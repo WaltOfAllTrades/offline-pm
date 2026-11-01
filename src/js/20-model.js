@@ -10,7 +10,7 @@ const M = {
   tasks: new Map(), roots: [], order: [], byWbs: new Map(),
   deps: [], depsIn: new Map(), depsOut: new Map(),
   parties: new Map(), people: [], teams: [], members: new Map(), teamsOf: new Map(),
-  raci: new Map(), issues: [],
+  raci: new Map(), issues: [], noteCount: new Map(),
 };
 
 function loadModel() {
@@ -59,6 +59,7 @@ function loadModel() {
     if (!M.depsIn.has(d.succ_id)) M.depsIn.set(d.succ_id, []); M.depsIn.get(d.succ_id).push(d);
     if (!M.depsOut.has(d.pred_id)) M.depsOut.set(d.pred_id, []); M.depsOut.get(d.pred_id).push(d);
   }
+  M.noteCount = new Map(q("SELECT n.task_id, COUNT(*) c FROM note n JOIN task t ON t.id=n.task_id WHERE t.project_id=? GROUP BY n.task_id", [M.projectId]).map(r => [r.task_id, r.c]));
   M.issues = computeIssues();
 }
 
@@ -366,6 +367,27 @@ function opSetMembers(teamId, personIds) {
   for (const p of personIds) run("INSERT INTO team_member VALUES (?,?)", [teamId, p]);
 }
 
+// Work notes: a dated journal per task. Unlike ServiceNow's journal, notes can be edited and deleted (DECISIONS #39).
+const noteStamp = () => new Date().toISOString();
+function opAddNote(taskId, body, author = "") {
+  body = String(body ?? "").trim(); if (!body) throw new Error("A note can't be empty");
+  taskRow(taskId);
+  run("INSERT INTO note(task_id, body, author, created_at) VALUES (?,?,?,?)", [taskId, body, String(author || "").trim(), noteStamp()]);
+  return lastId();
+}
+function opEditNote(id, body) {
+  body = String(body ?? "").trim(); if (!body) throw new Error("A note can't be empty. Delete it instead");
+  const n = one("SELECT body FROM note WHERE id=?", [id]); if (!n) throw new Error("Note not found");
+  if (n.body !== body) run("UPDATE note SET body=?, updated_at=? WHERE id=?", [body, noteStamp(), id]);
+}
+function opDeleteNote(id) { run("DELETE FROM note WHERE id=?", [id]); }
+// Notes for a task, newest first; withSubtasks adds notes from every descendant.
+function notesFor(taskId, withSubtasks = false) {
+  if (!withSubtasks) return q("SELECT * FROM note WHERE task_id=? ORDER BY created_at DESC, id DESC", [taskId]);
+  return q(`WITH RECURSIVE s(id) AS (SELECT ? UNION ALL SELECT t.id FROM task t JOIN s ON t.parent_id=s.id)
+            SELECT n.* FROM note n JOIN s ON s.id=n.task_id ORDER BY n.created_at DESC, n.id DESC`, [taskId]);
+}
+
 function opAddProject(name) {
   name = String(name || "").trim() || "New project";
   run("INSERT INTO project(name, position, created_at) VALUES (?, (SELECT COALESCE(MAX(position),0)+1 FROM project), ?)", [name, nowIso()]);
@@ -411,4 +433,10 @@ function seedSample() {
   R(c, chloe, "R"); R(c, ben, "C"); R(d, chloe, "R"); R(e, chloe, "R"); R(e, mkt, "C");
   R(f, eng, "R"); R(g, eng, "R"); R(g, ben, "A"); R(h2, mkt, "R"); R(h2, dev, "A");
   R(i, ana, "R"); R(i, eng, "C"); R(i, mkt, "C"); R(j, ben, "R"); R(j, mkt, "I"); R(j, dev, "I");
+  opAddNote(a, "Interviewed 8 stakeholders. Main theme: the current site is hard to update without a developer.", "Ana Ruiz");
+  opAddNote(c, "Homepage and product page wireframes reviewed with marketing. Navigation still open.", "Chloe Park");
+  opAddNote(c, "Decision: keep the mega-menu, but limit it to 3 columns.", "Ana Ruiz");
+  opAddNote(g, "Waiting on the final style guide before starting the article template.", "Ben Okafor");
+  // Spread the sample notes over the past days so the stream looks lived-in.
+  q("SELECT id FROM note ORDER BY id").forEach((n, k) => run("UPDATE note SET created_at=? WHERE id=?", [new Date(Date.now() - (8 - k * 2) * 864e5 - 3600e3 * (k + 1)).toISOString(), n.id]));
 }

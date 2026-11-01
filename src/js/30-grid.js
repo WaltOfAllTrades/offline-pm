@@ -2,7 +2,7 @@
 const ROW = 30;
 const UI = {
   view: "plan", selId: null, col: "name", collapsed: new Set(), search: "", person: "", grain: "week",
-  drawer: false, rows: [], editing: null, selDep: null,
+  rows: [], editing: null, selDep: null,
 };
 const COLS = [
   { key: "wbs", label: "WBS", w: 64 },
@@ -74,7 +74,7 @@ function cellHtml(t, c) {
     case "wbs": return esc(t.wbs);
     case "name": {
       const caret = t.isSummary ? `<span class="caret" data-caret>${UI.collapsed.has(t.id) && !filterActive() ? "▶" : "▼"}</span>` : `<span class="caret"></span>`;
-      return `<span style="width:${t.depth * 16}px;flex:none"></span>${caret}${t.isMilestone ? '<span class="ms-ico">◆</span>' : ""}<span class="nm">${esc(t.name)}</span>${_warnSet.has(t.id) ? '<span class="warn-dot" title="Has warnings, see Issues">⚠</span>' : ""}`;
+      return `<span style="width:${t.depth * 16}px;flex:none"></span>${caret}${t.isMilestone ? '<span class="ms-ico">◆</span>' : ""}<span class="nm">${esc(t.name)}</span>${_warnSet.has(t.id) ? '<span class="warn-dot" title="Has warnings, see Issues">⚠</span>' : ""}${M.noteCount.get(t.id) ? `<span class="nc" title="${M.noteCount.get(t.id)} work note(s)">💬${M.noteCount.get(t.id)}</span>` : ""}<span class="open-rec" data-open title="Open record form">↗</span>`;
     }
     case "start": return fmtShort(t.S);
     case "finish": return fmtShort(t.F);
@@ -116,7 +116,7 @@ function renderGridRows() {
 function selectTask(id, { scroll = true, col } = {}) {
   UI.selId = id; if (col) UI.col = col;
   if (id != null && scroll) revealTask(id);
-  renderGridRows(); renderGanttRows(); renderDrawer();
+  renderGridRows(); renderGanttRows(); renderForm();
 }
 function revealTask(id) {
   const t = M.tasks.get(id); if (!t) return;
@@ -150,7 +150,7 @@ function showLevel(level) {
   UI.collapsed.clear();
   if (level !== "all") for (const t of M.order) if (t.isSummary && t.depth >= +level - 1) UI.collapsed.add(t.id);
   if (UI.selId && UI.collapsed.size) { const t = selTask(); if (t && t.depth >= +level) UI.selId = t.parent ? ancestorAtDepth(t, +level - 1).id : t.id; }
-  saveCollapsed(); computeRows(); renderGrid(); renderGantt(); renderDrawer();
+  saveCollapsed(); computeRows(); renderGrid(); renderGantt(); renderForm();
 }
 function ancestorAtDepth(t, d) { let x = t; while (x.depth > d && x.parent) x = x.parent; return x; }
 
@@ -238,7 +238,9 @@ function cmdStructure(op) {
 function cmdDelete() {
   const t = selTask(); if (!t) return;
   const n = countDesc(t);
-  if (n && !confirm(`Delete “${t.name}” and its ${n} subtask${n > 1 ? "s" : ""}?`)) return;
+  const notes = [t, ...M.order.slice(t.index + 1, t.index + 1 + n)].reduce((s, x) => s + (M.noteCount.get(x.id) || 0), 0);
+  const parts = [n ? `its ${n} subtask${n > 1 ? "s" : ""}` : "", notes ? `${notes} work note${notes > 1 ? "s" : ""}` : ""].filter(Boolean);
+  if (parts.length && !confirm(`Delete “${t.name}” and ${parts.join(" and ")}? (Undo is available.)`)) return;
   const next = UI.rows[t.row + 1 + (UI.collapsed.has(t.id) ? 0 : n)] || UI.rows[t.row - 1];
   if (mutate(`Deleted “${t.name}”${n ? ` (+${n} subtasks)` : ""}`, () => opDelete(t.id))) selectTask(next && M.tasks.has(next.id) ? next.id : null);
 }
@@ -258,6 +260,7 @@ function initGrid() {
     if (e.target.closest(".cell-editor")) return;
     const row = e.target.closest(".grow"); if (!row) return;
     const id = +row.dataset.id, cell = e.target.closest(".gc");
+    if (e.target.closest("[data-open]")) { e.preventDefault(); openRecord(id); return; }
     if (e.target.closest("[data-caret]")) { toggleCollapse(id); return; }
     const col = cell?.dataset.col;
     if (col === "wbs") { beginRowDrag(e, id); }
@@ -266,7 +269,6 @@ function initGrid() {
     lastDown = { id, col, t: now };
     const wasSel = UI.selId === id && UI.col === col;
     if (!wasSel) selectTask(id, { scroll: false, col: col && col !== "wbs" ? col : UI.col });
-    else if (UI.drawer) renderDrawer();
     // Deferred so the browser's own mousedown focus handling can't steal focus from the editor/picker.
     if (col && col !== "wbs" && (dbl || (wasSel && colByKey(col)?.edit === "party"))) { e.preventDefault(); lastDown = null; setTimeout(() => startEdit(col), 0); }
   });

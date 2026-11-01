@@ -1,5 +1,5 @@
 // ---------- SQLite, schema, revisions, undo, live save ----------
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const IDB_NAME = "offline-pm";
 let SQL, db;
 let rev = 0, mirrorRev = null, diskRev = null, lastDiskAt = null, lastSize = 0;
@@ -8,7 +8,7 @@ let saving = false, pending = false, pendingReasons = [], lastErr = null;
 const saveLog = [];
 const undoStack = [], redoStack = [];
 const UNDO_LIMIT = 40;
-const hooks = { onChange() { }, onSaveState() { } };
+const hooks = { onChange() { }, onSaveState() { }, onReplace() { } };
 let slowSaves = false; // test/demo aid
 
 function q(sql, params = []) {
@@ -72,6 +72,18 @@ CREATE TRIGGER IF NOT EXISTS team_member_kinds BEFORE INSERT ON team_member BEGI
 END;
 INSERT OR IGNORE INTO meta VALUES ('rev','0'), ('app','offline-pm'), ('file_id', lower(hex(randomblob(8))));
 `;
+// v2: work notes journal on tasks (DECISIONS #38-#41).
+const SCHEMA_V2 = `
+CREATE TABLE IF NOT EXISTS note(
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  author TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT);
+CREATE INDEX IF NOT EXISTS note_task ON note(task_id, created_at);
+`;
+const SCHEMA_ALL = SCHEMA_V1 + SCHEMA_V2;
 
 const tableExists = (d, name) => !!d.exec("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", [name])[0];
 
@@ -79,14 +91,14 @@ const tableExists = (d, name) => !!d.exec("SELECT 1 FROM sqlite_master WHERE typ
 function migrate(d) {
   const ver = d.exec("PRAGMA user_version")[0].values[0][0];
   if (ver > SCHEMA_VERSION) throw new Error(`This file was made by a newer version of the app (schema ${ver}). Please use the newer app.`);
-  if (ver === SCHEMA_VERSION) { d.run(SCHEMA_V1); return ""; }
+  if (ver === SCHEMA_VERSION) { d.run(SCHEMA_ALL); return ""; }
   let note = "";
   d.run("BEGIN");
   try {
     const legacy = tableExists(d, "tasks"); // proof-of-concept layout
     const oldRev = legacy && tableExists(d, "meta") ? +(d.exec("SELECT value FROM meta WHERE key='rev'")[0]?.values[0][0] ?? 0) : 0;
     if (legacy && tableExists(d, "meta")) d.run("ALTER TABLE meta RENAME TO meta_v0");
-    d.run(SCHEMA_V1);
+    d.run(SCHEMA_ALL);
     if (legacy) {
       d.run("INSERT INTO project(name, created_at) VALUES ('Imported plan', ?)", [nowIso()]);
       const pid = d.exec("SELECT last_insert_rowid()")[0].values[0][0];
@@ -121,6 +133,7 @@ function installDb(bytes) {
   if (!scalar("SELECT COUNT(*) FROM project")) run("INSERT INTO project(name, created_at) VALUES ('My project', ?)", [nowIso()]);
   rev = readRev(db);
   undoStack.length = 0; redoStack.length = 0;
+  hooks.onReplace();
   return note;
 }
 

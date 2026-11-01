@@ -229,7 +229,7 @@ function initGantt() {
 function beginBarDrag(e, t, mode, barEl) {
   const svg = $("ganttSvg"), start = svgPoint(e);
   const wasSel = UI.selId === t.id;
-  if (!wasSel) { UI.selId = t.id; renderGridRows(); renderDrawer(); }
+  if (!wasSel) { UI.selId = t.id; renderGridRows(); }
   if (t.isSummary || t.S == null) { selectTask(t.id, { scroll: true }); barClicked(t); return; }
   svg.setPointerCapture(e.pointerId);
   let days = 0, moved = false, S = t.S, F = t.F;
@@ -266,7 +266,7 @@ function beginBarDrag(e, t, mode, barEl) {
 let lastBarClick = null;
 function barClicked(t) {
   const now = performance.now();
-  if (lastBarClick && lastBarClick.id === t.id && now - lastBarClick.t < 450) { lastBarClick = null; toggleDrawer(true); }
+  if (lastBarClick && lastBarClick.id === t.id && now - lastBarClick.t < 450) { lastBarClick = null; openRecord(t.id); }
   else lastBarClick = { id: t.id, t: now };
 }
 

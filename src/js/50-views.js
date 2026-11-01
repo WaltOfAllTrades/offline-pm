@@ -32,7 +32,7 @@ const modalOpen = () => !$("modalBack").hidden;
 const avatarColor = p => { let hsh = 0; for (const c of p.name) hsh = (hsh * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${hsh % 360} 55% 48%)`; };
 const initials = n => n.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("");
 
-// ---------- Party picker (R/A cells, drawer) ----------
+// ---------- Party picker (R/A cells, record form) ----------
 function openPartyPicker(rect, taskId, role) {
   const t = M.tasks.get(taskId); if (!t) return;
   const current = new Set(rolesOf(taskId, role).map(r => r.party_id));
@@ -88,101 +88,6 @@ function openDepEditor(depId, x, y) {
     d.violated ? h("div", { class: "msg warn" }, "Dates currently conflict with this link. Dates are never moved automatically.") : null,
     h("div", { class: "acts" }, h("button", { class: "danger", onclick: () => { closePop(); UI.selDep = null; mutate(`Removed link ${p.wbs} → ${s.wbs}`, () => opRemoveDep(d.id)); } }, "Delete link"), h("button", { onclick: closePop }, "Close")));
   openPop(x + 8, y + 8, box);
-}
-
-// ---------- Task details drawer ----------
-function toggleDrawer(force) {
-  UI.drawer = force ?? !UI.drawer; $("detailsBtn").classList.toggle("primary", UI.drawer);
-  renderDrawer();
-}
-let drawerBusy = false;
-function renderDrawer() {
-  if (drawerBusy) return;
-  const dr = $("drawer");
-  if (!UI.drawer || UI.view !== "plan") { dr.hidden = true; return; }
-  dr.hidden = false;
-  const ae = document.activeElement;
-  if (dr.contains(ae) && ae.matches("input,textarea,select")) {
-    if (dr.dataset.task === String(UI.selId)) return; // don't clobber typing in the same task
-    drawerBusy = true; try { ae.blur(); } finally { drawerBusy = false; } // switching task: commit pending edit first
-  }
-  const t = selTask();
-  dr.dataset.task = t?.id ?? "";
-  dr.innerHTML = "";
-  if (!t) { dr.append(h("div", { class: "drawer-head" }, h("h3", { style: { flex: 1 } }, "Details"), h("button", { class: "icon", onclick: () => toggleDrawer(false) }, "✕")), h("p", { class: "hint" }, "Select a task to see and edit its details.")); return; }
-  const field = (label, el) => [h("label", {}, label), el];
-  const commit = (fieldName, el) => () => { const v = el.value; mutate(`Task ${t.wbs}: ${fieldName} → “${v}”`, () => opSetField(t.id, fieldName, v)); };
-  const inp = (fieldName, value, attrs = {}) => {
-    const el = h("input", { value: value ?? "", ...attrs });
-    if (attrs.type === "date") { // date inputs fire change per keystroke; commit on blur/Enter instead
-      const orig = el.value;
-      el.addEventListener("blur", () => { if (el.value !== orig && el.value) commit(fieldName, el)(); });
-      el.addEventListener("keydown", e => { if (e.key === "Enter") el.blur(); });
-    } else el.addEventListener("change", commit(fieldName, el));
-    return el;
-  };
-  const ro = t.isSummary;
-  const name = inp("name", t.name);
-  const kind = h("select", { disabled: ro }, h("option", { value: "task", selected: !t.isMilestone }, "Task"), h("option", { value: "milestone", selected: t.isMilestone }, "Milestone"));
-  kind.addEventListener("change", commit("kind", kind));
-  const status = h("select", { disabled: ro }, ...STATUSES.map(s => h("option", { selected: s === t.ST }, s)));
-  status.addEventListener("change", commit("status", status));
-  const notes = h("textarea", { placeholder: "Notes, links, decisions…" }, t.notes || "");
-  notes.addEventListener("change", commit("notes", notes));
-  dr.append(
-    h("div", { class: "drawer-head" }, h("div", { style: { flex: 1 } }, h("div", { class: "wbs" }, `WBS ${t.wbs}${t.isSummary ? " · summary (rolls up)" : ""}`)), h("button", { class: "icon", title: "Close", onclick: () => toggleDrawer(false) }, "✕")),
-    h("div", { class: "frm" },
-      ...field("Name", name),
-      ...field("Type", kind),
-      ...field("Start", inp("start", fmtYMD(t.S), { type: "date", disabled: ro })),
-      ...field("Finish", inp("finish", fmtYMD(t.F), { type: "date", disabled: ro || t.isMilestone })),
-      ...field("Duration", inp("duration", t.dur == null ? "" : t.dur + "d", { disabled: ro, title: "Working days, e.g. 5, 5d, 2w. 0 makes a milestone" })),
-      ...field("% complete", inp("percent", t.P, { type: "number", min: 0, max: 100, disabled: ro })),
-      ...field("Status", status),
-      ...field("WBS code", inp("code", t.code, { placeholder: "Optional stable code" })),
-      ...field("Notes", notes)));
-
-  // RACI
-  dr.append(h("h4", {}, "RACI"));
-  const rl = h("div", { class: "rowlist" });
-  for (const r of rolesOf(t.id)) {
-    const p = M.parties.get(r.party_id);
-    const sel = h("select", {}, ...ROLES.map(x => h("option", { value: x, selected: x === r.role }, `${x}: ${ROLE_NAMES[x]}`)));
-    sel.addEventListener("change", () => mutate(`Task ${t.wbs}: ${p.name} → ${sel.value}`, () => opSetRole(t.id, p.id, sel.value)));
-    rl.append(h("div", { class: "rowitem" }, h("span", { class: "grow1" }, (p.kind === "team" ? "👥 " : "") + p.name + (p.active ? "" : " (inactive)")), sel,
-      h("button", { class: "x", title: "Remove", onclick: () => mutate(`Task ${t.wbs}: removed ${p.name}`, () => opSetRole(t.id, p.id, null)) }, "✕")));
-  }
-  const acc = accountable(t);
-  if (acc.inherited && acc.list.length) rl.append(h("div", { class: "hint" }, `Accountable inherited from ${acc.from.wbs}: ${acc.list.map(r => partyName(r.party_id)).join(", ")}`));
-  const assigned = new Set(rolesOf(t.id).map(r => r.party_id));
-  const addSel = h("select", {}, h("option", { value: "" }, "＋ Add person or team…"),
-    ...[...M.people, ...M.teams].filter(p => p.active && !assigned.has(p.id)).map(p => h("option", { value: p.id }, (p.kind === "team" ? "👥 " : "") + p.name)));
-  const addRole = h("select", {}, ...ROLES.map(x => h("option", { value: x, selected: x === (rolesOf(t.id, "R").length ? "C" : "R") }, x)));
-  addSel.addEventListener("change", () => { const pid = +addSel.value; if (pid) mutate(`Task ${t.wbs}: ${partyName(pid)} → ${addRole.value}`, () => opSetRole(t.id, pid, addRole.value)); });
-  rl.append(h("div", { class: "rowitem" }, addRole, addSel));
-  dr.append(rl);
-
-  // Dependencies
-  const depRow = (d, other, dirLabel) => {
-    const type = h("select", {}, ...DEP_TYPES.map(k => h("option", { value: k, selected: k === d.type }, k)));
-    const lag = h("input", { type: "number", value: d.lag, title: "Lag in working days (negative = lead)" });
-    const ch = () => mutate(`Link ${d.pred_id}→${d.succ_id}: ${type.value} ${lag.value}d`, () => opUpdateDep(d.id, type.value, +lag.value));
-    type.addEventListener("change", ch); lag.addEventListener("change", ch);
-    return h("div", { class: "rowitem", title: DEP_NAMES[d.type] }, h("span", { class: "grow1" }, `${dirLabel} ${other.wbs} ${other.name}`), d.violated ? h("span", { title: "Dates conflict with this link" }, "⚠") : null, type, lag,
-      h("button", { class: "x", title: "Remove link", onclick: () => mutate("Removed link", () => opRemoveDep(d.id)) }, "✕"));
-  };
-  dr.append(h("h4", {}, "Predecessors"));
-  const pl = h("div", { class: "rowlist" });
-  for (const d of M.depsIn.get(t.id) || []) pl.append(depRow(d, M.tasks.get(d.pred_id), "←"));
-  const addPred = h("select", {}, h("option", { value: "" }, "＋ Add predecessor…"),
-    ...M.order.filter(x => x !== t && !isAncestor(x, t) && !isAncestor(t, x) && !(M.depsIn.get(t.id) || []).some(d => d.pred_id === x.id)).map(x => h("option", { value: x.id }, `${x.wbs} ${x.name}`)));
-  addPred.addEventListener("change", () => { const pid = +addPred.value; if (pid) mutate(`Linked ${M.tasks.get(pid).wbs} → ${t.wbs}`, () => opAddDep(pid, t.id, "FS", 0)); });
-  pl.append(addPred); dr.append(pl);
-  const outs = M.depsOut.get(t.id) || [];
-  if (outs.length) { dr.append(h("h4", {}, "Successors")); const sl = h("div", { class: "rowlist" }); for (const d of outs) sl.append(depRow(d, M.tasks.get(d.succ_id), "→")); dr.append(sl); }
-
-  const myIssues = M.issues.filter(i => i.task === t);
-  if (myIssues.length) { dr.append(h("h4", {}, "Issues")); for (const i of myIssues) dr.append(h("div", { class: "msg " + (i.level === "warn" ? "warn" : "") }, i.text)); }
 }
 
 // ---------- RACI matrix ----------
@@ -383,7 +288,7 @@ function showHelp() {
   const rows = [
     ["Insert", "New task below"], ["Ctrl+Insert", "New subtask"], ["Tab / Shift+Tab", "Indent / outdent"], ["Alt+Shift+↑/↓", "Move task up / down"],
     ["Alt+← / Alt+→", "Collapse / expand"], ["Enter or F2", "Edit cell (Enter again to save)"], ["Type", "Start editing the cell"], ["Esc", "Cancel edit"],
-    ["Delete", "Delete task (and subtasks)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+I", "Toggle details panel"], ["Arrows, PgUp/PgDn", "Move around"],
+    ["Delete", "Delete task (and subtasks)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+I", "Open / close the record form"], ["Arrows, PgUp/PgDn", "Move around"],
   ];
   const body = h("div", { class: "modal-b" },
     h("h3", { style: { marginTop: 0 } }, "Keyboard (outline grid)"),
@@ -392,7 +297,9 @@ function showHelp() {
     h("ul", {}, h("li", {}, "Drag a bar to move it; drag its left or right edge to change dates."),
       h("li", {}, "Hover a bar to see link handles (○). Drag from a handle onto another bar: the end you start from and the half of the target you drop on decide the type (Finish→Start, Start→Start, …)."),
       h("li", {}, "Click an arrow to change its type and lag, or delete it. Red arrows mean the dates conflict with the link; dates are never moved automatically."),
-      h("li", {}, "Double-click a bar to open its details.")),
+      h("li", {}, "Double-click a bar, or click ↗ next to a task name, to open its record form.")),
+    h("h3", {}, "Record form"),
+    h("p", {}, "Shows every field of a task, a mini Gantt of a summary task's subtasks, its work notes (dated, editable) and related records in tabs. The outline stays on the left: click another task to switch records. ", h("kbd", {}, "Ctrl+Enter"), " posts a note."),
     h("h3", {}, "Predecessors cell"),
     h("p", {}, "Type WBS numbers separated by commas, with an optional type and lag: ", h("kbd", {}, "1.2"), " ", h("kbd", {}, "3FS+2d"), " ", h("kbd", {}, "2.1SS-1d"), " ", h("kbd", {}, "4FF+1w")),
     h("h3", {}, "Saving"),

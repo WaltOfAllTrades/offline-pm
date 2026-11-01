@@ -16,7 +16,7 @@ function renderPersonFilter() {
 }
 function renderAll() {
   renderProjectMenu(); updateIssueBadge(); renderSaveState(); renderPersonFilter();
-  if (UI.view === "plan") { renderGrid(); renderGantt(); renderDrawer(); }
+  if (UI.view === "plan") { renderGrid(); if (!UI.form) renderGantt(); renderForm(); }
   else if (UI.view === "raci") renderRaci();
   else if (UI.view === "people") renderPeople();
   else if (UI.view === "issues") renderIssues();
@@ -44,7 +44,7 @@ function initToolbar() {
   $("levelSel").onchange = e => { if (e.target.value) showLevel(e.target.value); e.target.value = ""; };
   $("searchBox").addEventListener("input", e => { UI.search = e.target.value; computeRows(); renderGrid(); renderGantt(); });
   $("personFilter").addEventListener("change", e => { UI.person = e.target.value; computeRows(); renderGrid(); renderGantt(); });
-  $("detailsBtn").onclick = () => toggleDrawer();
+  $("detailsBtn").onclick = () => toggleForm();
   $$("#grainSeg button").forEach(b => b.addEventListener("click", () => setGrain(b.dataset.grain)));
   $("todayBtn").onclick = () => scrollGanttTo(todayNum(), 0.3);
   $("undoBtn").onclick = undo; $("redoBtn").onclick = redo;
@@ -62,8 +62,12 @@ function initToolbar() {
   $("addTeamBtn").onclick = () => editParty(null, "team");
   $$("#issueSeg button").forEach(b => b.addEventListener("click", () => { issueFilter = b.dataset.f; $$("#issueSeg button").forEach(x => x.classList.toggle("on", x === b)); renderIssues(); }));
   $("modalBack").addEventListener("pointerdown", e => { if (e.target === $("modalBack")) closeModal(); });
-  // Committing a drawer field blurs it first, so the re-render after the change isn't skipped.
-  $("drawer").addEventListener("change", e => { if (e.target.matches("input:not([type=date]),select,textarea")) e.target.blur(); }, true);
+  // Committing a form field blurs it first, so the re-render after the change isn't skipped.
+  $("formPane").addEventListener("pointerdown", e => {
+    const ae = document.activeElement;
+    if (ae?._commit && $("formPane").contains(ae) && !ae.contains(e.target)) { holdFormRender(); ae._commit(); }
+  }, true);
+  $("formPane").addEventListener("change", e => { if (e.target.closest(".f-fields") && e.target.matches("input:not([type=date]),select,textarea")) e.target.blur(); }, true);
 
   // splitter
   const sp = $("splitter"), pane = $("gridPane");
@@ -72,10 +76,10 @@ function initToolbar() {
     sp.setPointerCapture(e.pointerId); sp.classList.add("drag");
     const x0 = e.clientX, w0 = pane.offsetWidth;
     const mv = ev => { pane.style.width = clamp(w0 + ev.clientX - x0, 240, innerWidth - 160) + "px"; };
-    const up = () => { sp.classList.remove("drag"); sp.removeEventListener("pointermove", mv); sp.removeEventListener("pointerup", up); lsSet("pm.split", pane.offsetWidth); renderGridRows(); renderGantt(); };
+    const up = () => { sp.classList.remove("drag"); sp.removeEventListener("pointermove", mv); sp.removeEventListener("pointerup", up); lsSet("pm.split", pane.offsetWidth); renderGridRows(); if (UI.form) relayoutForm(); else renderGantt(); };
     sp.addEventListener("pointermove", mv); sp.addEventListener("pointerup", up);
   });
-  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "plan") { renderGridRows(); renderGantt(); } }, 120); });
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "plan") { renderGridRows(); if (UI.form) relayoutForm(); else renderGantt(); } }, 120); });
 
   document.addEventListener("keydown", e => {
     const ctrl = e.ctrlKey || e.metaKey;
@@ -84,12 +88,13 @@ function initToolbar() {
     if (modalOpen() || typing) return;
     if (ctrl && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
     else if (ctrl && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { e.preventDefault(); redo(); }
-    else if (ctrl && e.key.toLowerCase() === "i" && UI.view === "plan") { e.preventDefault(); toggleDrawer(); }
+    else if (ctrl && e.key.toLowerCase() === "i" && UI.view === "plan") { e.preventDefault(); toggleForm(); }
   });
 }
 
 hooks.onChange = onDataChanged;
 hooks.onSaveState = () => { if (ready) renderSaveState(); };
+hooks.onReplace = () => { UI.noteDrafts.clear(); UI.editNote = null; }; // ids from another file mean nothing here
 setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
 
 (async () => {
@@ -112,8 +117,8 @@ setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
   } catch { }
   if (!fsSupported) toast("This browser can't save to files. Use Chrome or Edge for live saving; Excel export still works.", "err");
   window.PM = {
-    M, UI, q, run, one, scalar, mutate, undo, redo, flushSaves, refresh, renderAll, selectTask, switchView, switchProject,
-    op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject },
+    M, UI, q, run, one, scalar, mutate, undo, redo, flushSaves, refresh, renderAll, selectTask, switchView, switchProject, openRecord, toggleForm, renderForm, notesFor,
+    op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote },
     util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum },
     io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, autoMap, get W() { return W; } },
     db: { installDb, exportBytes, migrate, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; } },

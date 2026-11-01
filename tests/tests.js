@@ -190,7 +190,7 @@ window.runPmTests = async function () {
     eq(d.exec("select name from task where id=" + a)[0].values[0][0], "persist-me"); d.close();
   });
 
-  await test("migrate", "proof-of-concept file upgrades to schema v1", () => {
+  await test("migrate", "proof-of-concept file upgrades to the current schema", () => {
     const d = new P.SQL.Database();
     d.run("CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT); INSERT INTO meta VALUES('rev','7');" +
       "CREATE TABLE tasks(id INTEGER PRIMARY KEY, title TEXT, status TEXT, due TEXT, notes TEXT, updated_at TEXT);" +
@@ -199,7 +199,7 @@ window.runPmTests = async function () {
       "INSERT INTO deps VALUES (2,1),(3,2);");
     const bytes = d.export(); d.close();
     P.db.installDb(bytes); P.M.projectId = null; P.refresh();
-    eq(P.scalar("PRAGMA user_version"), 1); eq(P.db.rev, 7, "rev kept");
+    eq(P.scalar("PRAGMA user_version"), 2); eq(P.db.rev, 7, "rev kept");
     eq(P.M.order.map(t => [t.name, t.ST]), [["One", "Done"], ["Two", "In progress"], ["Three", "Not started"]]);
     eq(P.M.deps.length, 2); ok(!P.scalar("select count(*) from sqlite_master where name='tasks'"), "old table dropped");
   });
@@ -347,6 +347,207 @@ window.runPmTests = async function () {
   });
   await test("review", "part-day durations are 1 day, not milestones", () => { eq(U.parseDuration("0.25d"), 1); eq(U.parseDuration("0"), 0); });
 
+  // ---------- Record form + work notes (branch: notes) ----------
+  const fp = () => document.getElementById("formPane");
+  const inForm = sel => fp().querySelector(sel);
+  const allInForm = sel => [...fp().querySelectorAll(sel)];
+  const btnInForm = text => allInForm("button").find(b => b.textContent.trim() === text);
+
+  await test("notes", "add, edit, delete, ordering, cascade, undo", async () => {
+    fresh(); const a = T("A"), b = T("B", a); let n1, n2, n3;
+    m(() => { n1 = O.opAddNote(a, "  first  ", "Ana"); });
+    eq(P.one("select body, author, updated_at from note where id=?", [n1]), { body: "first", author: "Ana", updated_at: null }, "trimmed, no edit stamp");
+    throws(() => { P.run("BEGIN"); try { O.opAddNote(a, "   "); } finally { P.run("ROLLBACK"); } }, /empty/, "empty note rejected");
+    await new Promise(r => setTimeout(r, 5));
+    m(() => { n2 = O.opAddNote(a, "second"); n3 = O.opAddNote(b, "child note", "Ben"); });
+    eq(P.notesFor(a).map(n => n.body), ["second", "first"], "newest first");
+    eq(P.notesFor(a, true).length, 3, "with subtasks");
+    eq(P.M.noteCount.get(a), 2, "model count");
+    m(() => O.opEditNote(n1, "first (fixed)"));
+    const e = P.one("select body, created_at, updated_at from note where id=?", [n1]);
+    ok(e.body === "first (fixed)" && e.updated_at && e.updated_at >= e.created_at, "edit stamps updated_at");
+    m(() => O.opEditNote(n2, "second")); eq(P.one("select updated_at from note where id=?", [n2]).updated_at, null, "unchanged edit is a no-op");
+    throws(() => { P.run("BEGIN"); try { O.opEditNote(n1, ""); } finally { P.run("ROLLBACK"); } }, /empty/, "edit to empty rejected");
+    m(() => O.opDeleteNote(n2)); eq(P.notesFor(a).length, 1);
+    P.undo(); eq(P.notesFor(a).length, 2, "undo restores note");
+    m(() => O.opDelete(b)); eq(P.scalar("select count(*) from note where id=" + n3), 0, "notes cascade with task");
+  });
+
+  await test("migrate", "schema v1 file gains the note table, data kept", () => {
+    fresh(); T("Keep me");
+    const d = new P.SQL.Database(P.db.exportBytes()); d.run("DROP TABLE note; PRAGMA user_version = 1;");
+    const bytes = d.export(); d.close();
+    P.db.installDb(bytes); P.M.projectId = null; P.refresh();
+    eq(P.scalar("PRAGMA user_version"), 2); ok(P.scalar("select count(*) from sqlite_master where name='note'"), "note table created");
+    eq(P.M.order.map(t => t.name), ["Keep me"]);
+    m(() => O.opAddNote(P.M.order[0].id, "works after upgrade")); eq(P.notesFor(P.M.order[0].id).length, 1);
+  });
+
+  await test("form", "opens in place of the Gantt, shows fields, closes back", () => {
+    fresh(); const a = T("Parent"), c1 = T("Child 1", a, "2026-03-02", "2026-03-04"), c2 = T("Child 2", a, "2026-03-05", "2026-03-10"); T("Grandchild", c2, "2026-03-05", "2026-03-06");
+    P.switchView("plan"); P.openRecord(c1);
+    ok(!fp().hidden && document.getElementById("ganttPane").hidden, "form shown, gantt hidden");
+    ok(inForm(".f-title h2").textContent.includes("Child 1"), "title");
+    eq(inForm("[data-f=name]").value, "Child 1"); eq(inForm("[data-f=start]").value, "2026-03-02");
+    ok(!inForm(".mg"), "no mini gantt for a leaf");
+    ok(inForm(".f-crumbs").textContent.includes("1 Parent"), "breadcrumb shows parent");
+    P.openRecord(a);
+    ok(inForm("[data-f=start]").disabled && inForm("[data-f=status]").disabled, "rolled-up fields read-only on summary");
+    P.UI.mgAll = false; P.renderForm(true);
+    eq(allInForm(".mg-l").length, 2, "direct children"); eq(allInForm(".mg-svg .bar").length, 2);
+    const cb = inForm(".mg .f-sec-h input[type=checkbox]"); cb.checked = true; cb.dispatchEvent(new Event("change"));
+    eq(allInForm(".mg-l").map(x => x.textContent), ["1.1Child 1", "1.2Child 2", "1.2.1Grandchild"], "all levels in outline order");
+    P.UI.mgAll = false; localStorage.removeItem("pm.mgAll");
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "i", ctrlKey: true, bubbles: true }));
+    ok(fp().hidden && !document.getElementById("ganttPane").hidden, "Ctrl+I closes");
+    ok(document.querySelectorAll("#gBars .bar").length >= 3, "gantt re-rendered after closing");
+    P.toggleForm(false);
+  });
+
+  await test("form", "selecting another outline row switches the record and commits pending edits", () => {
+    fresh(); const a = T("A"), b = T("B");
+    P.openRecord(a);
+    const nm = inForm("[data-f=name]"); nm.focus(); nm.value = "A renamed";
+    P.selectTask(b); // the outline is the record list
+    eq(task(a).name, "A renamed", "pending edit committed on switch");
+    ok(inForm(".f-title h2").textContent.includes("B"), "form shows B");
+    P.toggleForm(false);
+  });
+
+  await test("form", "post a note from the form, draft kept per record, Ctrl+Enter", () => {
+    fresh(); const a = T("A"), b = T("B");
+    P.openRecord(a);
+    let ta = inForm(".n-compose"); ta.value = "draft for A"; ta.dispatchEvent(new Event("input"));
+    P.openRecord(b); eq(inForm(".n-compose").value, "", "B starts empty");
+    P.openRecord(a); eq(inForm(".n-compose").value, "draft for A", "A's draft restored");
+    const who = inForm("select[data-keep=author]"); who.value = ""; who.dispatchEvent(new Event("change"));
+    btnInForm("Post").click();
+    eq(P.notesFor(a).map(n => n.body), ["draft for A"]); eq(inForm(".n-compose").value, "", "compose cleared");
+    eq(allInForm(".n-entry").length, 1);
+    ta = inForm(".n-compose"); ta.value = "via keyboard"; ta.dispatchEvent(new Event("input"));
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }));
+    eq(P.notesFor(a).map(n => n.body), ["via keyboard", "draft for A"], "Ctrl+Enter posts");
+    btnInForm("Post").click(); eq(P.notesFor(a).length, 2, "empty post ignored");
+    P.toggleForm(false);
+  });
+
+  await test("form", "edit and cancel a note inline; notes render as text with safe links", () => {
+    fresh(); const a = T("A");
+    m(() => { O.opAddNote(a, `<img src=x onerror="window.__pwned=1"> see https://example.com/a?b=1&c=2. javascript:alert(1)`, "Ana"); });
+    P.openRecord(a);
+    const body = inForm(".n-body");
+    ok(!body.querySelector("img") && !window.__pwned, "HTML not interpreted");
+    eq([...body.querySelectorAll("a")].map(x => x.getAttribute("href")), ["https://example.com/a?b=1&c=2"], "only http(s) linked, trailing dot excluded");
+    btnInForm("Edit").click();
+    let ed = inForm(".n-edit"); ok(document.activeElement === ed, "editor focused");
+    ed.value = "changed"; ed.dispatchEvent(new Event("input"));
+    ed.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    ok(!inForm(".n-edit") && P.notesFor(a)[0].body.startsWith("<img"), "Esc cancels");
+    btnInForm("Edit").click(); ed = inForm(".n-edit"); ed.value = "changed"; ed.dispatchEvent(new Event("input"));
+    btnInForm("Save").click();
+    eq(P.notesFor(a)[0].body, "changed"); ok(inForm(".n-ed"), "(edited) marker");
+    P.toggleForm(false);
+  });
+
+  await test("form", "summary shows subtask notes with a link to the subtask", () => {
+    fresh(); const a = T("Parent"), c = T("Kid", a);
+    m(() => { O.opAddNote(c, "from the kid"); O.opAddNote(a, "on the parent"); });
+    P.UI.notesWithSub = true; P.openRecord(a);
+    eq(allInForm(".n-entry").length, 2); ok(inForm(".n-on").textContent.includes("1.1 Kid"), "shows which subtask");
+    const cb = allInForm(".notes .f-sec-h input[type=checkbox]")[0]; cb.checked = false; cb.dispatchEvent(new Event("change"));
+    eq(allInForm(".n-entry").length, 1, "own notes only");
+    P.UI.notesWithSub = true; localStorage.removeItem("pm.notesWithSub"); P.toggleForm(false);
+  });
+
+  await test("related", "tabs with counts; add predecessor, successor, RACI, subtask; RAID placeholder", () => {
+    fresh(); const a = T("A"), b = T("B"), c = T("C"); let ana;
+    m(() => { ana = O.opAddParty("person", "Ana"); });
+    P.openRecord(b);
+    const tab = k => inForm(`.rel-tab[data-tab=${k}]`);
+    tab("pred").click();
+    let sel = inForm(".rel-body select"); sel.value = String(a); sel.dispatchEvent(new Event("change"));
+    eq(P.M.depsIn.get(b).map(d => d.pred_id), [a], "predecessor added");
+    eq(tab("pred").querySelector(".cnt").textContent, "1", "count badge");
+    tab("succ").click(); sel = inForm(".rel-body select"); sel.value = String(c); sel.dispatchEvent(new Event("change"));
+    eq(P.M.depsOut.get(b).map(d => d.succ_id), [c], "successor added");
+    ok(![...inForm(".rel-body select").options].some(o => o.value === String(c)), "linked task not offered again");
+    tab("raci").click(); sel = allInForm(".rel-body select")[1]; sel.value = String(ana); sel.dispatchEvent(new Event("change"));
+    eq(P.M.raci.get(b).map(r => [r.party_id, r.role]), [[ana, "R"]], "RACI added as R");
+    tab("children").click(); btnInForm("＋ New subtask").click();
+    eq(task(b).children.length, 1, "subtask added"); ok(inForm(".mg"), "now a summary with mini gantt");
+    eq(allInForm(".rel-body tbody tr").length, 1);
+    tab("raid").click(); ok(inForm(".rel-soon"), "RAID placeholder"); eq(P.UI.formTab, "raid");
+    tab("children").click(); P.toggleForm(false);
+  });
+
+  await test("mini-gantt", "draws links between subtasks and opens a subtask on click", () => {
+    fresh(); const a = T("P"), x = T("X", a, "2026-03-02", "2026-03-03"), y = T("Y", a, "2026-03-02", "2026-03-03");
+    m(() => O.opAddDep(x, y)); // FS conflict: Y starts with X
+    P.openRecord(a);
+    eq(allInForm(".mg-svg .dep").length, 1); ok(inForm(".mg-svg .dep.bad"), "conflict shown red");
+    inForm(`.mg-svg .bar[data-id="${y}"]`).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    eq(P.UI.selId, y, "bar click opens subtask record"); ok(inForm(".f-title h2").textContent.includes("Y"));
+    P.toggleForm(false);
+  });
+
+  await test("export", "Excel export carries a Notes sheet; import still reads Tasks", async () => {
+    fresh(); const a = T("A"); m(() => { O.opAddNote(a, "n1", "Ana"); }); await new Promise(r => setTimeout(r, 5)); m(() => { O.opAddNote(a, "n2"); });
+    const wb = P.io.exportWorkbook();
+    ok(wb.SheetNames.includes("Notes"), "Notes sheet");
+    const rows = XL.utils.sheet_to_json(wb.Sheets.Notes, { header: 1 });
+    eq(rows[0], ["Task ID", "WBS", "Task", "Author", "Created", "Edited", "Note"]);
+    eq(rows.slice(1).map(r => r[6]), ["n1", "n2"], "oldest first"); ok(/^\d{4}-\d\d-\d\d \d\d:\d\d$/.test(rows[1][4]), "local timestamp");
+    const bytes = XL.write(wb, { type: "array", bookType: "xlsx" });
+    const { W } = await runImport("rt.xlsx", bytes, W => W.mode = "new");
+    eq(W.sheetName, "Tasks"); eq(P.M.order.map(t => t.name), ["A"]);
+  });
+await test("form-review", "Gantt lines up with the outline again after closing the form", () => {
+    fresh(); let first; for (let i = 0; i < 80; i++) { const id = T("T" + i); first ??= id; }
+    P.switchView("plan"); P.openRecord(first);
+    const gb = document.getElementById("gridBody"); gb.scrollTop = 900; gb.dispatchEvent(new Event("scroll"));
+    P.toggleForm(false);
+    eq(document.getElementById("ganttBody").scrollTop, gb.scrollTop, "gantt scrollTop synced");
+  });
+
+  await test("form-review", "a click on a form button lands even when it commits a pending edit", async () => {
+    fresh(); const a = T("A"), b = T("B");
+    P.openRecord(a);
+    const nm = inForm("[data-f=name]"); nm.focus(); nm.value = "A2";
+    const next = allInForm(".f-acts button")[1];
+    next.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+    eq(task(a).name, "A2", "edit committed on pointerdown");
+    ok(next.isConnected, "button still in the page");
+    window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+    next.click();
+    await new Promise(r => setTimeout(r, 10));
+    eq(P.UI.selId, b, "Next worked"); ok(inForm(".f-title h2").textContent.includes("B"));
+    P.toggleForm(false);
+  });
+
+  await test("form-review", "stale note edit state never attaches to a reused id", () => {
+    fresh(); const a = T("A");
+    m(() => O.opAddNote(a, "old"));
+    P.openRecord(a); btnInForm("Edit").click(); ok(inForm(".n-edit"), "editing");
+    P.undo(); // removes the note being edited
+    m(() => O.opAddNote(a, "new")); // SQLite reuses the id
+    ok(!inForm(".n-edit"), "new note not opened in edit mode"); eq(inForm(".n-body").textContent, "new");
+    P.toggleForm(false);
+  });
+
+  await test("form-review", "typing the same duration or percent is not a change", () => {
+    fresh(); const a = T("A", null, "2026-03-02", "2026-03-06");
+    P.openRecord(a); const depth = P.db.undoDepth;
+    const d = inForm("[data-f=duration]"); d.value = "5"; d.dispatchEvent(new Event("change", { bubbles: true }));
+    const p = inForm("[data-f=percent]"); p.value = "0%"; p.dispatchEvent(new Event("change", { bubbles: true }));
+    eq(P.db.undoDepth, depth, "no undo step");
+    P.toggleForm(false);
+  });
+
+  await test("form-review", "subtask notes work on a deep tree (no bound-variable limit)", () => {
+    fresh(); const root = T("Root"); let last;
+    m(() => { for (let i = 0; i < 1200; i++) P.run("INSERT INTO task(project_id, parent_id, position, name) VALUES (?,?,?,?)", [P.M.projectId, root, i, "c" + i]); last = P.scalar("SELECT MAX(id) FROM task"); O.opAddNote(last, "deep"); });
+    eq(P.notesFor(root, true).map(n => n.body), ["deep"]);
+  });
   P.reset();
   const failed = results.filter(r => !r.pass);
   return { total: results.length, passed: results.length - failed.length, failed };

@@ -11,14 +11,14 @@
   --bar:#5b7cfa; --bar-done:#3fae84; --bar-blocked:#e5534b; --bar-ns:#9aa8c7; --bar-prog:rgba(0,0,0,.28);
   --summary:#344054; --ms:#7a5af8; --weekend:rgba(16,24,40,.035); --today:#e5534b; --link:#8a94a6; --link-bad:#e5534b;
   --R:#3b5bdb; --A:#b54708; --C:#12805c; --I:#667085;
-  --row:30px;
+  --row:30px; --note-bar:#e3b341;
   color-scheme:light dark;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --bg:#101317; --panel:#171b21; --panel2:#1b2027; --ink:#e6e9ed; --muted:#98a2b3; --line:#2a3039; --line2:#222830;
     --accent:#7b93ff; --accent-ink:#0b0e13; --accent-soft:#1e2745; --sel:#24305a;
-    --ok:#4ade9b; --ok-bg:#12301f; --warn:#f8b26a; --warn-bg:#3a2510; --err:#ff7aa2; --err-bg:#3d1424; --info:#a6b0c0; --info-bg:#222830;
+    --ok:#4ade9b; --ok-bg:#12301f; --warn:#f8b26a; --warn-bg:#3a2510; --err:#ff7aa2; --err-bg:#3d1424; --info:#a6b0c0; --info-bg:#222830; --note-bar:#a07a24;
     --bar:#6d8bff; --bar-done:#3fbf8f; --bar-blocked:#f06a62; --bar-ns:#5d6b88; --bar-prog:rgba(0,0,0,.35);
     --summary:#c9d1dc; --ms:#a48afb; --weekend:rgba(255,255,255,.035); --link:#76809a;
     --R:#7b93ff; --A:#f8b26a; --C:#4ade9b; --I:#98a2b3;
@@ -147,10 +147,6 @@ hr{border:0;border-top:1px solid var(--line);margin:4px 0}
 .ghost-link{stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 3;fill:none;pointer-events:none}
 .dragtip{position:fixed;z-index:80;background:var(--ink);color:var(--bg);padding:4px 8px;border-radius:6px;font-size:12px;pointer-events:none;white-space:nowrap}
 
-/* drawer */
-.drawer{position:absolute;right:0;top:0;bottom:0;width:380px;max-width:92vw;background:var(--panel);border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(0,0,0,.08);z-index:30;overflow:auto;padding:14px}
-.drawer h3{margin:0 0 8px;font-size:15px}
-.drawer h4{margin:16px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
 .frm{display:grid;grid-template-columns:96px 1fr;gap:6px 8px;align-items:center}
 .frm label{color:var(--muted);font-size:12.5px}
 .frm input,.frm select,.frm textarea{width:100%}
@@ -162,8 +158,6 @@ hr{border:0;border-top:1px solid var(--line);margin:4px 0}
 .rowitem input[type=number]{width:58px;padding:2px 4px}
 .x{border:0;background:none;color:var(--muted);padding:0 4px;font-size:15px}
 .x:hover{color:var(--err)}
-.drawer-head{display:flex;align-items:flex-start;gap:8px}
-.drawer-head .wbs{color:var(--muted);font-size:12.5px}
 
 /* popover */
 .pop{position:fixed;z-index:70;background:var(--panel);border:1px solid var(--line);border-radius:9px;box-shadow:0 12px 32px rgba(0,0,0,.18);padding:10px;min-width:220px;max-height:60vh;overflow:auto}
@@ -257,6 +251,88 @@ kbd{font:11.5px ui-monospace,Consolas,monospace;background:var(--line2);border:1
 #toast.show{opacity:1}#toast.err{background:var(--err-bg);color:var(--err);border:1px solid var(--err);font-weight:600}
 
 /* print */
+/* record form */
+.split.form-open .grid-pane{max-width:max(240px,calc(100% - 540px))}
+.form-pane{scrollbar-gutter:stable;container-type:inline-size;flex:1;min-width:380px;overflow:auto;background:var(--bg);border-left:1px solid var(--line);padding:0 16px 24px}
+.f-head{position:sticky;top:0;z-index:5;display:flex;align-items:flex-start;gap:10px;margin:0 -16px 12px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+.f-title{flex:1;min-width:0}
+.f-title h2{margin:2px 0 0;font-size:17px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.f-kind{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--accent);background:var(--accent-soft);padding:1px 7px;border-radius:9px}
+.f-wbs{color:var(--muted);font-weight:500}
+.f-crumbs{font-size:12px;color:var(--muted);display:flex;gap:5px;flex-wrap:wrap}
+.f-crumbs a,.f-field a,.n-on a,.rel-list a{color:var(--accent);text-decoration:none}
+.f-crumbs a:hover,.f-field a:hover,.n-on a:hover,.rel-list a:hover{text-decoration:underline}
+.f-crumbs .sep{opacity:.6}
+.f-acts{display:flex;gap:4px}
+.f-fields{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.f-field{display:grid;grid-template-columns:104px 1fr;align-items:center;gap:8px;min-width:0}
+.f-field.wide{grid-column:1/-1}
+.f-field>label{color:var(--muted);font-size:12.5px;text-align:right}
+.f-field input,.f-field select,.f-field textarea{width:100%}
+.f-field textarea{resize:vertical;min-height:54px}
+.f-field input:disabled,.f-field select:disabled{opacity:.75;background:var(--panel2)}
+.f-party{text-align:left;display:flex;flex-wrap:wrap;gap:3px;align-items:center;min-height:30px;width:100%;white-space:normal}
+.f-sec{margin-top:14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.f-sec-h{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.f-sec-h h3{margin:0;font-size:14px}
+.sec-tog{border:0;background:none;padding:0;display:flex;align-items:center;gap:6px;color:inherit}
+.sec-tog .car{font-size:10px;color:var(--muted);width:10px}
+.f-sec.det .f-fields{border:0;padding:4px 0 0;background:none}
+.f-sec.det .f-sec-h:last-child,.f-sec.mg .f-sec-h:last-child{margin-bottom:0}
+select.need{border-color:var(--warn);background:var(--warn-bg);color:var(--warn)}
+.need-hint{font-size:12px;color:var(--warn)}
+.mg-l .nc{margin-left:auto;font-size:11px;color:var(--muted);flex:none}
+.mg-wrap{display:flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
+.mg-lbls{flex:none;border-right:1px solid var(--line);background:var(--panel2)}
+.mg-lh{height:44px;display:flex;align-items:flex-end;padding:0 8px 6px;font-size:12px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--line);box-sizing:border-box}
+.mg-l{height:var(--row);display:flex;align-items:center;gap:6px;padding:0 8px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--line2);box-sizing:border-box;white-space:nowrap;overflow:hidden}
+.mg-l:hover{background:var(--sel)}
+.mg-l.summary{font-weight:600}
+.mg-l .w{color:var(--muted);flex:none}
+.mg-l .n{overflow:hidden;text-overflow:ellipsis}
+.mg-chart{flex:1;overflow-x:auto;overflow-y:hidden}
+.mg-svg{display:block}
+.mg-svg .bar{cursor:pointer}
+.mg-span{fill:var(--accent-soft);opacity:.55}
+.mg-row{stroke:var(--line2)}
+.mg-hdr text{pointer-events:none}
+.n-composer{border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--panel2)}
+.n-compose,.n-edit{width:100%;resize:vertical;font:inherit;box-sizing:border-box}
+.n-cbar{display:flex;align-items:center;gap:6px;margin-top:6px}
+.n-stream{margin-top:10px;display:flex;flex-direction:column}
+.n-entry{display:flex;gap:10px;padding:10px 4px;border-top:1px solid var(--line2)}
+.n-entry:first-child{border-top:0}
+.n-entry .avatar{width:28px;height:28px;font-size:11px}
+.n-main{flex:1;min-width:0;border-left:3px solid var(--note-bar);padding-left:10px}
+.n-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:12.5px}
+.n-head time,.n-ed,.n-on{color:var(--muted)}
+.n-body{margin-top:3px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45}
+.n-body a{color:var(--accent)}
+.n-empty{padding:8px 2px}
+button.link{border:0;background:none;padding:0 2px;color:var(--accent);font-size:12px}
+button.link:hover{text-decoration:underline}
+button.link.danger{color:var(--err)}
+.rel-tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.rel-tab{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:6px 10px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.rel-tab.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.rel-tab .cnt{background:var(--line2);color:var(--ink);border-radius:9px;padding:0 6px;font-size:11px;font-weight:600}
+.rel-tab .soon{font-size:10px;text-transform:uppercase;color:var(--muted);border:1px dashed var(--line);border-radius:6px;padding:0 4px}
+.rel-body{padding-top:10px}
+.rel-bar{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+table.rel-list{width:100%;border-collapse:collapse;font-size:12.5px}
+.rel-list th{text-align:left;font-weight:600;color:var(--muted);background:var(--panel2);padding:5px 8px;border-bottom:1px solid var(--line)}
+.rel-list td{padding:5px 8px;border-bottom:1px solid var(--line2);vertical-align:middle}
+.rel-list tr.click{cursor:pointer}
+.rel-list tr.click:hover td{background:var(--sel)}
+.rel-list tr.summary td{font-weight:600}
+.rel-list td.num{text-align:right;color:var(--muted)}
+.rel-list select{padding:2px 4px}
+.rel-empty{padding:10px 2px}
+.rel-soon p{margin:0 0 8px}
+.gc .nc{margin-left:6px;font-size:11px;color:var(--muted);flex:none}
+.gc .open-rec{margin-left:auto;padding:0 4px;color:var(--accent);opacity:0;cursor:pointer;flex:none;font-weight:700}
+.grow:hover .open-rec,.grow.sel .open-rec{opacity:1}
+@container (max-width:620px){.f-fields{grid-template-columns:1fr}}
 .print-root{display:none}
 @media print{
   :root,:root:not([data-theme="light"]){
@@ -344,7 +420,7 @@ kbd{font:11.5px ui-monospace,Consolas,monospace;background:var(--line2);border:1
       </div>
       <div class="spacer"></div>
       <div class="grp">
-        <button id="detailsBtn" title="Show task details (Ctrl+I)">Details</button>
+        <button id="detailsBtn" title="Open the record form for the selected task (Ctrl+I)">📄 Record</button>
       </div>
       <div class="grp seg" id="grainSeg">
         <button data-grain="day">Day</button><button data-grain="week" class="on">Week</button>
@@ -363,7 +439,7 @@ kbd{font:11.5px ui-monospace,Consolas,monospace;background:var(--line2);border:1
         <div class="gantt-head" id="ganttHead"><svg id="ganttHeadSvg"></svg></div>
         <div class="gantt-body" id="ganttBody"><svg id="ganttSvg"></svg></div>
       </div>
-      <aside id="drawer" class="drawer" hidden></aside>
+      <section id="formPane" class="form-pane" hidden></section>
     </div>
   </section>
 
@@ -759,7 +835,7 @@ function excelSerialToDay(v, date1904) {
 
 // ===== 10-db.js =====
 // ---------- SQLite, schema, revisions, undo, live save ----------
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const IDB_NAME = "offline-pm";
 let SQL, db;
 let rev = 0, mirrorRev = null, diskRev = null, lastDiskAt = null, lastSize = 0;
@@ -768,7 +844,7 @@ let saving = false, pending = false, pendingReasons = [], lastErr = null;
 const saveLog = [];
 const undoStack = [], redoStack = [];
 const UNDO_LIMIT = 40;
-const hooks = { onChange() { }, onSaveState() { } };
+const hooks = { onChange() { }, onSaveState() { }, onReplace() { } };
 let slowSaves = false; // test/demo aid
 
 function q(sql, params = []) {
@@ -832,6 +908,18 @@ CREATE TRIGGER IF NOT EXISTS team_member_kinds BEFORE INSERT ON team_member BEGI
 END;
 INSERT OR IGNORE INTO meta VALUES ('rev','0'), ('app','offline-pm'), ('file_id', lower(hex(randomblob(8))));
 `;
+// v2: work notes journal on tasks (DECISIONS #38-#41).
+const SCHEMA_V2 = `
+CREATE TABLE IF NOT EXISTS note(
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  author TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT);
+CREATE INDEX IF NOT EXISTS note_task ON note(task_id, created_at);
+`;
+const SCHEMA_ALL = SCHEMA_V1 + SCHEMA_V2;
 
 const tableExists = (d, name) => !!d.exec("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", [name])[0];
 
@@ -839,14 +927,14 @@ const tableExists = (d, name) => !!d.exec("SELECT 1 FROM sqlite_master WHERE typ
 function migrate(d) {
   const ver = d.exec("PRAGMA user_version")[0].values[0][0];
   if (ver > SCHEMA_VERSION) throw new Error(`This file was made by a newer version of the app (schema ${ver}). Please use the newer app.`);
-  if (ver === SCHEMA_VERSION) { d.run(SCHEMA_V1); return ""; }
+  if (ver === SCHEMA_VERSION) { d.run(SCHEMA_ALL); return ""; }
   let note = "";
   d.run("BEGIN");
   try {
     const legacy = tableExists(d, "tasks"); // proof-of-concept layout
     const oldRev = legacy && tableExists(d, "meta") ? +(d.exec("SELECT value FROM meta WHERE key='rev'")[0]?.values[0][0] ?? 0) : 0;
     if (legacy && tableExists(d, "meta")) d.run("ALTER TABLE meta RENAME TO meta_v0");
-    d.run(SCHEMA_V1);
+    d.run(SCHEMA_ALL);
     if (legacy) {
       d.run("INSERT INTO project(name, created_at) VALUES ('Imported plan', ?)", [nowIso()]);
       const pid = d.exec("SELECT last_insert_rowid()")[0].values[0][0];
@@ -881,6 +969,7 @@ function installDb(bytes) {
   if (!scalar("SELECT COUNT(*) FROM project")) run("INSERT INTO project(name, created_at) VALUES ('My project', ?)", [nowIso()]);
   rev = readRev(db);
   undoStack.length = 0; redoStack.length = 0;
+  hooks.onReplace();
   return note;
 }
 
@@ -1111,7 +1200,7 @@ const M = {
   tasks: new Map(), roots: [], order: [], byWbs: new Map(),
   deps: [], depsIn: new Map(), depsOut: new Map(),
   parties: new Map(), people: [], teams: [], members: new Map(), teamsOf: new Map(),
-  raci: new Map(), issues: [],
+  raci: new Map(), issues: [], noteCount: new Map(),
 };
 
 function loadModel() {
@@ -1160,6 +1249,7 @@ function loadModel() {
     if (!M.depsIn.has(d.succ_id)) M.depsIn.set(d.succ_id, []); M.depsIn.get(d.succ_id).push(d);
     if (!M.depsOut.has(d.pred_id)) M.depsOut.set(d.pred_id, []); M.depsOut.get(d.pred_id).push(d);
   }
+  M.noteCount = new Map(q("SELECT n.task_id, COUNT(*) c FROM note n JOIN task t ON t.id=n.task_id WHERE t.project_id=? GROUP BY n.task_id", [M.projectId]).map(r => [r.task_id, r.c]));
   M.issues = computeIssues();
 }
 
@@ -1467,6 +1557,27 @@ function opSetMembers(teamId, personIds) {
   for (const p of personIds) run("INSERT INTO team_member VALUES (?,?)", [teamId, p]);
 }
 
+// Work notes: a dated journal per task. Unlike ServiceNow's journal, notes can be edited and deleted (DECISIONS #39).
+const noteStamp = () => new Date().toISOString();
+function opAddNote(taskId, body, author = "") {
+  body = String(body ?? "").trim(); if (!body) throw new Error("A note can't be empty");
+  taskRow(taskId);
+  run("INSERT INTO note(task_id, body, author, created_at) VALUES (?,?,?,?)", [taskId, body, String(author || "").trim(), noteStamp()]);
+  return lastId();
+}
+function opEditNote(id, body) {
+  body = String(body ?? "").trim(); if (!body) throw new Error("A note can't be empty. Delete it instead");
+  const n = one("SELECT body FROM note WHERE id=?", [id]); if (!n) throw new Error("Note not found");
+  if (n.body !== body) run("UPDATE note SET body=?, updated_at=? WHERE id=?", [body, noteStamp(), id]);
+}
+function opDeleteNote(id) { run("DELETE FROM note WHERE id=?", [id]); }
+// Notes for a task, newest first; withSubtasks adds notes from every descendant.
+function notesFor(taskId, withSubtasks = false) {
+  if (!withSubtasks) return q("SELECT * FROM note WHERE task_id=? ORDER BY created_at DESC, id DESC", [taskId]);
+  return q(`WITH RECURSIVE s(id) AS (SELECT ? UNION ALL SELECT t.id FROM task t JOIN s ON t.parent_id=s.id)
+            SELECT n.* FROM note n JOIN s ON s.id=n.task_id ORDER BY n.created_at DESC, n.id DESC`, [taskId]);
+}
+
 function opAddProject(name) {
   name = String(name || "").trim() || "New project";
   run("INSERT INTO project(name, position, created_at) VALUES (?, (SELECT COALESCE(MAX(position),0)+1 FROM project), ?)", [name, nowIso()]);
@@ -1512,6 +1623,12 @@ function seedSample() {
   R(c, chloe, "R"); R(c, ben, "C"); R(d, chloe, "R"); R(e, chloe, "R"); R(e, mkt, "C");
   R(f, eng, "R"); R(g, eng, "R"); R(g, ben, "A"); R(h2, mkt, "R"); R(h2, dev, "A");
   R(i, ana, "R"); R(i, eng, "C"); R(i, mkt, "C"); R(j, ben, "R"); R(j, mkt, "I"); R(j, dev, "I");
+  opAddNote(a, "Interviewed 8 stakeholders. Main theme: the current site is hard to update without a developer.", "Ana Ruiz");
+  opAddNote(c, "Homepage and product page wireframes reviewed with marketing. Navigation still open.", "Chloe Park");
+  opAddNote(c, "Decision: keep the mega-menu, but limit it to 3 columns.", "Ana Ruiz");
+  opAddNote(g, "Waiting on the final style guide before starting the article template.", "Ben Okafor");
+  // Spread the sample notes over the past days so the stream looks lived-in.
+  q("SELECT id FROM note ORDER BY id").forEach((n, k) => run("UPDATE note SET created_at=? WHERE id=?", [new Date(Date.now() - (8 - k * 2) * 864e5 - 3600e3 * (k + 1)).toISOString(), n.id]));
 }
 
 // ===== 30-grid.js =====
@@ -1519,7 +1636,7 @@ function seedSample() {
 const ROW = 30;
 const UI = {
   view: "plan", selId: null, col: "name", collapsed: new Set(), search: "", person: "", grain: "week",
-  drawer: false, rows: [], editing: null, selDep: null,
+  rows: [], editing: null, selDep: null,
 };
 const COLS = [
   { key: "wbs", label: "WBS", w: 64 },
@@ -1591,7 +1708,7 @@ function cellHtml(t, c) {
     case "wbs": return esc(t.wbs);
     case "name": {
       const caret = t.isSummary ? `<span class="caret" data-caret>${UI.collapsed.has(t.id) && !filterActive() ? "▶" : "▼"}</span>` : `<span class="caret"></span>`;
-      return `<span style="width:${t.depth * 16}px;flex:none"></span>${caret}${t.isMilestone ? '<span class="ms-ico">◆</span>' : ""}<span class="nm">${esc(t.name)}</span>${_warnSet.has(t.id) ? '<span class="warn-dot" title="Has warnings, see Issues">⚠</span>' : ""}`;
+      return `<span style="width:${t.depth * 16}px;flex:none"></span>${caret}${t.isMilestone ? '<span class="ms-ico">◆</span>' : ""}<span class="nm">${esc(t.name)}</span>${_warnSet.has(t.id) ? '<span class="warn-dot" title="Has warnings, see Issues">⚠</span>' : ""}${M.noteCount.get(t.id) ? `<span class="nc" title="${M.noteCount.get(t.id)} work note(s)">💬${M.noteCount.get(t.id)}</span>` : ""}<span class="open-rec" data-open title="Open record form">↗</span>`;
     }
     case "start": return fmtShort(t.S);
     case "finish": return fmtShort(t.F);
@@ -1633,7 +1750,7 @@ function renderGridRows() {
 function selectTask(id, { scroll = true, col } = {}) {
   UI.selId = id; if (col) UI.col = col;
   if (id != null && scroll) revealTask(id);
-  renderGridRows(); renderGanttRows(); renderDrawer();
+  renderGridRows(); renderGanttRows(); renderForm();
 }
 function revealTask(id) {
   const t = M.tasks.get(id); if (!t) return;
@@ -1667,7 +1784,7 @@ function showLevel(level) {
   UI.collapsed.clear();
   if (level !== "all") for (const t of M.order) if (t.isSummary && t.depth >= +level - 1) UI.collapsed.add(t.id);
   if (UI.selId && UI.collapsed.size) { const t = selTask(); if (t && t.depth >= +level) UI.selId = t.parent ? ancestorAtDepth(t, +level - 1).id : t.id; }
-  saveCollapsed(); computeRows(); renderGrid(); renderGantt(); renderDrawer();
+  saveCollapsed(); computeRows(); renderGrid(); renderGantt(); renderForm();
 }
 function ancestorAtDepth(t, d) { let x = t; while (x.depth > d && x.parent) x = x.parent; return x; }
 
@@ -1755,7 +1872,9 @@ function cmdStructure(op) {
 function cmdDelete() {
   const t = selTask(); if (!t) return;
   const n = countDesc(t);
-  if (n && !confirm(`Delete “${t.name}” and its ${n} subtask${n > 1 ? "s" : ""}?`)) return;
+  const notes = [t, ...M.order.slice(t.index + 1, t.index + 1 + n)].reduce((s, x) => s + (M.noteCount.get(x.id) || 0), 0);
+  const parts = [n ? `its ${n} subtask${n > 1 ? "s" : ""}` : "", notes ? `${notes} work note${notes > 1 ? "s" : ""}` : ""].filter(Boolean);
+  if (parts.length && !confirm(`Delete “${t.name}” and ${parts.join(" and ")}? (Undo is available.)`)) return;
   const next = UI.rows[t.row + 1 + (UI.collapsed.has(t.id) ? 0 : n)] || UI.rows[t.row - 1];
   if (mutate(`Deleted “${t.name}”${n ? ` (+${n} subtasks)` : ""}`, () => opDelete(t.id))) selectTask(next && M.tasks.has(next.id) ? next.id : null);
 }
@@ -1775,6 +1894,7 @@ function initGrid() {
     if (e.target.closest(".cell-editor")) return;
     const row = e.target.closest(".grow"); if (!row) return;
     const id = +row.dataset.id, cell = e.target.closest(".gc");
+    if (e.target.closest("[data-open]")) { e.preventDefault(); openRecord(id); return; }
     if (e.target.closest("[data-caret]")) { toggleCollapse(id); return; }
     const col = cell?.dataset.col;
     if (col === "wbs") { beginRowDrag(e, id); }
@@ -1783,7 +1903,6 @@ function initGrid() {
     lastDown = { id, col, t: now };
     const wasSel = UI.selId === id && UI.col === col;
     if (!wasSel) selectTask(id, { scroll: false, col: col && col !== "wbs" ? col : UI.col });
-    else if (UI.drawer) renderDrawer();
     // Deferred so the browser's own mousedown focus handling can't steal focus from the editor/picker.
     if (col && col !== "wbs" && (dbl || (wasSel && colByKey(col)?.edit === "party"))) { e.preventDefault(); lastDown = null; setTimeout(() => startEdit(col), 0); }
   });
@@ -2089,7 +2208,7 @@ function initGantt() {
 function beginBarDrag(e, t, mode, barEl) {
   const svg = $("ganttSvg"), start = svgPoint(e);
   const wasSel = UI.selId === t.id;
-  if (!wasSel) { UI.selId = t.id; renderGridRows(); renderDrawer(); }
+  if (!wasSel) { UI.selId = t.id; renderGridRows(); }
   if (t.isSummary || t.S == null) { selectTask(t.id, { scroll: true }); barClicked(t); return; }
   svg.setPointerCapture(e.pointerId);
   let days = 0, moved = false, S = t.S, F = t.F;
@@ -2126,7 +2245,7 @@ function beginBarDrag(e, t, mode, barEl) {
 let lastBarClick = null;
 function barClicked(t) {
   const now = performance.now();
-  if (lastBarClick && lastBarClick.id === t.id && now - lastBarClick.t < 450) { lastBarClick = null; toggleDrawer(true); }
+  if (lastBarClick && lastBarClick.id === t.id && now - lastBarClick.t < 450) { lastBarClick = null; openRecord(t.id); }
   else lastBarClick = { id: t.id, t: now };
 }
 
@@ -2160,6 +2279,371 @@ function beginLink(e, from, side) {
     } else renderGanttRows();
   };
   svg.addEventListener("pointermove", move); svg.addEventListener("pointerup", up); svg.addEventListener("pointercancel", up);
+}
+
+// ===== 45-form.js =====
+// ---------- Record form (ServiceNow-style: fields, mini Gantt, work notes, related records) ----------
+// Opens in the right-hand pane in place of the Gantt; the outline on the left acts as the record list (DECISIONS #38).
+Object.assign(UI, {
+  form: false, formTab: lsGet("pm.formTab", "children"), mgAll: lsGet("pm.mgAll", false),
+  notesWithSub: lsGet("pm.notesWithSub", true), noteDrafts: new Map(), editNote: null,
+  secClosed: new Set(lsGet("pm.formClosed", [])),
+});
+// Collapsible section header; open/closed state is remembered per browser.
+function secHead(key, title, ...extras) {
+  const closed = UI.secClosed.has(key);
+  const toggle = () => { closed ? UI.secClosed.delete(key) : UI.secClosed.add(key); lsSet("pm.formClosed", [...UI.secClosed]); renderForm(true); };
+  return h("div", { class: "f-sec-h" }, h("button", { class: "sec-tog", "aria-expanded": String(!closed), title: closed ? "Show section" : "Hide section", onclick: toggle }, h("span", { class: "car" }, closed ? "▶" : "▼"), h("h3", {}, title)), ...extras);
+}
+
+function toggleForm(force) {
+  const want = force ?? !UI.form;
+  if (want === UI.form) { renderForm(); return; }
+  UI.form = want;
+  const gb = $("ganttBody");
+  formHold = formHeldRender = false; // closing/opening must not wait for a held render
+  if (want) { UI.ganttLeft = gb.scrollLeft; renderForm(true); return; }
+  UI.editNote = null; renderForm(); renderGantt();
+  // The Gantt was display:none, so it missed the grid's scroll sync while the form was open.
+  gb.scrollLeft = UI.ganttLeft ?? gb.scrollLeft; gb.scrollTop = $("gridBody").scrollTop; renderGanttRows();
+  $("gridBody").focus();
+}
+function openRecord(id) {
+  if (!M.tasks.has(id)) return;
+  if (UI.view !== "plan") switchView("plan");
+  UI.form = true;
+  if (UI.selId !== id) { UI.editNote = null; selectTask(id); } // selectTask re-renders the form
+  else renderForm(true);
+}
+// Window resize / splitter: only the mini Gantt depends on the pane width, so leave fields (and focus) alone.
+function relayoutForm() {
+  const old = $("formPane").querySelector(".f-sec.mg"), t = selTask();
+  if (old && t && !$("formPane").hidden) old.replaceWith(miniGanttSection(t));
+}
+// 2. A pointerdown inside the form commits a pending field edit, but the re-render waits until the click has landed,
+// so the button (or note box) under the pointer still exists when the click arrives.
+let formHold = false, formHeldRender = false;
+function holdFormRender() {
+  formHold = true;
+  const release = () => {
+    removeEventListener("pointerup", release, true); removeEventListener("pointercancel", release, true);
+    setTimeout(() => { formHold = false; if (formHeldRender) { formHeldRender = false; renderForm(true); } }, 0);
+  };
+  addEventListener("pointerup", release, true); addEventListener("pointercancel", release, true);
+}
+
+let formBusy = false;
+function renderForm(force = false) {
+  if (formBusy) return;
+  if (formHold) { formHeldRender = true; return; }
+  const pane = $("formPane"), show = UI.form && UI.view === "plan";
+  pane.hidden = !show; $("ganttPane").hidden = show; $("split").classList.toggle("form-open", show);
+  $("detailsBtn").classList.toggle("primary", show);
+  $$("#grainSeg button, #todayBtn").forEach(b => b.disabled = show);
+  if (!show) { pane.dataset.task = ""; return; }
+  const ae = document.activeElement;
+  // Don't clobber a field being typed in; when switching records, commit the pending edit first.
+  if (pane.contains(ae) && ae.closest(".f-fields") && ae.matches("input,select,textarea")) {
+    if (!force && pane.dataset.task === String(UI.selId)) { refreshFieldsInPlace(selTask(), ae); return; }
+    formBusy = true; try { ae._commit?.(); ae.blur(); } finally { formBusy = false; }
+  }
+  const t = selTask();
+  const keep = pane.contains(ae) ? ae.dataset.keep : null;
+  const selRange = keep && ae.selectionStart != null ? [ae.selectionStart, ae.selectionEnd] : null;
+  const scroll = pane.dataset.task === String(t?.id ?? "") ? pane.scrollTop : 0;
+  pane.dataset.task = t?.id ?? "";
+  pane.innerHTML = "";
+  if (!t) {
+    pane.append(h("div", { class: "f-head" }, h("div", { class: "f-title" }, h("h2", {}, "Record")), h("button", { class: "icon", title: "Close form (Ctrl+I)", onclick: () => toggleForm(false) }, "✕")),
+      h("div", { class: "empty" }, "Select a task or milestone in the outline to open its record."));
+    return;
+  }
+  if (UI.editNote && !one("SELECT 1 FROM note WHERE id=? AND created_at=?", [UI.editNote.id, UI.editNote.created])) UI.editNote = null;
+  pane.append(formHeader(t), formFields(t));
+  if (t.isSummary) pane.append(miniGanttSection(t));
+  pane.append(notesSection(t), relatedSection(t));
+  pane.scrollTop = scroll;
+  if (keep) {
+    const el = pane.querySelector(`[data-keep="${keep}"]`);
+    if (el) { el.focus(); if (selRange && el.setSelectionRange) try { el.setSelectionRange(...selRange); } catch { } }
+  }
+}
+
+// Another view changed the task while a form field has focus: update the other fields, keep the one being typed in.
+const fieldValue = (t, f) => ({ name: t.name, start: fmtYMD(t.S), finish: fmtYMD(t.F), percent: String(t.P), duration: t.dur == null ? "" : t.dur + "d", code: t.code || "", notes: t.notes || "", status: t.ST, kind: t.isMilestone ? "milestone" : "task" })[f];
+function refreshFieldsInPlace(t, focused) {
+  if (!t) return;
+  for (const el of $("formPane").querySelectorAll(".f-fields [data-f]")) {
+    if (el === focused) continue;
+    const v = fieldValue(t, el.dataset.f); if (v == null || el.value === v) continue;
+    el.value = v; el._orig = v;
+  }
+  const h2 = $("formPane").querySelector(".f-title h2");
+  if (h2) h2.lastChild.textContent = t.name;
+}
+
+const recordLabel = t => t.isSummary ? "Summary task" : t.isMilestone ? "Milestone" : "Task";
+function formHeader(t) {
+  const i = M.order.indexOf(t), prev = M.order[i - 1], next = M.order[i + 1];
+  const crumbs = [];
+  for (let x = t.parent; x; x = x.parent) crumbs.unshift(h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(x.id); } }, `${x.wbs} ${x.name}`), h("span", { class: "sep" }, "›"));
+  const proj = M.projects.find(p => p.id === M.projectId);
+  return h("div", { class: "f-head" },
+    h("div", { class: "f-title" },
+      h("div", { class: "f-crumbs" }, h("span", {}, proj?.name || ""), h("span", { class: "sep" }, "›"), ...crumbs),
+      h("h2", {}, h("span", { class: "f-kind" }, recordLabel(t)), h("span", { class: "f-wbs" }, t.wbs), t.name)),
+    h("div", { class: "f-acts" },
+      h("button", { class: "icon", title: "Previous record", disabled: !prev, onclick: () => prev && openRecord(prev.id) }, "▲"),
+      h("button", { class: "icon", title: "Next record", disabled: !next, onclick: () => next && openRecord(next.id) }, "▼"),
+      h("button", { class: "icon", title: "Close form, back to the Gantt (Ctrl+I)", onclick: () => toggleForm(false) }, "✕")));
+}
+
+function formFields(t) {
+  const commit = (fieldName, el) => () => { const v = el.value; mutate(`Task ${t.wbs}: ${fieldName} → “${v}”`, () => opSetField(t.id, fieldName, v)); };
+  // Text commits once, on change or blur, whichever comes first (blur also covers values set without a change event).
+  const commitOnce = (fieldName, el) => {
+    el._orig = el.value; let done = false;
+    const same = () => el.value === el._orig || (fieldName === "duration" && parseDuration(el.value) === t.dur) || (fieldName === "percent" && parsePercent(el.value) === t.P);
+    const go = () => { if (done || same() || (el.type === "date" && !el.value)) return; done = true; commit(fieldName, el)(); };
+    el._commit = go; // renderForm calls this directly when switching records
+    if (el.type !== "date") el.addEventListener("change", go); // date inputs fire change per keystroke
+    el.addEventListener("blur", go);
+    if (el.tagName === "INPUT") el.addEventListener("keydown", e => { if (e.key === "Enter") el.blur(); });
+  };
+  const inp = (fieldName, value, attrs = {}) => { const el = h("input", { value: value ?? "", "data-f": fieldName, ...attrs }); commitOnce(fieldName, el); return el; };
+  const ro = t.isSummary, rollHint = ro ? "Rolls up from subtasks" : null;
+  const kind = h("select", { disabled: ro, "data-f": "kind", title: rollHint }, h("option", { value: "task", selected: !t.isMilestone }, "Task"), h("option", { value: "milestone", selected: t.isMilestone }, "Milestone"));
+  kind.addEventListener("change", commit("kind", kind));
+  const status = h("select", { disabled: ro, "data-f": "status", title: rollHint }, ...STATUSES.map(s => h("option", { selected: s === t.ST }, s)));
+  status.addEventListener("change", commit("status", status));
+  const desc = h("textarea", { placeholder: "What this task covers, scope, links…", "data-f": "notes", rows: 3 }, t.notes || "");
+  commitOnce("notes", desc);
+  const party = role => {
+    const own = rolesOf(t.id, role), acc = role === "A" ? accountable(t) : null;
+    const list = role === "A" ? acc.list : own, inh = role === "A" && acc.inherited;
+    const btn = h("button", { class: "f-party", title: `Choose ${ROLE_NAMES[role]}`, html: (list.length ? list.map(r => chipFor(r, inh)).join("") : `<span class="hint">None</span>`) + (inh && list.length ? `<span class="hint"> from ${esc(acc.from.wbs)}</span>` : "") });
+    btn.addEventListener("click", () => openPartyPicker(btn.getBoundingClientRect(), t.id, role));
+    return btn;
+  };
+  const parent = t.parent ? h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(t.parent.id); } }, `${t.parent.wbs} ${t.parent.name}`) : h("span", { class: "hint" }, "Top level");
+  const F = (label, el, cls = "") => h("div", { class: "f-field " + cls }, h("label", {}, label), el);
+  if (UI.secClosed.has("details")) return h("section", { class: "f-sec det" }, secHead("details", "Details", h("span", { class: "hint" }, `${t.ST} · ${fmtShort(t.S)} → ${fmtShort(t.F)} · ${t.P}%`)));
+  return h("section", { class: "f-sec det" }, secHead("details", "Details"), h("div", { class: "f-fields" },
+    F("Name", inp("name", t.name), "wide"),
+    F("Type", kind), F("Start", inp("start", fmtYMD(t.S), { type: "date", disabled: ro, title: rollHint })),
+    F("Status", status), F("Finish", inp("finish", fmtYMD(t.F), { type: "date", disabled: ro || t.isMilestone, title: rollHint })),
+    F("% complete", inp("percent", t.P, { type: "number", min: 0, max: 100, disabled: ro, title: rollHint })),
+    F("Duration", inp("duration", t.dur == null ? "" : t.dur + "d", { disabled: ro, title: ro ? rollHint : "Working days, e.g. 5, 5d, 2w. 0 makes a milestone" })),
+    F("Responsible", party("R")), F("Accountable", party("A")),
+    F("Parent", parent), F("WBS code", inp("code", t.code, { placeholder: "Optional stable code" })),
+    F("Description", desc, "wide")));
+}
+
+// ---------- Mini Gantt of a summary task's subtasks ----------
+const MG_LBL = 230, MG_MAX = 80;
+function descendantsOf(t) { return M.order.slice(t.index + 1, t.index + 1 + countDesc(t)); }
+function miniGanttSection(t) {
+  const rows = UI.mgAll ? descendantsOf(t) : t.children;
+  const shown = rows.slice(0, MG_MAX);
+  const allCb = h("input", { type: "checkbox", checked: UI.mgAll });
+  allCb.addEventListener("change", () => { UI.mgAll = allCb.checked; lsSet("pm.mgAll", UI.mgAll); renderForm(true); });
+  const sec = h("section", { class: "f-sec mg" },
+    secHead("mg", "Subtask schedule", h("span", { class: "hint" }, `${rows.length} ${UI.mgAll ? "subtasks at all levels" : "direct subtasks"}`),
+      h("span", { class: "spacer" }), h("label", { class: "hint" }, allCb, " All levels")));
+  if (UI.secClosed.has("mg")) return sec;
+  const avail = ($("formPane").clientWidth || 760) - 66; // pane + section padding and borders
+  const lbl = clamp(Math.round(avail * 0.34), 140, MG_LBL);
+  sec.append(h("div", { class: "mg-wrap" }, miniGanttLabels(t, shown, lbl), h("div", { class: "mg-chart", html: miniGanttSvg(t, shown, Math.max(200, avail - lbl - 1)) })));
+  if (rows.length > shown.length) sec.append(h("div", { class: "hint" }, `Showing the first ${MG_MAX} of ${rows.length}.`));
+  sec.addEventListener("click", e => {
+    const dep = e.target.closest(".dep"); if (dep) { openDepEditor(+dep.dataset.dep, e.clientX, e.clientY); return; }
+    const el = e.target.closest("[data-id]"); if (el) openRecord(+el.dataset.id);
+  });
+  return sec;
+}
+function miniGanttLabels(t, rows, width) {
+  return h("div", { class: "mg-lbls", style: { width: width + "px" } }, h("div", { class: "mg-lh" }, "Subtask"),
+    ...rows.map(r => h("div", { class: "mg-l" + (r.isSummary ? " summary" : ""), "data-id": r.id, title: `${r.wbs} ${r.name} · ${fmtShort(r.S)} → ${fmtShort(r.F)} · ${r.ST}` },
+      h("span", { style: { width: (r.depth - t.depth - 1) * 14 + "px", flex: "none" } }), h("span", { class: "w" }, r.wbs), h("span", { class: "n" }, (r.isMilestone ? "◆ " : "") + r.name),
+      M.noteCount.get(r.id) ? h("span", { class: "nc", title: "Work notes" }, "💬" + M.noteCount.get(r.id)) : null)));
+}
+function miniGanttSvg(t, rows, width) {
+  const sc = buildScale("fit", width, [t, ...rows]);
+  const H = Math.max(rows.length, 1) * ROW, HD = 44;
+  const idx = new Map(rows.map((r, i) => [r.id, i]));
+  const rowOf = x => idx.get(x.id) ?? null;
+  let body = backgroundSvg(sc, H);
+  if (t.S != null) body += `<rect class="mg-span" x="${xOf(sc, t.S)}" y="0" width="${Math.max(2, xOf(sc, t.F + 1) - xOf(sc, t.S))}" height="${H}"/>`;
+  body += rows.map((r, i) => `<line class="mg-row" x1="0" x2="${sc.width}" y1="${(i + 1) * ROW}" y2="${(i + 1) * ROW}"/>`).join("");
+  body += M.deps.filter(d => idx.has(d.pred_id) && idx.has(d.succ_id)).map(d => depPath(sc, d, rowOf, "mg")).join("");
+  body += rows.map((r, i) => barSvg(sc, r, i * ROW, { print: true, noLabel: true })).join("");
+  return `<svg width="${sc.width}" height="${H + HD}" class="mg-svg">${defs("mg")}<g class="mg-hdr">${headerSvg(sc)}</g><g transform="translate(0,${HD})">${body}</g></svg>`;
+}
+
+// ---------- Work notes (activity stream) ----------
+const linkify = s => s.replace(/https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"]/g, u => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
+function fmtWhen(iso) {
+  const d = new Date(iso); if (isNaN(d)) return { abs: iso || "", rel: "" };
+  const abs = d.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  const s = (Date.now() - d) / 1000;
+  const rel = s < 60 ? "just now" : s < 3600 ? Math.floor(s / 60) + " min ago" : s < 86400 ? Math.floor(s / 3600) + " h ago" : s < 172800 ? "yesterday" : s < 14 * 86400 ? Math.floor(s / 86400) + " days ago" : "";
+  return { abs, rel };
+}
+const authorColor = name => name ? avatarColor({ name }) : "var(--muted)";
+function notesSection(t) {
+  const withSub = t.isSummary && UI.notesWithSub;
+  const list = notesFor(t.id, withSub);
+  const sec = h("section", { class: "f-sec notes" });
+  const subCb = t.isSummary ? h("input", { type: "checkbox", checked: UI.notesWithSub }) : null;
+  subCb?.addEventListener("change", () => { UI.notesWithSub = subCb.checked; lsSet("pm.notesWithSub", UI.notesWithSub); renderForm(true); });
+  sec.append(h("div", { class: "f-sec-h" }, h("h3", {}, "Work notes"), h("span", { class: "hint" }, list.length ? `${list.length}` : ""), h("span", { class: "spacer" }),
+    subCb ? h("label", { class: "hint" }, subCb, " Include subtask notes") : null));
+
+  // Compose box
+  const me = lsGet("pm.me", "");
+  const names = M.people.filter(p => p.active).map(p => p.name);
+  if (me && !names.includes(me)) names.unshift(me);
+  const who = h("select", { "data-keep": "author", title: "Who is writing this note" }, h("option", { value: "" }, "(no name)"), ...names.map(n => h("option", { value: n, selected: n === me }, n)));
+  who.addEventListener("change", () => { lsSet("pm.me", who.value); who.classList.toggle("need", !who.value); nameHint.hidden = !!who.value; });
+  if (!who.value) who.classList.add("need");
+  const nameHint = h("span", { class: "need-hint", hidden: !!who.value }, "Pick your name once so teammates know who wrote it");
+  const ta = h("textarea", { class: "n-compose", "data-keep": "compose", rows: 3, placeholder: "Add a work note… (Ctrl+Enter to post)" });
+  ta.value = UI.noteDrafts.get(t.id) || "";
+  ta.addEventListener("input", () => { ta.value ? UI.noteDrafts.set(t.id, ta.value) : UI.noteDrafts.delete(t.id); });
+  const post = () => {
+    if (!ta.value.trim()) { toast("Write something first"); ta.focus(); return; }
+    const body = ta.value;
+    UI.noteDrafts.delete(t.id);
+    if (!mutate(`Task ${t.wbs}: added a work note`, () => opAddNote(t.id, body, who.value))) { UI.noteDrafts.set(t.id, body); renderForm(true); }
+  };
+  ta.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); post(); } e.stopPropagation(); });
+  sec.append(h("div", { class: "n-composer" }, ta, h("div", { class: "n-cbar" }, h("span", { class: "hint" }, "Posting as "), who, nameHint, h("span", { class: "spacer" }), h("button", { class: "primary", onclick: post }, "Post"))));
+
+  // Stream, newest first
+  const stream = h("div", { class: "n-stream" });
+  if (!list.length) stream.append(h("div", { class: "hint n-empty" }, withSub ? "No work notes on this task or its subtasks yet." : "No work notes yet."));
+  for (const n of list) stream.append(noteEntry(t, n));
+  sec.append(stream);
+  return sec;
+}
+function noteEntry(t, n) {
+  const c = fmtWhen(n.created_at), ed = n.updated_at ? fmtWhen(n.updated_at) : null;
+  const on = n.task_id !== t.id ? M.tasks.get(n.task_id) : null;
+  const editing = UI.editNote?.id === n.id;
+  const head = h("div", { class: "n-head" },
+    h("b", {}, n.author || "(no name)"),
+    on ? h("span", { class: "n-on" }, "on ", h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(on.id); } }, `${on.wbs} ${on.name}`)) : null,
+    h("time", { title: n.created_at }, c.abs + (c.rel ? ` · ${c.rel}` : "")),
+    ed ? h("span", { class: "n-ed", title: `Edited ${ed.abs}` }, "(edited)") : null,
+    h("span", { class: "spacer" }),
+    editing ? null : h("button", { class: "link", onclick: () => { UI.editNote = { id: n.id, created: n.created_at, text: n.body }; renderForm(true); const ta = $("formPane").querySelector(".n-edit"); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } } }, "Edit"),
+    editing ? null : h("button", { class: "link danger", onclick: () => { if (confirm("Delete this work note? (Undo is available.)")) mutate(`Task ${on?.wbs || t.wbs}: deleted a work note`, () => opDeleteNote(n.id)); } }, "Delete"));
+  let body;
+  if (editing) {
+    const ta = h("textarea", { class: "n-edit", "data-keep": "note-edit", rows: Math.min(10, n.body.split("\n").length + 1) });
+    ta.value = UI.editNote.text;
+    ta.addEventListener("input", () => { if (UI.editNote) UI.editNote.text = ta.value; });
+    const save = () => { const v = ta.value; const prev = UI.editNote; UI.editNote = null; if (v.trim() === n.body) { renderForm(true); return; } if (!mutate(`Task ${on?.wbs || t.wbs}: edited a work note`, () => opEditNote(n.id, v))) { UI.editNote = prev; renderForm(true); } };
+    const cancel = () => { UI.editNote = null; renderForm(true); };
+    ta.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); } e.stopPropagation(); });
+    body = h("div", {}, ta, h("div", { class: "n-cbar" }, h("span", { class: "spacer" }), h("button", { onclick: cancel }, "Cancel"), h("button", { class: "primary", onclick: save }, "Save")));
+  } else body = h("div", { class: "n-body", html: linkify(esc(n.body)) });
+  return h("div", { class: "n-entry", "data-note": n.id },
+    h("div", { class: "avatar", style: { background: authorColor(n.author) } }, n.author ? initials(n.author) : "?"),
+    h("div", { class: "n-main" }, head, body));
+}
+
+// ---------- Related records (tabbed lists at the bottom) ----------
+// Each tab: key, label, count(t) (null = no badge), render(t) → element. New record types (e.g. RAID) register here (DECISIONS #40).
+const RELATED_TABS = [
+  { key: "children", label: "Subtasks", count: t => t.children.length, render: relChildren },
+  { key: "pred", label: "Predecessors", count: t => (M.depsIn.get(t.id) || []).length, render: t => relDeps(t, "in") },
+  { key: "succ", label: "Successors", count: t => (M.depsOut.get(t.id) || []).length, render: t => relDeps(t, "out") },
+  { key: "raci", label: "People (RACI)", count: t => rolesOf(t.id).length, render: relRaci },
+  { key: "issues", label: "Plan issues", count: t => M.issues.filter(i => i.task === t).length, render: relIssues },
+  { key: "raid", label: "RAID", count: () => null, render: relRaid, soon: true },
+];
+function relatedSection(t) {
+  const cur = RELATED_TABS.find(x => x.key === UI.formTab) || RELATED_TABS[0];
+  const bar = h("div", { class: "rel-tabs", role: "tablist" });
+  for (const tab of RELATED_TABS) {
+    const n = tab.count(t);
+    bar.append(h("button", { class: "rel-tab" + (tab === cur ? " on" : ""), role: "tab", "data-tab": tab.key, onclick: () => { UI.formTab = tab.key; lsSet("pm.formTab", tab.key); renderForm(true); } },
+      tab.label, n != null ? h("span", { class: "cnt" }, String(n)) : null, tab.soon ? h("span", { class: "soon" }, "soon") : null));
+  }
+  return h("section", { class: "f-sec rel" }, h("div", { class: "f-sec-h" }, h("h3", {}, "Related records")), bar, h("div", { class: "rel-body" }, cur.render(t)));
+}
+const relTable = (heads, rows, empty) => rows.length
+  ? h("table", { class: "rel-list" }, h("thead", {}, h("tr", {}, ...heads.map(x => h("th", {}, x)))), h("tbody", {}, ...rows))
+  : h("div", { class: "hint rel-empty" }, empty);
+
+function relChildren(t) {
+  const add = h("button", {
+    onclick: () => {
+      const last = t.children.at(-1);
+      UI.collapsed.delete(t.id); saveCollapsed();
+      if (mutate("Added subtask", () => opAddTask({ parentId: t.id, name: "New task", ...newTaskDefaults(last || t) }))) toast("Subtask added. Click it to open its record and rename it");
+    }
+  }, "＋ New subtask");
+  const rows = t.children.map(c => h("tr", { class: "click" + (c.isSummary ? " summary" : ""), onclick: () => openRecord(c.id) },
+    h("td", {}, c.wbs), h("td", {}, (c.isMilestone ? "◆ " : "") + c.name), h("td", {}, fmtShort(c.S)), h("td", {}, fmtShort(c.F)),
+    h("td", {}, c.P + "%"), h("td", { html: `<span class="st ${stClass(c.ST)}">${esc(c.ST)}</span>` }),
+    h("td", { html: `<span class="chips">${rolesOf(c.id, "R").map(r => chipFor(r)).join("")}</span>` }),
+    h("td", { class: "num" }, M.noteCount.get(c.id) ? "💬 " + M.noteCount.get(c.id) : "")));
+  return h("div", {}, h("div", { class: "rel-bar" }, add),
+    relTable(["WBS", "Name", "Start", "Finish", "%", "Status", "Responsible", "Notes"], rows, t.isMilestone ? "Milestones normally have no subtasks." : "No subtasks. Adding one turns this into a summary task whose dates roll up."));
+}
+function relDeps(t, dir) {
+  const list = (dir === "in" ? M.depsIn : M.depsOut).get(t.id) || [];
+  const rows = list.map(d => {
+    const o = M.tasks.get(dir === "in" ? d.pred_id : d.succ_id);
+    const type = h("select", {}, ...DEP_TYPES.map(k => h("option", { value: k, selected: k === d.type }, `${k}: ${DEP_NAMES[k]}`)));
+    const lag = h("input", { type: "number", value: d.lag, title: "Lag in working days (negative = lead)", style: { width: "64px" } });
+    const ch = () => mutate(`Link ${M.tasks.get(d.pred_id).wbs} → ${M.tasks.get(d.succ_id).wbs}: ${type.value} ${lag.value}d`, () => opUpdateDep(d.id, type.value, +lag.value));
+    type.addEventListener("change", ch); lag.addEventListener("change", ch);
+    return h("tr", {}, h("td", {}, h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(o.id); } }, o.wbs)), h("td", {}, o.name),
+      h("td", {}, type), h("td", {}, lag), h("td", { title: d.violated ? "Dates conflict with this link. Dates are never moved automatically." : "" }, d.violated ? "⚠ conflict" : "OK"),
+      h("td", {}, h("button", { class: "x", title: "Remove link", onclick: () => mutate("Removed link", () => opRemoveDep(d.id)) }, "✕")));
+  });
+  const linked = new Set(list.map(d => dir === "in" ? d.pred_id : d.succ_id));
+  const add = h("select", {}, h("option", { value: "" }, dir === "in" ? "＋ Add predecessor…" : "＋ Add successor…"),
+    ...M.order.filter(x => x !== t && !isAncestor(x, t) && !isAncestor(t, x) && !linked.has(x.id)).map(x => h("option", { value: x.id }, `${x.wbs} ${x.name}`)));
+  add.addEventListener("change", () => {
+    const oid = +add.value; if (!oid) return;
+    const [p, s] = dir === "in" ? [oid, t.id] : [t.id, oid];
+    mutate(`Linked ${M.tasks.get(p).wbs} → ${M.tasks.get(s).wbs}`, () => opAddDep(p, s, "FS", 0));
+  });
+  return h("div", {}, h("div", { class: "rel-bar" }, add),
+    relTable([dir === "in" ? "Predecessor" : "Successor", "Name", "Type", "Lag (d)", "Dates", ""], rows, dir === "in" ? "Nothing has to happen before this task." : "Nothing waits on this task."));
+}
+function relRaci(t) {
+  const rows = rolesOf(t.id).map(r => {
+    const p = M.parties.get(r.party_id);
+    const sel = h("select", {}, ...ROLES.map(x => h("option", { value: x, selected: x === r.role }, `${x}: ${ROLE_NAMES[x]}`)));
+    sel.addEventListener("change", () => mutate(`Task ${t.wbs}: ${p.name} → ${sel.value}`, () => opSetRole(t.id, p.id, sel.value)));
+    return h("tr", {}, h("td", {}, (p.kind === "team" ? "👥 " : "") + p.name + (p.active ? "" : " (inactive)")), h("td", {}, p.kind === "team" ? "Team" : p.title || "Person"), h("td", {}, sel),
+      h("td", {}, h("button", { class: "x", title: "Remove", onclick: () => mutate(`Task ${t.wbs}: removed ${p.name}`, () => opSetRole(t.id, p.id, null)) }, "✕")));
+  });
+  const assigned = new Set(rolesOf(t.id).map(r => r.party_id));
+  const addRole = h("select", {}, ...ROLES.map(x => h("option", { value: x, selected: x === (rolesOf(t.id, "R").length ? "C" : "R") }, `${x}: ${ROLE_NAMES[x]}`)));
+  const addSel = h("select", {}, h("option", { value: "" }, "＋ Add person or team…"),
+    ...[...M.people, ...M.teams].filter(p => p.active && !assigned.has(p.id)).map(p => h("option", { value: p.id }, (p.kind === "team" ? "👥 " : "") + p.name)));
+  addSel.addEventListener("change", () => { const pid = +addSel.value; if (pid) mutate(`Task ${t.wbs}: ${partyName(pid)} → ${addRole.value}`, () => opSetRole(t.id, pid, addRole.value)); });
+  const acc = accountable(t);
+  return h("div", {}, h("div", { class: "rel-bar" }, addRole, addSel),
+    acc.inherited && acc.list.length ? h("div", { class: "hint", style: { margin: "0 0 6px" } }, `Accountable inherited from ${acc.from.wbs}: ${acc.list.map(r => partyName(r.party_id)).join(", ")}`) : null,
+    relTable(["Person or team", "Kind / title", "Role", ""], rows, "Nobody is assigned to this task yet."));
+}
+function relIssues(t) {
+  const list = M.issues.filter(i => i.task === t);
+  if (!list.length) return h("div", { class: "hint rel-empty" }, "No plan issues for this task.");
+  return h("div", {}, ...list.map(i => h("div", { class: "msg " + (i.level === "warn" ? "warn" : "") }, i.text)));
+}
+function relRaid() {
+  return h("div", { class: "rel-soon" },
+    h("p", {}, h("b", {}, "Risks, actions, issues and decisions"), " will be linked to tasks here in an upcoming version."),
+    h("table", { class: "rel-list" }, h("thead", {}, h("tr", {}, ...["Type", "Number", "Short description", "State", "Owner", "Due"].map(x => h("th", {}, x)))),
+      h("tbody", {}, h("tr", {}, h("td", { colspan: 6, class: "hint" }, "No RAID items yet.")))));
 }
 
 // ===== 50-views.js =====
@@ -2197,7 +2681,7 @@ const modalOpen = () => !$("modalBack").hidden;
 const avatarColor = p => { let hsh = 0; for (const c of p.name) hsh = (hsh * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${hsh % 360} 55% 48%)`; };
 const initials = n => n.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("");
 
-// ---------- Party picker (R/A cells, drawer) ----------
+// ---------- Party picker (R/A cells, record form) ----------
 function openPartyPicker(rect, taskId, role) {
   const t = M.tasks.get(taskId); if (!t) return;
   const current = new Set(rolesOf(taskId, role).map(r => r.party_id));
@@ -2253,101 +2737,6 @@ function openDepEditor(depId, x, y) {
     d.violated ? h("div", { class: "msg warn" }, "Dates currently conflict with this link. Dates are never moved automatically.") : null,
     h("div", { class: "acts" }, h("button", { class: "danger", onclick: () => { closePop(); UI.selDep = null; mutate(`Removed link ${p.wbs} → ${s.wbs}`, () => opRemoveDep(d.id)); } }, "Delete link"), h("button", { onclick: closePop }, "Close")));
   openPop(x + 8, y + 8, box);
-}
-
-// ---------- Task details drawer ----------
-function toggleDrawer(force) {
-  UI.drawer = force ?? !UI.drawer; $("detailsBtn").classList.toggle("primary", UI.drawer);
-  renderDrawer();
-}
-let drawerBusy = false;
-function renderDrawer() {
-  if (drawerBusy) return;
-  const dr = $("drawer");
-  if (!UI.drawer || UI.view !== "plan") { dr.hidden = true; return; }
-  dr.hidden = false;
-  const ae = document.activeElement;
-  if (dr.contains(ae) && ae.matches("input,textarea,select")) {
-    if (dr.dataset.task === String(UI.selId)) return; // don't clobber typing in the same task
-    drawerBusy = true; try { ae.blur(); } finally { drawerBusy = false; } // switching task: commit pending edit first
-  }
-  const t = selTask();
-  dr.dataset.task = t?.id ?? "";
-  dr.innerHTML = "";
-  if (!t) { dr.append(h("div", { class: "drawer-head" }, h("h3", { style: { flex: 1 } }, "Details"), h("button", { class: "icon", onclick: () => toggleDrawer(false) }, "✕")), h("p", { class: "hint" }, "Select a task to see and edit its details.")); return; }
-  const field = (label, el) => [h("label", {}, label), el];
-  const commit = (fieldName, el) => () => { const v = el.value; mutate(`Task ${t.wbs}: ${fieldName} → “${v}”`, () => opSetField(t.id, fieldName, v)); };
-  const inp = (fieldName, value, attrs = {}) => {
-    const el = h("input", { value: value ?? "", ...attrs });
-    if (attrs.type === "date") { // date inputs fire change per keystroke; commit on blur/Enter instead
-      const orig = el.value;
-      el.addEventListener("blur", () => { if (el.value !== orig && el.value) commit(fieldName, el)(); });
-      el.addEventListener("keydown", e => { if (e.key === "Enter") el.blur(); });
-    } else el.addEventListener("change", commit(fieldName, el));
-    return el;
-  };
-  const ro = t.isSummary;
-  const name = inp("name", t.name);
-  const kind = h("select", { disabled: ro }, h("option", { value: "task", selected: !t.isMilestone }, "Task"), h("option", { value: "milestone", selected: t.isMilestone }, "Milestone"));
-  kind.addEventListener("change", commit("kind", kind));
-  const status = h("select", { disabled: ro }, ...STATUSES.map(s => h("option", { selected: s === t.ST }, s)));
-  status.addEventListener("change", commit("status", status));
-  const notes = h("textarea", { placeholder: "Notes, links, decisions…" }, t.notes || "");
-  notes.addEventListener("change", commit("notes", notes));
-  dr.append(
-    h("div", { class: "drawer-head" }, h("div", { style: { flex: 1 } }, h("div", { class: "wbs" }, `WBS ${t.wbs}${t.isSummary ? " · summary (rolls up)" : ""}`)), h("button", { class: "icon", title: "Close", onclick: () => toggleDrawer(false) }, "✕")),
-    h("div", { class: "frm" },
-      ...field("Name", name),
-      ...field("Type", kind),
-      ...field("Start", inp("start", fmtYMD(t.S), { type: "date", disabled: ro })),
-      ...field("Finish", inp("finish", fmtYMD(t.F), { type: "date", disabled: ro || t.isMilestone })),
-      ...field("Duration", inp("duration", t.dur == null ? "" : t.dur + "d", { disabled: ro, title: "Working days, e.g. 5, 5d, 2w. 0 makes a milestone" })),
-      ...field("% complete", inp("percent", t.P, { type: "number", min: 0, max: 100, disabled: ro })),
-      ...field("Status", status),
-      ...field("WBS code", inp("code", t.code, { placeholder: "Optional stable code" })),
-      ...field("Notes", notes)));
-
-  // RACI
-  dr.append(h("h4", {}, "RACI"));
-  const rl = h("div", { class: "rowlist" });
-  for (const r of rolesOf(t.id)) {
-    const p = M.parties.get(r.party_id);
-    const sel = h("select", {}, ...ROLES.map(x => h("option", { value: x, selected: x === r.role }, `${x}: ${ROLE_NAMES[x]}`)));
-    sel.addEventListener("change", () => mutate(`Task ${t.wbs}: ${p.name} → ${sel.value}`, () => opSetRole(t.id, p.id, sel.value)));
-    rl.append(h("div", { class: "rowitem" }, h("span", { class: "grow1" }, (p.kind === "team" ? "👥 " : "") + p.name + (p.active ? "" : " (inactive)")), sel,
-      h("button", { class: "x", title: "Remove", onclick: () => mutate(`Task ${t.wbs}: removed ${p.name}`, () => opSetRole(t.id, p.id, null)) }, "✕")));
-  }
-  const acc = accountable(t);
-  if (acc.inherited && acc.list.length) rl.append(h("div", { class: "hint" }, `Accountable inherited from ${acc.from.wbs}: ${acc.list.map(r => partyName(r.party_id)).join(", ")}`));
-  const assigned = new Set(rolesOf(t.id).map(r => r.party_id));
-  const addSel = h("select", {}, h("option", { value: "" }, "＋ Add person or team…"),
-    ...[...M.people, ...M.teams].filter(p => p.active && !assigned.has(p.id)).map(p => h("option", { value: p.id }, (p.kind === "team" ? "👥 " : "") + p.name)));
-  const addRole = h("select", {}, ...ROLES.map(x => h("option", { value: x, selected: x === (rolesOf(t.id, "R").length ? "C" : "R") }, x)));
-  addSel.addEventListener("change", () => { const pid = +addSel.value; if (pid) mutate(`Task ${t.wbs}: ${partyName(pid)} → ${addRole.value}`, () => opSetRole(t.id, pid, addRole.value)); });
-  rl.append(h("div", { class: "rowitem" }, addRole, addSel));
-  dr.append(rl);
-
-  // Dependencies
-  const depRow = (d, other, dirLabel) => {
-    const type = h("select", {}, ...DEP_TYPES.map(k => h("option", { value: k, selected: k === d.type }, k)));
-    const lag = h("input", { type: "number", value: d.lag, title: "Lag in working days (negative = lead)" });
-    const ch = () => mutate(`Link ${d.pred_id}→${d.succ_id}: ${type.value} ${lag.value}d`, () => opUpdateDep(d.id, type.value, +lag.value));
-    type.addEventListener("change", ch); lag.addEventListener("change", ch);
-    return h("div", { class: "rowitem", title: DEP_NAMES[d.type] }, h("span", { class: "grow1" }, `${dirLabel} ${other.wbs} ${other.name}`), d.violated ? h("span", { title: "Dates conflict with this link" }, "⚠") : null, type, lag,
-      h("button", { class: "x", title: "Remove link", onclick: () => mutate("Removed link", () => opRemoveDep(d.id)) }, "✕"));
-  };
-  dr.append(h("h4", {}, "Predecessors"));
-  const pl = h("div", { class: "rowlist" });
-  for (const d of M.depsIn.get(t.id) || []) pl.append(depRow(d, M.tasks.get(d.pred_id), "←"));
-  const addPred = h("select", {}, h("option", { value: "" }, "＋ Add predecessor…"),
-    ...M.order.filter(x => x !== t && !isAncestor(x, t) && !isAncestor(t, x) && !(M.depsIn.get(t.id) || []).some(d => d.pred_id === x.id)).map(x => h("option", { value: x.id }, `${x.wbs} ${x.name}`)));
-  addPred.addEventListener("change", () => { const pid = +addPred.value; if (pid) mutate(`Linked ${M.tasks.get(pid).wbs} → ${t.wbs}`, () => opAddDep(pid, t.id, "FS", 0)); });
-  pl.append(addPred); dr.append(pl);
-  const outs = M.depsOut.get(t.id) || [];
-  if (outs.length) { dr.append(h("h4", {}, "Successors")); const sl = h("div", { class: "rowlist" }); for (const d of outs) sl.append(depRow(d, M.tasks.get(d.succ_id), "→")); dr.append(sl); }
-
-  const myIssues = M.issues.filter(i => i.task === t);
-  if (myIssues.length) { dr.append(h("h4", {}, "Issues")); for (const i of myIssues) dr.append(h("div", { class: "msg " + (i.level === "warn" ? "warn" : "") }, i.text)); }
 }
 
 // ---------- RACI matrix ----------
@@ -2548,7 +2937,7 @@ function showHelp() {
   const rows = [
     ["Insert", "New task below"], ["Ctrl+Insert", "New subtask"], ["Tab / Shift+Tab", "Indent / outdent"], ["Alt+Shift+↑/↓", "Move task up / down"],
     ["Alt+← / Alt+→", "Collapse / expand"], ["Enter or F2", "Edit cell (Enter again to save)"], ["Type", "Start editing the cell"], ["Esc", "Cancel edit"],
-    ["Delete", "Delete task (and subtasks)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+I", "Toggle details panel"], ["Arrows, PgUp/PgDn", "Move around"],
+    ["Delete", "Delete task (and subtasks)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+I", "Open / close the record form"], ["Arrows, PgUp/PgDn", "Move around"],
   ];
   const body = h("div", { class: "modal-b" },
     h("h3", { style: { marginTop: 0 } }, "Keyboard (outline grid)"),
@@ -2557,7 +2946,9 @@ function showHelp() {
     h("ul", {}, h("li", {}, "Drag a bar to move it; drag its left or right edge to change dates."),
       h("li", {}, "Hover a bar to see link handles (○). Drag from a handle onto another bar: the end you start from and the half of the target you drop on decide the type (Finish→Start, Start→Start, …)."),
       h("li", {}, "Click an arrow to change its type and lag, or delete it. Red arrows mean the dates conflict with the link; dates are never moved automatically."),
-      h("li", {}, "Double-click a bar to open its details.")),
+      h("li", {}, "Double-click a bar, or click ↗ next to a task name, to open its record form.")),
+    h("h3", {}, "Record form"),
+    h("p", {}, "Shows every field of a task, a mini Gantt of a summary task's subtasks, its work notes (dated, editable) and related records in tabs. The outline stays on the left: click another task to switch records. ", h("kbd", {}, "Ctrl+Enter"), " posts a note."),
     h("h3", {}, "Predecessors cell"),
     h("p", {}, "Type WBS numbers separated by commas, with an optional type and lag: ", h("kbd", {}, "1.2"), " ", h("kbd", {}, "3FS+2d"), " ", h("kbd", {}, "2.1SS-1d"), " ", h("kbd", {}, "4FF+1w")),
     h("h3", {}, "Saving"),
@@ -3114,6 +3505,12 @@ function exportWorkbook() {
   XLSX.utils.book_append_sheet(wb, ws, "Tasks");
   const pws = XLSX.utils.aoa_to_sheet(people); pws["!cols"] = [24, 8, 26, 20, 7, 40].map(w => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, pws, "People");
+  // Work notes travel as a read-only sheet; import ignores it (DECISIONS #42).
+  const notes = [["Task ID", "WBS", "Task", "Author", "Created", "Edited", "Note"]];
+  const localTs = iso => { if (!iso) return ""; const d = new Date(iso); return isNaN(d) ? iso : `${fmtYMD(Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY))} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  for (const t of M.order) for (const n of notesFor(t.id).reverse()) notes.push([t.id, t.wbs, t.name, n.author, localTs(n.created_at), localTs(n.updated_at), n.body]);
+  const nws = XLSX.utils.aoa_to_sheet(notes); nws["!cols"] = [7, 8, 32, 18, 16, 16, 80].map(w => ({ wch: w }));
+  XLSX.utils.book_append_sheet(wb, nws, "Notes");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(meta), "_meta");
   return wb;
 }
@@ -3199,7 +3596,7 @@ function renderPersonFilter() {
 }
 function renderAll() {
   renderProjectMenu(); updateIssueBadge(); renderSaveState(); renderPersonFilter();
-  if (UI.view === "plan") { renderGrid(); renderGantt(); renderDrawer(); }
+  if (UI.view === "plan") { renderGrid(); if (!UI.form) renderGantt(); renderForm(); }
   else if (UI.view === "raci") renderRaci();
   else if (UI.view === "people") renderPeople();
   else if (UI.view === "issues") renderIssues();
@@ -3227,7 +3624,7 @@ function initToolbar() {
   $("levelSel").onchange = e => { if (e.target.value) showLevel(e.target.value); e.target.value = ""; };
   $("searchBox").addEventListener("input", e => { UI.search = e.target.value; computeRows(); renderGrid(); renderGantt(); });
   $("personFilter").addEventListener("change", e => { UI.person = e.target.value; computeRows(); renderGrid(); renderGantt(); });
-  $("detailsBtn").onclick = () => toggleDrawer();
+  $("detailsBtn").onclick = () => toggleForm();
   $$("#grainSeg button").forEach(b => b.addEventListener("click", () => setGrain(b.dataset.grain)));
   $("todayBtn").onclick = () => scrollGanttTo(todayNum(), 0.3);
   $("undoBtn").onclick = undo; $("redoBtn").onclick = redo;
@@ -3245,8 +3642,12 @@ function initToolbar() {
   $("addTeamBtn").onclick = () => editParty(null, "team");
   $$("#issueSeg button").forEach(b => b.addEventListener("click", () => { issueFilter = b.dataset.f; $$("#issueSeg button").forEach(x => x.classList.toggle("on", x === b)); renderIssues(); }));
   $("modalBack").addEventListener("pointerdown", e => { if (e.target === $("modalBack")) closeModal(); });
-  // Committing a drawer field blurs it first, so the re-render after the change isn't skipped.
-  $("drawer").addEventListener("change", e => { if (e.target.matches("input:not([type=date]),select,textarea")) e.target.blur(); }, true);
+  // Committing a form field blurs it first, so the re-render after the change isn't skipped.
+  $("formPane").addEventListener("pointerdown", e => {
+    const ae = document.activeElement;
+    if (ae?._commit && $("formPane").contains(ae) && !ae.contains(e.target)) { holdFormRender(); ae._commit(); }
+  }, true);
+  $("formPane").addEventListener("change", e => { if (e.target.closest(".f-fields") && e.target.matches("input:not([type=date]),select,textarea")) e.target.blur(); }, true);
 
   // splitter
   const sp = $("splitter"), pane = $("gridPane");
@@ -3255,10 +3656,10 @@ function initToolbar() {
     sp.setPointerCapture(e.pointerId); sp.classList.add("drag");
     const x0 = e.clientX, w0 = pane.offsetWidth;
     const mv = ev => { pane.style.width = clamp(w0 + ev.clientX - x0, 240, innerWidth - 160) + "px"; };
-    const up = () => { sp.classList.remove("drag"); sp.removeEventListener("pointermove", mv); sp.removeEventListener("pointerup", up); lsSet("pm.split", pane.offsetWidth); renderGridRows(); renderGantt(); };
+    const up = () => { sp.classList.remove("drag"); sp.removeEventListener("pointermove", mv); sp.removeEventListener("pointerup", up); lsSet("pm.split", pane.offsetWidth); renderGridRows(); if (UI.form) relayoutForm(); else renderGantt(); };
     sp.addEventListener("pointermove", mv); sp.addEventListener("pointerup", up);
   });
-  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "plan") { renderGridRows(); renderGantt(); } }, 120); });
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "plan") { renderGridRows(); if (UI.form) relayoutForm(); else renderGantt(); } }, 120); });
 
   document.addEventListener("keydown", e => {
     const ctrl = e.ctrlKey || e.metaKey;
@@ -3267,12 +3668,13 @@ function initToolbar() {
     if (modalOpen() || typing) return;
     if (ctrl && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
     else if (ctrl && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { e.preventDefault(); redo(); }
-    else if (ctrl && e.key.toLowerCase() === "i" && UI.view === "plan") { e.preventDefault(); toggleDrawer(); }
+    else if (ctrl && e.key.toLowerCase() === "i" && UI.view === "plan") { e.preventDefault(); toggleForm(); }
   });
 }
 
 hooks.onChange = onDataChanged;
 hooks.onSaveState = () => { if (ready) renderSaveState(); };
+hooks.onReplace = () => { UI.noteDrafts.clear(); UI.editNote = null; }; // ids from another file mean nothing here
 setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
 
 (async () => {
@@ -3295,8 +3697,8 @@ setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
   } catch { }
   if (!fsSupported) toast("This browser can't save to files. Use Chrome or Edge for live saving; Excel export still works.", "err");
   window.PM = {
-    M, UI, q, run, one, scalar, mutate, undo, redo, flushSaves, refresh, renderAll, selectTask, switchView, switchProject,
-    op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject },
+    M, UI, q, run, one, scalar, mutate, undo, redo, flushSaves, refresh, renderAll, selectTask, switchView, switchProject, openRecord, toggleForm, renderForm, notesFor,
+    op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote },
     util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum },
     io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, autoMap, get W() { return W; } },
     db: { installDb, exportBytes, migrate, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; } },
