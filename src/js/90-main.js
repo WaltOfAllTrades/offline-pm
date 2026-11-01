@@ -14,20 +14,57 @@ function renderPersonFilter() {
   if (M.teams.length) sel.append(h("optgroup", { label: "Teams" }, ...M.teams.map(p => h("option", { value: "p:" + p.id, selected: cur === "p:" + p.id }, "👥 " + p.name))));
   if (cur && !M.parties.has(+cur.slice(2))) UI.person = "";
 }
-function renderAll() {
-  renderProjectMenu(); updateIssueBadge(); renderSaveState(); renderPersonFilter();
-  if (UI.view === "plan") { renderGrid(); renderGantt(); renderDrawer(); }
-  else if (UI.view === "raci") renderRaci();
-  else if (UI.view === "people") renderPeople();
-  else if (UI.view === "issues") renderIssues();
+// ---------- Redraws ----------
+// The one place that decides what gets drawn (DECISIONS #75). Code names what went stale with redraw(...parts), and
+// whatever the current view shows of it is drawn once, in a fixed order, in a microtask straight after the code that
+// asked: several requests from one event draw once, and it still runs in a background tab. Code that reads the new
+// DOM right away calls drawNow(). The render* functions are the drawing itself; only drawNow() calls them.
+//   all            everything: header bits and the whole current view (after any data change)
+//   rows           the outline's rows changed (filter, collapse): grid and Gantt in full
+//   gridRows, ganttRows   repaint the visible rows (selection, scrolling)      gantt   rescale the Gantt
+//   form, formForce       the record panel; formForce rebuilds it even while one of its fields has focus
+//   risks, planList, raci, raciRows (scrolling the matrix), issues, save
+const stale = new Set(); let drawQueued = false;
+function redraw(...parts) {
+  for (const p of parts) stale.add(p);
+  if (!drawQueued) { drawQueued = true; queueMicrotask(() => { if (!tabbing) drawNow(); }); }
 }
-function onDataChanged() { if (!ready) return; refresh(); computeRows(); renderAll(); }
+// Tab saves the field it leaves (change, blur) before focus reaches the next one. Rebuilding then would remove the
+// element focus is headed for, so queued redraws wait until it has landed, and refocus() keeps it there.
+let tabbing = false;
+document.addEventListener("keydown", e => { if (e.key === "Tab" && !tabbing) { tabbing = true; setTimeout(() => { tabbing = false; if (drawQueued) drawNow(); }, 0); } }, true);
+function drawNow() {
+  drawQueued = false;
+  if (!ready || !stale.size) return; // before startup finishes, requests wait for its redraw("all")
+  const s = new Set(stale); stale.clear();
+  const all = s.has("all"), v = UI.view, any = p => all || s.has(p);
+  if (all) { renderProjectMenu(); updateIssueBadge(); updateRiskBadge(); renderPersonFilter(); }
+  if (any("save")) renderSaveState();
+  if (v === "plan") {
+    if (any("rows")) { renderGrid(); renderGantt(); }
+    else {
+      if (s.has("gridRows")) renderGridRows();
+      if (s.has("gantt")) renderGantt(); else if (s.has("ganttRows")) renderGanttRows();
+    }
+  }
+  if (v === "risks") { if (any("risks")) renderRisks(); else if (s.has("planList")) renderPlanList(); }
+  const view = $("view-" + v), mark = (v === "raci" || v === "people" || v === "issues") && !$("formPane").contains(document.activeElement) ? markFocus(view) : null;
+  if (v === "raci") { if (any("raci")) renderRaci(); else if (s.has("raciRows")) renderRaciRows(); }
+  if (v === "people" && all) renderPeople();
+  if (v === "issues" && any("issues")) renderIssues();
+  if (mark && !view.contains(document.activeElement)) refocus(view, mark);
+  // The record panel last, beside the plan or the RACI matrix; asked for elsewhere, it just closes.
+  if (s.has("formForce")) renderForm(true);
+  else if (s.has("form") || (all && (v === "plan" || v === "raci"))) renderForm();
+}
+function onDataChanged() { if (!ready) return; refresh(); if (UI.collapsedFor !== collapsedKey()) loadCollapsed(); computeRows(); redraw("all"); } // another file or project: its own collapse state
 
 function switchView(v) {
   UI.view = v; closePop();
+  if (v !== "plan" && v !== "raci") { const fp = $("formPane"); fp.classList.remove("open"); }
   $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.view === v));
-  for (const s of ["plan", "raci", "people", "issues"]) $("view-" + s).hidden = s !== v;
-  renderAll();
+  for (const s of ["plan", "risks", "raci", "people", "issues"]) $("view-" + s).hidden = s !== v;
+  redraw("all"); drawNow(); // a view that was hidden has stale sizes and contents
   if (v === "plan") $("gridBody").focus();
 }
 
@@ -42,13 +79,14 @@ function initToolbar() {
   $("downBtn").onclick = () => cmdStructure("down");
   $("delBtn").onclick = cmdDelete;
   $("levelSel").onchange = e => { if (e.target.value) showLevel(e.target.value); e.target.value = ""; };
-  $("searchBox").addEventListener("input", e => { UI.search = e.target.value; computeRows(); renderGrid(); renderGantt(); });
-  $("personFilter").addEventListener("change", e => { UI.person = e.target.value; computeRows(); renderGrid(); renderGantt(); });
-  $("detailsBtn").onclick = () => toggleDrawer();
+  let searchTimer; // re-filter after a short pause, not on every keystroke
+  $("searchBox").addEventListener("input", e => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { UI.search = e.target.value; computeRows(); redraw("rows"); }, 150); });
+  $("personFilter").addEventListener("change", e => { UI.person = e.target.value; computeRows(); redraw("rows"); });
+  $("detailsBtn").onclick = () => toggleForm();
   $$("#grainSeg button").forEach(b => b.addEventListener("click", () => setGrain(b.dataset.grain)));
   $("todayBtn").onclick = () => scrollGanttTo(todayNum(), 0.3);
   $("undoBtn").onclick = undo; $("redoBtn").onclick = redo;
-  $("savePill").onclick = () => { $("logPanel").hidden = !$("logPanel").hidden; renderSaveState(); };
+  $("savePill").onclick = () => { $("logPanel").hidden = !$("logPanel").hidden; redraw("save"); };
   $("logClose").onclick = () => $("logPanel").hidden = true;
   $("slowMo").onchange = e => slowSaves = e.target.checked;
   $("projBtn").onclick = () => { const m = $("projMenu"); const open = m.hidden; $$(".menu").forEach(x => x.hidden = true); m.hidden = !open; };
@@ -56,69 +94,86 @@ function initToolbar() {
   $("fileMenu").addEventListener("click", e => {
     const act = e.target.closest("button")?.dataset.act; if (!act) return;
     $("fileMenu").hidden = true;
-    ({ new: newPlanFile, open: openPlanFile, copy: saveCopy, reconnect, import: startImport, xlsx: exportXlsx, csv: exportCsv, print: () => { if (UI.view !== "plan") switchView("plan"); printPlan(); }, help: showHelp })[act]?.();
+    ({ new: newPlanFile, open: openPlanFile, copy: saveCopy, reconnect, import: startImport, riskImport: startRiskImport, xlsx: exportXlsx, csv: exportCsv, print: () => { if (UI.view !== "plan") switchView("plan"); printPlan(); }, help: showHelp, backups: showBackups })[act]?.();
   });
   $("addPersonBtn").onclick = () => editParty(null, "person");
   $("addTeamBtn").onclick = () => editParty(null, "team");
-  $$("#issueSeg button").forEach(b => b.addEventListener("click", () => { issueFilter = b.dataset.f; $$("#issueSeg button").forEach(x => x.classList.toggle("on", x === b)); renderIssues(); }));
+  $$("#issueSeg button").forEach(b => b.addEventListener("click", () => { issueFilter = b.dataset.f; $$("#issueSeg button").forEach(x => x.classList.toggle("on", x === b)); redraw("issues"); }));
   $("modalBack").addEventListener("pointerdown", e => { if (e.target === $("modalBack")) closeModal(); });
-  // Committing a drawer field blurs it first, so the re-render after the change isn't skipped.
-  $("drawer").addEventListener("change", e => { if (e.target.matches("input:not([type=date]),select,textarea")) e.target.blur(); }, true);
+  // Committing a form field blurs it first, so the re-render after the change isn't skipped.
+  $("formPane").addEventListener("pointerdown", e => {
+    const ae = document.activeElement;
+    if (ae?._commit && $("formPane").contains(ae) && !ae.contains(e.target)) { holdFormRender(); ae._commit(); }
+  }, true);
 
   // splitter
   const sp = $("splitter"), pane = $("gridPane");
-  pane.style.width = lsGet("pm.split", 760) + "px";
+  pane.style.width = gridFullWidth() + "px";
   sp.addEventListener("pointerdown", e => {
     sp.setPointerCapture(e.pointerId); sp.classList.add("drag");
     const x0 = e.clientX, w0 = pane.offsetWidth;
     const mv = ev => { pane.style.width = clamp(w0 + ev.clientX - x0, 240, innerWidth - 160) + "px"; };
-    const up = () => { sp.classList.remove("drag"); sp.removeEventListener("pointermove", mv); sp.removeEventListener("pointerup", up); lsSet("pm.split", pane.offsetWidth); renderGridRows(); renderGantt(); };
+    const up = () => { sp.classList.remove("drag"); sp.removeEventListener("pointermove", mv); sp.removeEventListener("pointerup", up); lsSet("pm.split", pane.offsetWidth + (UI.form ? formWidth() : 0)); redraw("gridRows", "gantt"); if (UI.form) relayoutForm(); };
     sp.addEventListener("pointermove", mv); sp.addEventListener("pointerup", up);
   });
-  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "plan") { renderGridRows(); renderGantt(); } }, 120); });
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "risks") { if (UI.riskForm) sizeRiskForm(); $$("#riskBody textarea").forEach(autoGrow); } if (UI.view === "plan") { if (UI.form) relayoutForm(); else if (lsGet("pm.split", null) == null) pane.style.width = gridFullWidth() + "px"; redraw("gridRows", "gantt"); } }, 120); });
 
   document.addEventListener("keydown", e => {
     const ctrl = e.ctrlKey || e.metaKey;
     const typing = e.target.matches("input,textarea,select") && !e.target.matches("[type=checkbox]");
-    if (e.key === "Escape") { if (!$("pop").hidden) { closePop(); return; } if (modalOpen()) { closeModal(); return; } $("logPanel").hidden = true; }
+    if (e.key === "Escape") { if (!$("pop").hidden) { closePop(); return; } if (modalOpen()) { closeModal(); return; } $("logPanel").hidden = true; if (!typing && !modalOpen()) { if (UI.view === "risks" && UI.riskForm) { closeRiskForm(); return; } if (UI.form && (UI.view === "plan" || UI.view === "raci")) { toggleForm(false); return; } } }
     if (modalOpen() || typing) return;
     if (ctrl && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
     else if (ctrl && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { e.preventDefault(); redo(); }
-    else if (ctrl && e.key.toLowerCase() === "i" && UI.view === "plan") { e.preventDefault(); toggleDrawer(); }
+    else if (ctrl && e.key.toLowerCase() === "i" && (UI.view === "plan" || UI.view === "raci")) { e.preventDefault(); toggleForm(); }
   });
 }
 
 hooks.onChange = onDataChanged;
-hooks.onSaveState = () => { if (ready) renderSaveState(); };
-setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
+hooks.onSaveState = () => redraw("save");
+hooks.onReadOnly = () => { $("roText").textContent = readOnlyWhy; $("roBanner").hidden = false; };
+hooks.onReplace = () => { UI.selId = null; UI.noteDrafts.clear(); UI.editNote = null; UI.riskSel = null; UI.riskForm = false; UI.riskFocus = null; }; // ids from another file mean nothing here
+setInterval(() => { if (fileHandle) redraw("save"); }, 15000); // "saved 2 min ago" ages
 
 (async () => {
-  initToolbar(); initGrid(); initGantt(); initRaci();
+  initToolbar(); initGrid(); initGantt(); initRaci(); initRisks();
+  $("roTake").onclick = takeOverEditing;
   try {
+    // Before anything is read or written: only one tab may write the buffer and the file.
+    if (!(await acquireWriterLock())) setReadOnly("Offline PM is open in another tab, so this tab is read-only. Edit in the other tab, or take over here.");
     const fresh = await bootDb(WASM_B64);
     loadModel();
-    if (fresh && !fileHandle && !scalar("SELECT COUNT(*) FROM task")) { mutate("Created sample plan", seedSample); undoStack.length = 0; }
+    if (fresh && !readOnly && !fileHandle && !scalar("SELECT COUNT(*) FROM task")) { mutate("Created sample plan", seedSample); undoStack.length = 0; }
   } catch (e) { toast("Startup failed: " + e.message, "err"); console.error(e); return; }
   UI.grain = lsGet("pm.grain", "week");
   $$("#grainSeg button").forEach(b => b.classList.toggle("on", b.dataset.grain === UI.grain));
   ready = true;
-  refresh(); loadCollapsed(); computeRows(); renderAll();
+  refresh(); loadCollapsed(); computeRows(); redraw("all"); drawNow();
   const r = projectRange(); scrollGanttTo(r.lo, 0.05);
-  // Warn when the app is open in two tabs: both would save whole-database copies over each other.
-  try {
+  // Browsers without Web Locks can't make a second tab read-only, so at least warn.
+  if (!navigator.locks) try {
     const bc = new BroadcastChannel("offline-pm"); let warned = false;
     bc.onmessage = e => { if (e.data === "hello") bc.postMessage("here"); if (!warned) { warned = true; toast("Offline PM is open in another tab. Edit in one tab only, or changes may overwrite each other.", "err"); } };
     bc.postMessage("hello");
   } catch { }
   if (!fsSupported) toast("This browser can't save to files. Use Chrome or Edge for live saving; Excel export still works.", "err");
+  const drawn = fn => (...a) => { try { return fn(...a); } finally { drawNow(); } }; // console/test calls see the result drawn
   window.PM = {
-    M, UI, q, run, one, scalar, mutate, undo, redo, flushSaves, refresh, renderAll, selectTask, switchView, switchProject,
-    op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject },
-    util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum },
-    io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, autoMap, get W() { return W; } },
-    db: { installDb, exportBytes, migrate, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; } },
-    gantt: { buildScale, get SC() { return SC; }, setGrain }, cmd: { cmdAdd, cmdStructure, cmdDelete, startEdit, commitEdit, gridKey, toggleCollapse, showLevel, startImport, printPlan },
-    reset() { installDb(null); M.projectId = null; UI.selId = null; refresh(); loadCollapsed(); computeRows(); renderAll(); },
+    M, UI, q, run, one, scalar, undo: drawn(undo), redo: drawn(redo), flushSaves, refresh, redraw, drawNow, notesFor,
+    mutate: drawn(mutate), selectTask: drawn(selectTask), switchView: drawn(switchView), switchProject: drawn(switchProject), openRecord: drawn(openRecord), toggleForm: drawn(toggleForm),
+    renderAll: drawn(() => redraw("all")), renderForm: drawn(force => redraw(force ? "formForce" : "form")),
+    op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote, opSetRIsA,
+      opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote },
+    risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport: drawn(loadRiskImport), riskImportItems, doRiskImport: drawn(doRiskImport), openRiskRecord: drawn(openRiskRecord), closeRiskForm: drawn(closeRiskForm), renderRisks: drawn(() => redraw("risks")), get RI() { return RI; }, recNotes, toLMH },
+    util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml, markFocus, refocus },
+    io: { loadImportFile, buildPlan, doImport: drawn(doImport), collectPeople, exportWorkbook, csvText, autoMap, riskPreviewText, get W() { return W; } },
+    db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get historyBytes() { return historyBytes(); }, set undoBudget(n) { undoBudget = n; trimUndo(); }, get undoBudget() { return undoBudget; }, get mirrorRev() { return mirrorRev; },
+      get diskRev() { return diskRev; }, get readOnly() { return readOnly; }, get fileId() { return readFileId(db); },
+      // test aid: attach a stand-in file handle without a picker
+      attach(h, base = null) { fileHandle = h; filePerm = !!h; diskRev = base; }, endReadOnly() { readOnly = false; readOnlyWhy = ""; $("roBanner").hidden = true; } },
+    gantt: { buildScale, get SC() { return SC; }, setGrain },
+    cmd: Object.fromEntries(Object.entries({ cmdAdd, cmdStructure, cmdDelete, startEdit, commitEdit, gridKey, toggleCollapse, showLevel, startImport, printPlan }).map(([k, f]) => [k, drawn(f)])),
+    reset: drawn(() => { installDb(null); M.projectId = null; UI.selId = null; refresh(); loadCollapsed(); computeRows(); redraw("all"); }),
     get XLSX() { return XLSX; }, get SQL() { return SQL; },
   };
 })();

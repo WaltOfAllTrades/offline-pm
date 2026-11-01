@@ -1,8 +1,10 @@
 // ---------- Popover + modal helpers ----------
 // onClose runs when the popover is dismissed by clicking elsewhere (it's how pickers save); Escape cancels.
 let popOnClose = null;
+let popReturn = null, modalReturn = null; // where focus goes back to when they close
 function openPop(x, y, content, onClose = null) {
   closePop();
+  popReturn = document.activeElement;
   const pop = $("pop"); pop.innerHTML = ""; pop.append(content); pop.hidden = false; popOnClose = onClose;
   const r = pop.getBoundingClientRect();
   pop.style.left = clamp(x, 8, innerWidth - r.width - 8) + "px";
@@ -11,8 +13,10 @@ function openPop(x, y, content, onClose = null) {
 }
 function closePop(commit = false) {
   const pop = $("pop"), cb = popOnClose; popOnClose = null;
+  const hadFocus = pop.contains(document.activeElement);
   if (!pop.hidden) { pop.hidden = true; pop.innerHTML = ""; }
   if (commit && cb) cb();
+  if (hadFocus || document.activeElement === document.body) restoreFocus(popReturn); popReturn = null;
 }
 document.addEventListener("pointerdown", e => {
   if (!$("pop").hidden && !e.target.closest("#pop")) closePop(true);
@@ -22,23 +26,48 @@ document.addEventListener("pointerdown", e => {
 
 function openModal(title, body, footer, cls = "") {
   const m = $("modal"); m.className = "modal " + cls; m.innerHTML = "";
-  m.append(h("div", { class: "modal-h" }, h("h2", {}, title), h("button", { class: "icon", title: "Close", onclick: closeModal }, "✕")), body);
+  if ($("modalBack").hidden) modalReturn = document.activeElement;
+  m.append(h("div", { class: "modal-h" }, h("h2", { id: "modalTitle" }, title), h("button", { class: "icon", title: "Close", "aria-label": "Close", onclick: closeModal }, "✕")), body);
   if (footer) m.append(footer);
   $("modalBack").hidden = false;
+  (body.querySelector?.("input,select,textarea,button") || m).focus();
 }
-function closeModal() { $("modalBack").hidden = true; $("modal").innerHTML = ""; }
+function closeModal() { $("modalBack").hidden = true; $("modal").innerHTML = ""; restoreFocus(modalReturn); modalReturn = null; }
+// Back to the element that had focus, or to the outline when it's gone (keyboard shortcuts live there).
+function restoreFocus(el) {
+  if (el && el.isConnected && el !== document.body && !el.closest("[hidden]")) el.focus({ preventScroll: true });
+  else if (UI.view === "plan") $("gridBody").focus({ preventScroll: true });
+}
+// Tab stays inside an open dialog.
+document.addEventListener("keydown", e => {
+  if (e.key !== "Tab" || !modalOpen()) return;
+  const items = $$("#modal input:not([disabled]),#modal select:not([disabled]),#modal textarea:not([disabled]),#modal button:not([disabled]),#modal a[href]").filter(x => x.offsetParent);
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (e.shiftKey && (document.activeElement === first || !$("modal").contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
 const modalOpen = () => !$("modalBack").hidden;
 
-const avatarColor = p => { let hsh = 0; for (const c of p.name) hsh = (hsh * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${hsh % 360} 55% 48%)`; };
+// Dark enough for white initials to pass WCAG AA (4.5:1) at every hue, yellow included.
+const avatarColor = p => { let hsh = 0; for (const c of p.name) hsh = (hsh * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${hsh % 360} 55% 30%)`; };
 const initials = n => n.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("");
 
-// ---------- Party picker (R/A cells, drawer) ----------
+// ---------- Party picker (R/A cells, record form) ----------
 function openPartyPicker(rect, taskId, role) {
   const t = M.tasks.get(taskId); if (!t) return;
-  const current = new Set(rolesOf(taskId, role).map(r => r.party_id));
-  const others = new Map(rolesOf(taskId).filter(r => r.role !== role).map(r => [r.party_id, r.role]));
+  openPartyPickerFor(rect, {
+    title: `${ROLE_NAMES[role]}: ${t.wbs} ${t.name}`, role,
+    current: rolesOf(taskId, role).map(r => r.party_id),
+    others: new Map(rolesOf(taskId).filter(r => r.role !== role).map(r => [r.party_id, r.role])),
+    save: ids => mutate(`Task ${t.wbs}: ${ROLE_NAMES[role]} → ${ids.map(partyName).join(", ") || "none"}`, () => opSetRoleParties(taskId, role, ids)),
+  });
+}
+// Generic picker: { title, role, current: [ids], others: Map(id → role), save(ids), onDone? }.
+function openPartyPickerFor(rect, o) {
+  const current = new Set(o.current);
   const box = h("div");
-  box.append(h("h4", {}, `${ROLE_NAMES[role]}: ${t.wbs} ${t.name}`));
+  box.append(h("h4", {}, o.title));
   const search = h("input", { type: "search", placeholder: "Search people & teams…", style: { width: "100%" } });
   const list = h("div", { class: "pick" });
   const all = [...M.people, ...M.teams].filter(p => p.active || current.has(p.id));
@@ -48,7 +77,7 @@ function openPartyPicker(rect, taskId, role) {
       if (s && !p.name.toLowerCase().includes(s) && !p.email.toLowerCase().includes(s)) continue;
       const cb = h("input", { type: "checkbox", checked: current.has(p.id) });
       cb.addEventListener("change", () => { cb.checked ? current.add(p.id) : current.delete(p.id); });
-      list.append(h("label", {}, cb, (p.kind === "team" ? "👥 " : "") + p.name, others.has(p.id) ? h("span", { class: "sub" }, `now ${others.get(p.id)}`) : p.kind === "team" ? h("span", { class: "sub" }, "team") : null));
+      list.append(h("label", {}, cb, (p.kind === "team" ? "👥 " : "") + p.name, o.others.has(p.id) ? h("span", { class: "sub" }, `now ${o.others.get(p.id)}`) : p.kind === "team" ? h("span", { class: "sub" }, "team") : null));
     }
     if (!list.children.length) list.append(h("div", { class: "hint", style: { padding: "6px" } }, all.length ? "No match." : "No people yet."));
   };
@@ -58,18 +87,18 @@ function openPartyPicker(rect, taskId, role) {
     let pid; if (mutate(`Added ${kind} ${name}`, () => { pid = opAddParty(kind, name); })) { current.add(pid); const p = M.parties.get(pid); if (p) all.push(p); search.value = ""; draw(); }
   };
   draw();
+  const done = () => { if (o.onDone) o.onDone(); else $("gridBody").focus(); };
   const save = () => {
     closePop(false);
     const ids = [...current];
-    const before = rolesOf(taskId, role).map(r => r.party_id).sort().join();
-    if (before !== ids.slice().sort().join()) mutate(`Task ${t.wbs}: ${ROLE_NAMES[role]} → ${ids.map(partyName).join(", ") || "none"}`, () => opSetRoleParties(taskId, role, ids));
-    $("gridBody").focus();
+    if (o.current.slice().sort().join() !== ids.slice().sort().join()) o.save(ids);
+    done();
   };
-  search.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); save(); } if (e.key === "Escape") { closePop(); $("gridBody").focus(); } });
+  search.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); save(); } if (e.key === "Escape") { closePop(); done(); } });
   box.append(search, list, h("div", { class: "acts" },
     h("button", { onclick: () => addNew("person") }, "＋ Person"), h("button", { onclick: () => addNew("team") }, "＋ Team"),
     h("span", { class: "spacer" }), h("button", { class: "primary", onclick: save }, "Done")));
-  if (role === "A" && current.size > 1) box.prepend(h("div", { class: "msg warn" }, "RACI expects exactly one Accountable."));
+  if (o.role === "A" && current.size > 1) box.prepend(h("div", { class: "msg warn" }, "RACI expects exactly one Accountable."));
   openPop(rect.left, rect.bottom + 4, box, save);
 }
 
@@ -90,141 +119,135 @@ function openDepEditor(depId, x, y) {
   openPop(x + 8, y + 8, box);
 }
 
-// ---------- Task details drawer ----------
-function toggleDrawer(force) {
-  UI.drawer = force ?? !UI.drawer; $("detailsBtn").classList.toggle("primary", UI.drawer);
-  renderDrawer();
-}
-let drawerBusy = false;
-function renderDrawer() {
-  if (drawerBusy) return;
-  const dr = $("drawer");
-  if (!UI.drawer || UI.view !== "plan") { dr.hidden = true; return; }
-  dr.hidden = false;
-  const ae = document.activeElement;
-  if (dr.contains(ae) && ae.matches("input,textarea,select")) {
-    if (dr.dataset.task === String(UI.selId)) return; // don't clobber typing in the same task
-    drawerBusy = true; try { ae.blur(); } finally { drawerBusy = false; } // switching task: commit pending edit first
-  }
-  const t = selTask();
-  dr.dataset.task = t?.id ?? "";
-  dr.innerHTML = "";
-  if (!t) { dr.append(h("div", { class: "drawer-head" }, h("h3", { style: { flex: 1 } }, "Details"), h("button", { class: "icon", onclick: () => toggleDrawer(false) }, "✕")), h("p", { class: "hint" }, "Select a task to see and edit its details.")); return; }
-  const field = (label, el) => [h("label", {}, label), el];
-  const commit = (fieldName, el) => () => { const v = el.value; mutate(`Task ${t.wbs}: ${fieldName} → “${v}”`, () => opSetField(t.id, fieldName, v)); };
-  const inp = (fieldName, value, attrs = {}) => {
-    const el = h("input", { value: value ?? "", ...attrs });
-    if (attrs.type === "date") { // date inputs fire change per keystroke; commit on blur/Enter instead
-      const orig = el.value;
-      el.addEventListener("blur", () => { if (el.value !== orig && el.value) commit(fieldName, el)(); });
-      el.addEventListener("keydown", e => { if (e.key === "Enter") el.blur(); });
-    } else el.addEventListener("change", commit(fieldName, el));
-    return el;
-  };
-  const ro = t.isSummary;
-  const name = inp("name", t.name);
-  const kind = h("select", { disabled: ro }, h("option", { value: "task", selected: !t.isMilestone }, "Task"), h("option", { value: "milestone", selected: t.isMilestone }, "Milestone"));
-  kind.addEventListener("change", commit("kind", kind));
-  const status = h("select", { disabled: ro }, ...STATUSES.map(s => h("option", { selected: s === t.ST }, s)));
-  status.addEventListener("change", commit("status", status));
-  const notes = h("textarea", { placeholder: "Notes, links, decisions…" }, t.notes || "");
-  notes.addEventListener("change", commit("notes", notes));
-  dr.append(
-    h("div", { class: "drawer-head" }, h("div", { style: { flex: 1 } }, h("div", { class: "wbs" }, `WBS ${t.wbs}${t.isSummary ? " · summary (rolls up)" : ""}`)), h("button", { class: "icon", title: "Close", onclick: () => toggleDrawer(false) }, "✕")),
-    h("div", { class: "frm" },
-      ...field("Name", name),
-      ...field("Type", kind),
-      ...field("Start", inp("start", fmtYMD(t.S), { type: "date", disabled: ro })),
-      ...field("Finish", inp("finish", fmtYMD(t.F), { type: "date", disabled: ro || t.isMilestone })),
-      ...field("Duration", inp("duration", t.dur == null ? "" : t.dur + "d", { disabled: ro, title: "Working days, e.g. 5, 5d, 2w. 0 makes a milestone" })),
-      ...field("% complete", inp("percent", t.P, { type: "number", min: 0, max: 100, disabled: ro })),
-      ...field("Status", status),
-      ...field("WBS code", inp("code", t.code, { placeholder: "Optional stable code" })),
-      ...field("Notes", notes)));
-
-  // RACI
-  dr.append(h("h4", {}, "RACI"));
-  const rl = h("div", { class: "rowlist" });
-  for (const r of rolesOf(t.id)) {
-    const p = M.parties.get(r.party_id);
-    const sel = h("select", {}, ...ROLES.map(x => h("option", { value: x, selected: x === r.role }, `${x}: ${ROLE_NAMES[x]}`)));
-    sel.addEventListener("change", () => mutate(`Task ${t.wbs}: ${p.name} → ${sel.value}`, () => opSetRole(t.id, p.id, sel.value)));
-    rl.append(h("div", { class: "rowitem" }, h("span", { class: "grow1" }, (p.kind === "team" ? "👥 " : "") + p.name + (p.active ? "" : " (inactive)")), sel,
-      h("button", { class: "x", title: "Remove", onclick: () => mutate(`Task ${t.wbs}: removed ${p.name}`, () => opSetRole(t.id, p.id, null)) }, "✕")));
-  }
-  const acc = accountable(t);
-  if (acc.inherited && acc.list.length) rl.append(h("div", { class: "hint" }, `Accountable inherited from ${acc.from.wbs}: ${acc.list.map(r => partyName(r.party_id)).join(", ")}`));
-  const assigned = new Set(rolesOf(t.id).map(r => r.party_id));
-  const addSel = h("select", {}, h("option", { value: "" }, "＋ Add person or team…"),
-    ...[...M.people, ...M.teams].filter(p => p.active && !assigned.has(p.id)).map(p => h("option", { value: p.id }, (p.kind === "team" ? "👥 " : "") + p.name)));
-  const addRole = h("select", {}, ...ROLES.map(x => h("option", { value: x, selected: x === (rolesOf(t.id, "R").length ? "C" : "R") }, x)));
-  addSel.addEventListener("change", () => { const pid = +addSel.value; if (pid) mutate(`Task ${t.wbs}: ${partyName(pid)} → ${addRole.value}`, () => opSetRole(t.id, pid, addRole.value)); });
-  rl.append(h("div", { class: "rowitem" }, addRole, addSel));
-  dr.append(rl);
-
-  // Dependencies
-  const depRow = (d, other, dirLabel) => {
-    const type = h("select", {}, ...DEP_TYPES.map(k => h("option", { value: k, selected: k === d.type }, k)));
-    const lag = h("input", { type: "number", value: d.lag, title: "Lag in working days (negative = lead)" });
-    const ch = () => mutate(`Link ${d.pred_id}→${d.succ_id}: ${type.value} ${lag.value}d`, () => opUpdateDep(d.id, type.value, +lag.value));
-    type.addEventListener("change", ch); lag.addEventListener("change", ch);
-    return h("div", { class: "rowitem", title: DEP_NAMES[d.type] }, h("span", { class: "grow1" }, `${dirLabel} ${other.wbs} ${other.name}`), d.violated ? h("span", { title: "Dates conflict with this link" }, "⚠") : null, type, lag,
-      h("button", { class: "x", title: "Remove link", onclick: () => mutate("Removed link", () => opRemoveDep(d.id)) }, "✕"));
-  };
-  dr.append(h("h4", {}, "Predecessors"));
-  const pl = h("div", { class: "rowlist" });
-  for (const d of M.depsIn.get(t.id) || []) pl.append(depRow(d, M.tasks.get(d.pred_id), "←"));
-  const addPred = h("select", {}, h("option", { value: "" }, "＋ Add predecessor…"),
-    ...M.order.filter(x => x !== t && !isAncestor(x, t) && !isAncestor(t, x) && !(M.depsIn.get(t.id) || []).some(d => d.pred_id === x.id)).map(x => h("option", { value: x.id }, `${x.wbs} ${x.name}`)));
-  addPred.addEventListener("change", () => { const pid = +addPred.value; if (pid) mutate(`Linked ${M.tasks.get(pid).wbs} → ${t.wbs}`, () => opAddDep(pid, t.id, "FS", 0)); });
-  pl.append(addPred); dr.append(pl);
-  const outs = M.depsOut.get(t.id) || [];
-  if (outs.length) { dr.append(h("h4", {}, "Successors")); const sl = h("div", { class: "rowlist" }); for (const d of outs) sl.append(depRow(d, M.tasks.get(d.succ_id), "→")); dr.append(sl); }
-
-  const myIssues = M.issues.filter(i => i.task === t);
-  if (myIssues.length) { dr.append(h("h4", {}, "Issues")); for (const i of myIssues) dr.append(h("div", { class: "msg " + (i.level === "warn" ? "warn" : "") }, i.text)); }
-}
-
 // ---------- RACI matrix ----------
+// By team (default): columns are teams; each cell shows the team's own role plus its members' roles (home team).
+// Click cycles the team's own role; the small + hands that role to one of the team's members (DECISIONS #61).
+UI.raciBy = lsGet("pm.raciBy", "team");
+const RACI_SEQ = ["", "R", "A", "A/R", "C", "I", ""];
+const roleLabel = (t, role) => role === "A" && t.r_is_a ? "A/R" : role;
+// The matrix is drawn like the outline (DECISIONS #77): only the rows near the viewport, between two spacer rows
+// that keep the scrollbar honest, so a big plan costs no more per click or scroll than a small one.
+let RX = null; // { cls, head, rows, rowHtml(t), cols, rowH }
+function showRaci(cls, head, rows, cols, rowHtml) {
+  RX = { cls, head, rows, cols, rowHtml, rowH: RX?.rowH || 31 };
+  renderRaciRows(true);
+}
+// whole: replace the table too (new data). It goes in complete, spacers included, so the scroll position survives.
+function renderRaciRows(whole = false) {
+  const wrap = $("raciWrap"), body = wrap.querySelector("tbody"); if (!RX?.rows || (!whole && !body)) return;
+  const { scrollTop, scrollLeft } = wrap, rowH = RX.rowH, top = scrollTop - (wrap.querySelector("thead")?.offsetHeight ?? 60);
+  const first = Math.max(0, Math.floor(top / rowH) - 10), last = Math.min(RX.rows.length, Math.ceil((top + wrap.clientHeight) / rowH) + 10);
+  const pad = n => n > 0 ? html`<tr class="pad"><td colspan="${RX.cols + 2}" style="height:${n * rowH}px;padding:0;border:0"></td></tr>` : "";
+  const rows = html`${pad(first)}${RX.rows.slice(first, last).map(RX.rowHtml)}${pad(RX.rows.length - last)}`;
+  if (whole) setHtml(wrap, html`<table class="${RX.cls}"><thead>${RX.head}</thead><tbody>${rows}</tbody></table>`); else setHtml(body, rows);
+  wrap.scrollTop = scrollTop; wrap.scrollLeft = scrollLeft;
+  const real = wrap.querySelector("tbody tr:not(.pad)")?.offsetHeight; // measured once the first rows are on screen
+  if (real && real !== rowH) { RX.rowH = real; renderRaciRows(); }
+}
 function renderRaci() {
+  $$("#raciBySeg button").forEach(b => b.classList.toggle("on", b.dataset.by === UI.raciBy));
+  $("raciHint").textContent = UI.raciBy === "team"
+    ? "Click a cell to cycle the team's role: — R A A/R C I. Use + to hand it to a team member. Click a task to open its record"
+    : "Click a cell to cycle: — R A A/R C I. Click a task to open its record";
+  $("raciOnlyUsed").parentElement.lastChild.textContent = UI.raciBy === "team" ? " Only teams with assignments" : " Only people/teams with assignments";
+  RX = RX && { rowH: RX.rowH };
+  if (UI.raciBy === "team") return renderRaciTeams();
   const wrap = $("raciWrap");
   const onlyUsed = $("raciOnlyUsed").checked, leaves = $("raciLeaves").checked;
   const used = new Set(); for (const list of M.raci.values()) for (const r of list) used.add(r.party_id);
   const cols = [...M.people, ...M.teams].filter(p => onlyUsed ? used.has(p.id) : (p.active || used.has(p.id)));
   const rows = M.order.filter(t => !leaves || !t.isSummary);
-  if (!M.order.length) { wrap.innerHTML = `<div class="empty">No tasks in this project yet.</div>`; return; }
-  if (!cols.length) { wrap.innerHTML = `<div class="empty">No ${onlyUsed ? "assignments" : "people or teams"} yet. Untick “Only people/teams with assignments” or add people on the People &amp; teams tab.</div>`; return; }
+  if (!M.order.length) { setHtml(wrap, html`<div class="empty">No tasks in this project yet.</div>`); return; }
+  if (!cols.length) { setHtml(wrap, html`<div class="empty">No ${onlyUsed ? "assignments" : "people or teams"} yet. Untick “Only people/teams with assignments” or add people on the People &amp; teams tab.</div>`); return; }
   const issuesBy = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!issuesBy.has(i.task.id)) issuesBy.set(i.task.id, []); issuesBy.get(i.task.id).push(i.text); }
-  let html = `<table class="raci"><thead><tr><th class="tn">Task</th>${cols.map(p => `<th class="pc" title="${esc(p.name)}">${esc(p.name)}<span class="k">${p.kind === "team" ? "team" : esc(p.title || "")}</span></th>`).join("")}<th>Warnings</th></tr></thead><tbody>`;
-  for (const t of rows) {
+  const rowHtml = t => {
     const map = new Map(rolesOf(t.id).map(r => [r.party_id, r.role]));
     const inh = accountable(t);
-    html += `<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${esc(t.name)}">${esc(t.wbs)}&nbsp; ${esc(t.name)}</td>`;
-    for (const p of cols) {
+    const cells = cols.map(p => {
       const r = map.get(p.id) || "";
       const ghost = !r && inh.inherited && inh.list.some(a => a.party_id === p.id);
-      html += `<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" title="${esc(p.name)}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}">${r || (ghost ? '<span style="opacity:.35">a</span>' : "")}</td>`;
-    }
-    html += `<td class="flag">${(issuesBy.get(t.id) || []).map(esc).join("; ")}</td></tr>`;
+      const ar = t.r_is_a && (r === "A" || ghost); // Responsible = Accountable
+      return html`<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" title="${p.name}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? r + (ar ? "/R" : "") : ghost ? html`<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
+    });
+    return html`<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
+  };
+  showRaci("raci", html`<tr><th class="tn">Task</th>${cols.map(p => html`<th class="pc" title="${p.name}">${p.name}<span class="k">${p.kind === "team" ? "team" : p.title || ""}</span></th>`)}<th>Warnings</th></tr>`, rows, cols.length, rowHtml);
+}
+function renderRaciTeams() {
+  const wrap = $("raciWrap");
+  const onlyUsed = $("raciOnlyUsed").checked, leaves = $("raciLeaves").checked;
+  const rows = M.order.filter(t => !leaves || !t.isSummary);
+  if (!M.order.length) { setHtml(wrap, html`<div class="empty">No tasks in this project yet.</div>`); return; }
+  const teamOf = pid => { const p = M.parties.get(pid); return !p ? null : p.kind === "team" ? pid : homeTeam(pid) ?? 0; }; // 0 = no team
+  const used = new Set(); for (const list of M.raci.values()) for (const r of list) used.add(teamOf(r.party_id));
+  const cols = M.teams.filter(tm => onlyUsed ? used.has(tm.id) : (tm.active || used.has(tm.id))).map(tm => ({ id: tm.id, name: tm.name, team: tm }));
+  if (used.has(0)) cols.push({ id: 0, name: "No team", team: null });
+  if (!cols.length) { setHtml(wrap, html`<div class="empty">${M.teams.length ? "No team has assignments yet. Untick “Only teams with assignments”." : "No teams yet. Add teams on the People & teams tab."}</div>`); return; }
+  const issuesBy = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!issuesBy.has(i.task.id)) issuesBy.set(i.task.id, []); issuesBy.get(i.task.id).push(i.text); }
+  const rowHtml = t => {
+    const roles = rolesOf(t.id);
+    const cells = cols.map(c => {
+      const own = c.team ? roles.find(r => r.party_id === c.id) : null;
+      const mem = roles.filter(r => M.parties.get(r.party_id)?.kind === "person" && teamOf(r.party_id) === c.id);
+      const ownL = own ? roleLabel(t, own.role) : "";
+      const top = ownL || (mem[0] ? roleLabel(t, mem[0].role) : "");
+      const tip = [own ? `${c.name} (team): ${ownL}` : "", ...mem.map(r => `${partyName(r.party_id)}: ${roleLabel(t, r.role)}`)].filter(Boolean).join("\n") || `${c.name}: none`;
+      const chips = mem.map(r => html`<span class="mr r-${r.role}" data-p="${r.party_id}">${roleLabel(t, r.role)}·${initials(partyName(r.party_id))}</span>`);
+      const plus = c.team && (M.members.get(c.id) || []).length ? html`<button class="plus" data-plus="${c.id}" title="Give this to a member of ${c.name}">+</button>` : "";
+      return html`<td class="cell tcell ${top[0] || ""}" data-t="${t.id}" data-team="${c.id}" title="${tip}">${ownL ? html`<b>${ownL}</b>` : ""}${chips}${plus}</td>`;
+    });
+    return html`<tr class="${t.isSummary ? "summary" : ""}${t.id === UI.selId && UI.form ? " sel" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
+  };
+  showRaci("raci team", html`<tr><th class="tn">Task</th>${cols.map(c => html`<th class="pc" title="${c.name}">${c.name}<span class="k">${c.team ? `${(M.members.get(c.id) || []).length} people` : "people without a team"}</span></th>`)}<th>Warnings</th></tr>`, rows, cols.length, rowHtml);
+}
+// Hand the team's role on a task to one of its members (or set a member's role when the team has none).
+function teamMemberPicker(anchor, tid, teamId) {
+  const t = M.tasks.get(tid), team = M.parties.get(teamId);
+  const own = rolesOf(tid).find(r => r.party_id === teamId);
+  const role = own?.role || "R";
+  const box = h("div", {}, h("h4", {}, own ? `Give ${team.name}'s ${roleLabel(t, own.role)} on ${t.wbs} to…` : `Assign a member of ${team.name} to ${t.wbs} as…`));
+  const roleSel = own ? null : h("select", {}, ...["R", "A", "C", "I"].map(x => h("option", { value: x }, `${x}: ${ROLE_NAMES[x]}`)));
+  if (roleSel) box.append(roleSel);
+  const list = h("div", { class: "pick" });
+  for (const pid of M.members.get(teamId) || []) {
+    const cur = rolesOf(tid).find(r => r.party_id === pid);
+    list.append(h("button", { class: "pick-btn", onclick: () => {
+      closePop();
+      const give = own ? own.role : roleSel.value;
+      mutate(`RACI ${t.wbs}: ${partyName(pid)} → ${give}${own ? ` (from ${team.name})` : ""}`, () => { if (own) opSetRole(tid, teamId, null); opSetRole(tid, pid, give); });
+    } }, partyName(pid), cur ? h("span", { class: "sub" }, ` now ${roleLabel(t, cur.role)}`) : null));
   }
-  wrap.innerHTML = html + "</tbody></table>";
+  box.append(list);
+  openPop(anchor.left, anchor.bottom + 4, box);
 }
 function initRaci() {
   $("raciWrap").addEventListener("click", e => {
+    const link = e.target.closest("[data-open]"); if (link) { e.preventDefault(); openRecord(+link.dataset.open); redraw("raci"); return; }
+    const plus = e.target.closest("[data-plus]");
+    if (plus) { const td = plus.closest("td.cell"); teamMemberPicker(plus.getBoundingClientRect(), +td.dataset.t, +plus.dataset.plus); return; }
     const td = e.target.closest("td.cell"); if (!td) return;
-    const tid = +td.dataset.t, pid = +td.dataset.p;
-    const cur = rolesOf(tid).find(r => r.party_id === pid)?.role || "";
-    const seq = ["", "R", "A", "C", "I", ""]; const next = seq[seq.indexOf(cur) + 1];
+    if (td.dataset.team === "0") return; // "No team" column: display only
+    const tid = +td.dataset.t, pid = +(td.dataset.team || td.dataset.p), t = M.tasks.get(tid);
+    const role = rolesOf(tid).find(r => r.party_id === pid)?.role || "";
+    const cur = role === "A" && t.r_is_a ? "A/R" : role;
+    // A/R = Accountable plus the task's "Responsible same as Accountable" switch (DECISIONS #48).
+    const next = RACI_SEQ[RACI_SEQ.indexOf(cur) + 1];
     const keep = $("raciWrap").scrollTop, keepL = $("raciWrap").scrollLeft;
-    mutate(`RACI ${M.tasks.get(tid).wbs}: ${partyName(pid)} → ${next || "none"}`, () => opSetRole(tid, pid, next || null));
+    mutate(`RACI ${t.wbs}: ${partyName(pid)} → ${next || "none"}`, () => {
+      if (next === "A/R") { opSetRole(tid, pid, "A"); opSetRIsA(tid, true); return; }
+      if (cur === "A/R") opSetRIsA(tid, false);
+      opSetRole(tid, pid, next || null);
+    });
     $("raciWrap").scrollTop = keep; $("raciWrap").scrollLeft = keepL;
   });
-  $("raciOnlyUsed").addEventListener("change", renderRaci);
-  $("raciLeaves").addEventListener("change", renderRaci);
+  $$("#raciBySeg button").forEach(b => b.addEventListener("click", () => { UI.raciBy = b.dataset.by; lsSet("pm.raciBy", UI.raciBy); redraw("raci"); }));
+  $("raciOnlyUsed").addEventListener("change", () => redraw("raci"));
+  $("raciLeaves").addEventListener("change", () => redraw("raci"));
+  $("raciWrap").addEventListener("scroll", () => redraw("raciRows"));
 }
 
 // ---------- People & teams ----------
-function assignmentCounts() { const c = new Map(); for (const r of q("SELECT party_id, COUNT(*) n FROM raci GROUP BY party_id")) c.set(r.party_id, r.n); return c; }
+function assignmentCounts() { const c = new Map(); for (const r of q("SELECT party_id, COUNT(*) n FROM (SELECT party_id FROM raci UNION ALL SELECT party_id FROM risk_party UNION ALL SELECT party_id FROM mitigant_party) GROUP BY party_id")) c.set(r.party_id, r.n); return c; }
 function renderPeople() {
   const counts = assignmentCounts();
   const pl = $("peopleList"), tl = $("teamList"); pl.innerHTML = ""; tl.innerHTML = "";
@@ -257,7 +280,8 @@ function editParty(id, kind) {
   const memberSet = new Set(id ? M.members.get(id) || [] : []);
   const body = h("div", { class: "modal-b" });
   const frm = h("div", { class: "frm" }, h("label", {}, "Name"), name);
-  if (p.kind === "person") frm.append(h("label", {}, "Email"), email, h("label", {}, "Title"), title);
+  const teamSel = h("select", {}, h("option", { value: "" }, "— no team —"), ...M.teams.map(tm => h("option", { value: tm.id, selected: id && homeTeam(id) === tm.id }, tm.name)));
+  if (p.kind === "person") frm.append(h("label", {}, "Email"), email, h("label", {}, "Title"), title, h("label", {}, "Team"), teamSel);
   frm.append(h("label", {}, "Active"), h("label", { style: { color: "inherit" } }, active, " Can be assigned to tasks"));
   body.append(frm);
   if (p.kind === "team") {
@@ -266,7 +290,8 @@ function editParty(id, kind) {
     for (const person of M.people) {
       const cb = h("input", { type: "checkbox", checked: memberSet.has(person.id) });
       cb.addEventListener("change", () => cb.checked ? memberSet.add(person.id) : memberSet.delete(person.id));
-      pick.append(h("label", {}, cb, person.name, h("span", { class: "sub" }, person.title || "")));
+      const other = homeTeam(person.id); const moving = other && other !== id;
+      pick.append(h("label", {}, cb, person.name, h("span", { class: "sub" }, moving ? `in ${partyName(other)} (will move)` : person.title || "")));
     }
     if (!M.people.length) pick.append(h("div", { class: "hint" }, "Add people first."));
     body.append(pick);
@@ -277,12 +302,13 @@ function editParty(id, kind) {
       if (!id) newId = opAddParty(p.kind, name.value, { email: email.value, title: title.value });
       opUpdateParty(newId, { name: name.value, email: email.value, title: title.value, active: active.checked });
       if (p.kind === "team") opSetMembers(newId, [...memberSet]);
+      else if ((homeTeam(newId) ?? "") !== (+teamSel.value || "")) opSetPersonTeam(newId, +teamSel.value || null);
     });
     if (ok) closeModal();
   };
   const del = () => {
     const n = assignmentCounts().get(id) || 0;
-    if (!confirm(`Delete ${p.name}? ${n ? `They are assigned to ${n} task(s); those assignments will be removed. Consider marking them inactive instead.` : ""}`)) return;
+    if (!confirm(`Delete ${p.name}? ${n ? `They hold ${n} task or risk role(s); those will be removed. Consider marking them inactive instead.` : ""}`)) return;
     if (mutate(`Deleted ${p.kind} ${p.name}`, () => opDeleteParty(id))) closeModal();
   };
   const foot = h("div", { class: "modal-f" }, id ? h("button", { class: "danger", onclick: del }, "Delete") : null, h("span", { class: "spacer" }), h("button", { onclick: closeModal }, "Cancel"), h("button", { class: "primary", onclick: save }, "Save"));
@@ -342,7 +368,7 @@ function renderProjectMenu() {
 function switchProject(id) {
   M.projectId = id; lsSet("pm.project", id);
   UI.selId = null; UI.selDep = null;
-  refresh(); loadCollapsed(); computeRows(); renderAll();
+  refresh(); loadCollapsed(); computeRows(); redraw("all");
   const b = $("ganttBody"); const r = projectRange(); if (SC) scrollGanttTo(r.lo, 0.05); b.scrollTop = 0;
 }
 
@@ -351,7 +377,8 @@ const fmtAgo = t => { if (!t) return "never"; const s = Math.round((Date.now() -
 function renderSaveState() {
   const pill = $("savePill");
   let cls, text;
-  if (saving || pending) { cls = "busy"; text = "Saving…"; }
+  if (readOnly) { cls = "warn"; text = "Read-only tab"; }
+  else if (saving || pending) { cls = "busy"; text = "Saving…"; }
   else if (lastErr) { cls = "err"; text = "Save problem"; }
   else if (!fileHandle) { cls = "warn"; text = "Not saved to a file"; }
   else if (!filePerm) { cls = "warn"; text = "Reconnect needed"; }
@@ -378,12 +405,30 @@ function renderSaveState() {
   }
 }
 
+// ---------- Recover replaced copies (DECISIONS #64) ----------
+async function showBackups() {
+  let list = [];
+  try { list = (await idb.get("backups")) || []; } catch (e) { return toast("Couldn't read the backups: " + e.message, "err"); }
+  const download = b => {
+    const stamp = new Date(b.ts).toISOString().slice(0, 16).replace(/[T:]/g, "-");
+    const a = h("a", { href: URL.createObjectURL(new Blob([b.bytes], { type: "application/x-sqlite3" })), download: `backup ${stamp}.db` });
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  const body = h("div", { class: "modal-b" },
+    h("p", { style: { marginTop: 0 } }, "Copies the app kept because it had to replace them: a browser copy that lost to the plan file, a plan replaced by opening another, or a copy that couldn't be opened. Download one, then use File → Open plan file to look at it."),
+    list.length ? h("ul", { class: "bk-list" }, ...list.map(b => h("li", {},
+      h("div", {}, h("div", {}, new Date(b.ts).toLocaleString()), h("div", { class: "hint" }, `${b.reason} · ${(b.size / 1024).toFixed(1)} KB`)),
+      h("button", { onclick: () => download(b) }, "Download .db"))))
+      : h("p", { class: "hint" }, "No copies have been replaced in this browser."));
+  openModal("Recover replaced copies", body, h("div", { class: "modal-f" }, h("button", { class: "primary", onclick: closeModal }, "Close")));
+}
+
 // ---------- Help ----------
 function showHelp() {
   const rows = [
-    ["Insert", "New task below"], ["Ctrl+Insert", "New subtask"], ["Tab / Shift+Tab", "Indent / outdent"], ["Alt+Shift+↑/↓", "Move task up / down"],
-    ["Alt+← / Alt+→", "Collapse / expand"], ["Enter or F2", "Edit cell (Enter again to save)"], ["Type", "Start editing the cell"], ["Esc", "Cancel edit"],
-    ["Delete", "Delete task (and subtasks)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+I", "Toggle details panel"], ["Arrows, PgUp/PgDn", "Move around"],
+    ["Insert", "New task below"], ["Ctrl+Insert", "New subtask"], ["Tab / Shift+Tab", "Indent / outdent (also Alt+Shift+→ / ←)"], ["Alt+Shift+↑/↓", "Move task up / down"],
+    ["Alt+← / Alt+→", "Collapse / expand"], ["Enter or F2", "Edit cell (Enter again to save)"], ["Type", "Start editing the cell"], ["Esc", "Cancel edit, or clear the selection so Tab moves on"],
+    ["Delete", "Delete task (and subtasks)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+I", "Open / close the record form"], ["Arrows, PgUp/PgDn", "Move around"],
   ];
   const body = h("div", { class: "modal-b" },
     h("h3", { style: { marginTop: 0 } }, "Keyboard (outline grid)"),
@@ -392,10 +437,12 @@ function showHelp() {
     h("ul", {}, h("li", {}, "Drag a bar to move it; drag its left or right edge to change dates."),
       h("li", {}, "Hover a bar to see link handles (○). Drag from a handle onto another bar: the end you start from and the half of the target you drop on decide the type (Finish→Start, Start→Start, …)."),
       h("li", {}, "Click an arrow to change its type and lag, or delete it. Red arrows mean the dates conflict with the link; dates are never moved automatically."),
-      h("li", {}, "Double-click a bar to open its details.")),
+      h("li", {}, "Double-click a bar, or click ↗ next to a task name, to open its record form.")),
+    h("h3", {}, "Record form"),
+    h("p", {}, "Shows every field of a task, a mini Gantt of a summary task's subtasks, its work notes (dated, editable) and related records in tabs. It slides in over the outline; the Gantt stays visible, and clicking a bar switches records. Esc or ✕ closes it. ", h("kbd", {}, "Ctrl+Enter"), " posts a note."),
     h("h3", {}, "Predecessors cell"),
     h("p", {}, "Type WBS numbers separated by commas, with an optional type and lag: ", h("kbd", {}, "1.2"), " ", h("kbd", {}, "3FS+2d"), " ", h("kbd", {}, "2.1SS-1d"), " ", h("kbd", {}, "4FF+1w")),
     h("h3", {}, "Saving"),
-    h("p", {}, "Every change is saved immediately: first to a crash buffer inside the browser, then to your .db plan file (if one is connected). After a refresh Chrome may ask you to click ", h("b", {}, "Reconnect"), ". Share the .db file, an Excel export, or a printed PDF with your team."));
+    h("p", {}, "Every change is saved immediately: to your .db plan file (if one is connected) and to a crash buffer inside the browser. If the app ever has to replace work that isn't anywhere else, it keeps a copy under File → ", h("b", {}, "Recover replaced copies"), ". Only one tab can edit at a time; others open read-only. After a refresh Chrome may ask you to click ", h("b", {}, "Reconnect"), ". Share the .db file, an Excel export, or a printed PDF with your team."));
   openModal("Help & shortcuts", body, h("div", { class: "modal-f" }, h("button", { class: "primary", onclick: closeModal }, "Close")));
 }

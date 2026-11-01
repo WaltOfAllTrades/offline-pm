@@ -10,7 +10,7 @@ const M = {
   tasks: new Map(), roots: [], order: [], byWbs: new Map(),
   deps: [], depsIn: new Map(), depsOut: new Map(),
   parties: new Map(), people: [], teams: [], members: new Map(), teamsOf: new Map(),
-  raci: new Map(), issues: [],
+  raci: new Map(), issues: [], noteCount: new Map(),
 };
 
 function loadModel() {
@@ -59,6 +59,8 @@ function loadModel() {
     if (!M.depsIn.has(d.succ_id)) M.depsIn.set(d.succ_id, []); M.depsIn.get(d.succ_id).push(d);
     if (!M.depsOut.has(d.pred_id)) M.depsOut.set(d.pred_id, []); M.depsOut.get(d.pred_id).push(d);
   }
+  M.noteCount = new Map(q("SELECT n.task_id, COUNT(*) c FROM note n JOIN task t ON t.id=n.task_id WHERE t.project_id=? GROUP BY n.task_id", [M.projectId]).map(r => [r.task_id, r.c]));
+  loadRisks();
   M.issues = computeIssues();
 }
 
@@ -105,6 +107,11 @@ function accountable(t) { // own A list, or nearest ancestor's (DECISIONS #12)
   for (let x = t; x; x = x.parent) { const a = rolesOf(x.id, "A"); if (a.length) return { list: a, inherited: x !== t, from: x }; }
   return { list: [], inherited: false, from: null };
 }
+// Effective Responsible: own R list, or the effective Accountable when the task's "same as Accountable" switch is on.
+function responsible(t) {
+  if (t.r_is_a) { const a = accountable(t); return { list: a.list, same: true, inherited: a.inherited, from: a.from }; }
+  return { list: rolesOf(t.id, "R"), same: false };
+}
 function isAncestor(a, b) { for (let x = b?.parent; x; x = x.parent) if (x === a) return true; return false; }
 // Parties a person is "in": themselves plus their teams.
 const partySetFor = personId => new Set([personId, ...(M.teamsOf.get(personId) || [])]);
@@ -138,7 +145,7 @@ function computeIssues() {
     const ownA = rolesOf(t.id, "A");
     if (ownA.length > 1) add("warn", t, `${ownA.length} Accountables (should be exactly one)`, "raci");
     for (const a of ownA) if (M.parties.get(a.party_id)?.kind === "team") add("info", t, `Accountable is a team (${partyName(a.party_id)}). One person is recommended`, "raci");
-    if (!t.isSummary && !t.isMilestone && !rolesOf(t.id, "R").length) add("info", t, "No Responsible assigned", "raci");
+    if (!t.isSummary && !t.isMilestone && !responsible(t).list.length) add("info", t, t.r_is_a ? "Responsible is set to the Accountable, but there is no Accountable" : "No Responsible assigned", "raci");
     for (const r of rolesOf(t.id)) {
       const p = M.parties.get(r.party_id);
       if (p && !p.active) add("warn", t, `${p.name} is inactive but assigned as ${ROLE_NAMES[r.role]}`, "raci");
@@ -146,6 +153,7 @@ function computeIssues() {
     }
     if (!t.isSummary && t.S == null) add("info", t, "No dates set", "dates");
     if (!t.isSummary && t.F != null && t.S != null && t.F < t.S) add("warn", t, "Finish is before start", "dates");
+    else if (!t.isSummary && !t.isMilestone && t.S != null && t.F != null && workdays(t.S, t.F) === 0) add("info", t, "Falls on a weekend: no working days, so it carries no weight in % complete", "dates");
     if (t.F != null && t.F < today && t.ST !== "Done" && !t.isSummary) add("info", t, `Overdue: finish was ${fmtShort(t.F)}`, "dates");
   }
   for (const d of M.deps) if (d.violated) {
@@ -193,13 +201,23 @@ function dropHierarchyLinks() {
   if (bad.length) opNotes.push(`Removed ${bad.length} link${bad.length > 1 ? "s" : ""} between a summary task and its own subtask.`);
 }
 
+// A task that loses its last subtask keeps the dates, % and status it showed as a summary, instead of falling
+// back to whatever it stored before it had subtasks (DECISIONS #5). Call after the change, with the parent's id;
+// M still holds the rolled-up values from before the change.
+function keepRollupIfChildless(parentId) {
+  const was = parentId != null && M.tasks.get(parentId);
+  if (!was || !was.isSummary || hasChildren(parentId)) return;
+  run("UPDATE task SET start=?, finish=?, percent=?, status=?, kind='task', updated_at=? WHERE id=?",
+    [fmtYMD(was.S) || null, fmtYMD(was.F) || null, was.P ?? 0, was.ST || "Not started", nowIso(), parentId]);
+}
+
 function opIndent(id) {
   const t = taskRow(id), sib = siblingsOf(t.parent_id), i = sib.indexOf(id);
   if (i <= 0) throw new Error("Nothing above to indent under. A task can only be indented under the task directly above it at the same level");
   const newParent = sib[i - 1];
   insertAt(newParent, null, id);
   renumber(siblingsOf(t.parent_id));
-  dropHierarchyLinks();
+  dropHierarchyLinks(); checkDateCycles();
 }
 
 // Outdent keeps the visual row order: later siblings become children of the outdented task (DECISIONS #27).
@@ -212,7 +230,8 @@ function opOutdent(id) {
   insertAt(parent.parent_id, gp.indexOf(parent.id) + 1, id);
   if (later.length) { const kids = siblingsOf(id); later.forEach(x => run("UPDATE task SET parent_id=? WHERE id=?", [id, x])); renumber([...kids, ...later]); }
   renumber(siblingsOf(parent.id));
-  dropHierarchyLinks();
+  keepRollupIfChildless(parent.id);
+  dropHierarchyLinks(); checkDateCycles();
 }
 
 function opMove(id, delta) {
@@ -231,14 +250,15 @@ function opMoveTo(id, targetId, where) {
     const sib = siblingsOf(target.parent_id).filter(x => x !== id);
     insertAt(target.parent_id, sib.indexOf(targetId) + (where === "after" ? 1 : 0), id);
   }
-  if (t.parent_id !== (where === "child" ? targetId : target.parent_id)) renumber(siblingsOf(t.parent_id));
-  dropHierarchyLinks();
+  if (t.parent_id !== (where === "child" ? targetId : target.parent_id)) { renumber(siblingsOf(t.parent_id)); keepRollupIfChildless(t.parent_id); }
+  dropHierarchyLinks(); checkDateCycles();
 }
 
 function opDelete(id) {
   const t = taskRow(id);
   run("DELETE FROM task WHERE id=?", [id]); // cascades to subtree, deps, raci
   renumber(siblingsOf(t.parent_id));
+  keepRollupIfChildless(t.parent_id);
 }
 
 // Field edits on a single task; dates use working-day rules (DECISIONS #2–#4, #8).
@@ -309,23 +329,83 @@ function opSetField(id, field, value) {
   }
 }
 
-function depCheck(pred, succ) {
+// Date-order graph of a project: node 2i is task i's start, 2i+1 its finish; an edge u -> v means v can't come
+// before u. Besides the links, a task starts before it finishes and a summary spans its subtasks, so a cycle
+// means some links can never all be met, even when the links alone form no loop (DECISIONS #66).
+// Cached per project while nothing but our own link inserts has changed the database (imports add many links).
+let dateGraphCache = null;
+function dateGraph(pid, skipDep = null) {
+  const tc = scalar("SELECT total_changes()");
+  const c = dateGraphCache;
+  if (skipDep == null && c && c.pid === pid && c.tc === tc && c.gen === dbGen) return c;
+  const tasks = q("SELECT id, parent_id FROM task WHERE project_id=?", [pid]);
+  const ix = new Map(tasks.map((t, i) => [t.id, i])), adj = Array.from({ length: tasks.length * 2 }, () => []);
+  const end = (id, side) => 2 * ix.get(id) + (side === "S" ? 0 : 1);
+  for (const t of tasks) {
+    adj[end(t.id, "S")].push(end(t.id, "F"));
+    if (ix.has(t.parent_id)) { adj[end(t.parent_id, "S")].push(end(t.id, "S")); adj[end(t.id, "F")].push(end(t.parent_id, "F")); }
+  }
+  for (const d of q("SELECT d.id, d.pred_id, d.succ_id, d.type FROM dep d JOIN task t ON t.id=d.succ_id WHERE t.project_id=?", [pid]))
+    if (d.id !== skipDep) adj[end(d.pred_id, d.type[0])].push(end(d.succ_id, d.type[1]));
+  const g = { pid, tc, gen: dbGen, adj, end };
+  if (skipDep == null) dateGraphCache = g;
+  return g;
+}
+function reaches(adj, from, to) {
+  const seen = new Set([from]), stack = [from];
+  while (stack.length) { const u = stack.pop(); if (u === to) return true; for (const v of adj[u]) if (!seen.has(v)) { seen.add(v); stack.push(v); } }
+  return false;
+}
+function hasCycle(adj) {
+  const state = new Uint8Array(adj.length); // 0 new, 1 on the stack, 2 done
+  for (let r = 0; r < adj.length; r++) {
+    if (state[r]) continue;
+    const stack = [[r, 0]]; state[r] = 1;
+    while (stack.length) {
+      const top = stack[stack.length - 1], u = top[0];
+      if (top[1] < adj[u].length) { const v = adj[u][top[1]++]; if (state[v] === 1) return true; if (!state[v]) { state[v] = 1; stack.push([v, 0]); } }
+      else { state[u] = 2; stack.pop(); }
+    }
+  }
+  return false;
+}
+// After indent, outdent or a drag move: refuse a position that makes existing links impossible to meet.
+function checkDateCycles() {
+  if (hasCycle(dateGraph(M.projectId).adj)) throw new Error("That would put a task inside a summary task that its links say must come before or after it. Change the links first");
+}
+
+function depCheck(pred, succ, type = "FS", skipDep = null) {
   if (pred === succ) throw new Error("A task can't depend on itself");
   const a = taskRow(pred), b = taskRow(succ);
   if (a.project_id !== b.project_id) throw new Error("Links between projects aren't supported");
   if (subtreeIds(pred).includes(succ) || subtreeIds(succ).includes(pred)) throw new Error("Can't link a summary task to its own subtask");
   const cyc = scalar("WITH RECURSIVE down(id) AS (SELECT ? UNION SELECT d.succ_id FROM dep d JOIN down ON d.pred_id=down.id) SELECT 1 FROM down WHERE id=?", [succ, pred]);
   if (cyc) throw new Error("That link would create a circular dependency");
+  const g = dateGraph(a.project_id, skipDep);
+  if (reaches(g.adj, g.end(succ, type[1]), g.end(pred, type[0]))) throw new Error("That link would create a circular dependency through a summary task and its subtasks");
 }
+// lag = null keeps an existing link's lag (dragging onto an already linked pair only changes its type) and means 0 for a new one.
 function opAddDep(pred, succ, type = "FS", lag = 0) {
   if (!DEP_TYPES.includes(type)) throw new Error("Unknown link type");
-  const existing = one("SELECT id FROM dep WHERE pred_id=? AND succ_id=?", [pred, succ]);
-  if (existing) { run("UPDATE dep SET type=?, lag=? WHERE id=?", [type, Math.round(lag), existing.id]); return existing.id; }
-  depCheck(pred, succ);
+  const existing = one("SELECT id, type, lag FROM dep WHERE pred_id=? AND succ_id=?", [pred, succ]);
+  if (existing) {
+    depCheck(pred, succ, type, existing.id);
+    if (lag == null && existing.type !== type) opNotes.push(`That link already existed: changed it to ${DEP_NAMES[type]}, lag kept.`);
+    run("UPDATE dep SET type=?, lag=? WHERE id=?", [type, lag == null ? existing.lag : Math.round(lag), existing.id]); return existing.id;
+  }
+  lag = lag ?? 0;
+  depCheck(pred, succ, type);
+  const g = dateGraph(taskRow(pred).project_id);
   run("INSERT INTO dep(pred_id, succ_id, type, lag) VALUES (?,?,?,?)", [pred, succ, type, Math.round(lag)]);
+  g.adj[g.end(pred, type[0])].push(g.end(succ, type[1])); g.tc = scalar("SELECT total_changes()"); // keep the cache in step
   return lastId();
 }
-function opUpdateDep(id, type, lag) { if (!DEP_TYPES.includes(type)) throw new Error("Unknown link type"); run("UPDATE dep SET type=?, lag=? WHERE id=?", [type, Math.round(+lag || 0), id]); }
+function opUpdateDep(id, type, lag) {
+  if (!DEP_TYPES.includes(type)) throw new Error("Unknown link type");
+  const d = one("SELECT pred_id, succ_id FROM dep WHERE id=?", [id]); if (!d) throw new Error("Link not found");
+  depCheck(d.pred_id, d.succ_id, type, id);
+  run("UPDATE dep SET type=?, lag=? WHERE id=?", [type, Math.round(+lag || 0), id]);
+}
 function opRemoveDep(id) { run("DELETE FROM dep WHERE id=?", [id]); }
 function opSetPredText(succId, text) {
   const items = parsePredText(text);
@@ -338,11 +418,19 @@ function opSetPredText(succId, text) {
 }
 
 function opSetRole(taskId, partyId, role) {
+  if (role === "R") run("UPDATE task SET r_is_a=0 WHERE id=?", [taskId]); // naming a Responsible ends "same as Accountable"
   if (!role) run("DELETE FROM raci WHERE task_id=? AND party_id=?", [taskId, partyId]);
   else run("INSERT INTO raci(task_id, party_id, role) VALUES (?,?,?) ON CONFLICT(task_id, party_id) DO UPDATE SET role=excluded.role", [taskId, partyId, role]);
 }
+// "Responsible = Accountable" switch: on clears any separate R entries (one letter per party per task).
+function opSetRIsA(taskId, on) {
+  taskRow(taskId);
+  run("UPDATE task SET r_is_a=? WHERE id=?", [on ? 1 : 0, taskId]);
+  if (on) run("DELETE FROM raci WHERE task_id=? AND role='R'", [taskId]);
+}
 // Make exactly this set of parties hold `role` on a task (others with that role are cleared).
 function opSetRoleParties(taskId, role, partyIds) {
+  if (role === "R") run("UPDATE task SET r_is_a=0 WHERE id=?", [taskId]);
   run("DELETE FROM raci WHERE task_id=? AND role=?", [taskId, role]);
   for (const pid of partyIds) opSetRole(taskId, pid, role);
 }
@@ -361,9 +449,41 @@ function opUpdateParty(id, fields) {
   }
 }
 function opDeleteParty(id) { run("DELETE FROM party WHERE id=?", [id]); }
+// One team per person (DECISIONS #60): adding someone to a team moves them out of any other team.
 function opSetMembers(teamId, personIds) {
   run("DELETE FROM team_member WHERE team_id=?", [teamId]);
-  for (const p of personIds) run("INSERT INTO team_member VALUES (?,?)", [teamId, p]);
+  for (const p of personIds) {
+    const was = one("SELECT team_id FROM team_member WHERE person_id=? AND team_id<>?", [p, teamId]);
+    if (was) opNotes.push(`${partyName(p)} moved from ${partyName(was.team_id)}.`);
+    run("DELETE FROM team_member WHERE person_id=?", [p]);
+    run("INSERT INTO team_member VALUES (?,?)", [teamId, p]);
+  }
+}
+function opSetPersonTeam(personId, teamId) {
+  run("DELETE FROM team_member WHERE person_id=?", [personId]);
+  if (teamId) run("INSERT INTO team_member VALUES (?,?)", [teamId, personId]);
+}
+const homeTeam = personId => (M.teamsOf.get(personId) || [])[0] ?? null;
+
+// Work notes: a dated journal per task. Unlike ServiceNow's journal, notes can be edited and deleted (DECISIONS #39).
+const noteStamp = () => new Date().toISOString();
+function opAddNote(taskId, body, author = "") {
+  body = String(body ?? "").trim(); if (!body) throw new Error("A note can't be empty");
+  taskRow(taskId);
+  run("INSERT INTO note(task_id, body, author, created_at) VALUES (?,?,?,?)", [taskId, body, String(author || "").trim(), noteStamp()]);
+  return lastId();
+}
+function opEditNote(id, body) {
+  body = String(body ?? "").trim(); if (!body) throw new Error("A note can't be empty. Delete it instead");
+  const n = one("SELECT body FROM note WHERE id=?", [id]); if (!n) throw new Error("Note not found");
+  if (n.body !== body) run("UPDATE note SET body=?, updated_at=? WHERE id=?", [body, noteStamp(), id]);
+}
+function opDeleteNote(id) { run("DELETE FROM note WHERE id=?", [id]); }
+// Notes for a task, newest first; withSubtasks adds notes from every descendant.
+function notesFor(taskId, withSubtasks = false) {
+  if (!withSubtasks) return q("SELECT * FROM note WHERE task_id=? ORDER BY created_at DESC, id DESC", [taskId]);
+  return q(`WITH RECURSIVE s(id) AS (SELECT ? UNION ALL SELECT t.id FROM task t JOIN s ON t.parent_id=s.id)
+            SELECT n.* FROM note n JOIN s ON s.id=n.task_id ORDER BY n.created_at DESC, n.id DESC`, [taskId]);
 }
 
 function opAddProject(name) {
@@ -385,7 +505,8 @@ function seedSample() {
   const ana = P(["Ana Ruiz", "ana@example.com", "Project manager"]), ben = P(["Ben Okafor", "ben@example.com", "Lead developer"]);
   const chloe = P(["Chloe Park", "chloe@example.com", "Designer"]), dev = P(["Dev Patel", "dev@example.com", "Marketing"]);
   const eng = opAddParty("team", "Engineering"), mkt = opAddParty("team", "Marketing team");
-  opSetMembers(eng, [ben]); opSetMembers(mkt, [dev, chloe]);
+  const pmo = opAddParty("team", "PMO");
+  opSetMembers(eng, [ben]); opSetMembers(mkt, [dev, chloe]); opSetMembers(pmo, [ana]);
   const base = nextWorkday(todayNum() - 10);
   const T = (name, parentId, startOff, dur, extra = {}) => {
     const s = wdDay(wdIndex(base) + startOff);
@@ -411,4 +532,11 @@ function seedSample() {
   R(c, chloe, "R"); R(c, ben, "C"); R(d, chloe, "R"); R(e, chloe, "R"); R(e, mkt, "C");
   R(f, eng, "R"); R(g, eng, "R"); R(g, ben, "A"); R(h2, mkt, "R"); R(h2, dev, "A");
   R(i, ana, "R"); R(i, eng, "C"); R(i, mkt, "C"); R(j, ben, "R"); R(j, mkt, "I"); R(j, dev, "I");
+  opAddNote(a, "Interviewed 8 stakeholders. Main theme: the current site is hard to update without a developer.");
+  opAddNote(c, "Homepage and product page wireframes reviewed with marketing. Navigation still open.");
+  opAddNote(c, "Decision: keep the mega-menu, but limit it to 3 columns.");
+  opAddNote(g, "Waiting on the final style guide before starting the article template.");
+  seedRisks({ migration: h2, uat: i, ana, dev });
+  // Spread the sample notes over the past days so the stream looks lived-in.
+  q("SELECT id FROM note ORDER BY id").forEach((n, k) => run("UPDATE note SET created_at=? WHERE id=?", [new Date(Date.now() - (8 - k * 2) * 864e5 - 3600e3 * (k + 1)).toISOString(), n.id]));
 }

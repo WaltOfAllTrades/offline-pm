@@ -2,7 +2,7 @@
 const ROW = 30;
 const UI = {
   view: "plan", selId: null, col: "name", collapsed: new Set(), search: "", person: "", grain: "week",
-  drawer: false, rows: [], editing: null, selDep: null,
+  rows: [], editing: null, selDep: null,
 };
 const COLS = [
   { key: "wbs", label: "WBS", w: 64 },
@@ -22,8 +22,11 @@ const gridWidth = () => COLS.reduce((s, c) => s + c.w, 0);
 const ROLLED = new Set(["start", "finish", "duration", "percent", "status"]);
 const stClass = s => ({ "Not started": "st-ns", "In progress": "st-ip", "Blocked": "st-bl", "Done": "st-dn" }[s] || "st-ns");
 
-function loadCollapsed() { UI.collapsed = new Set(lsGet("pm.collapsed." + M.projectId, [])); }
-function saveCollapsed() { lsSet("pm.collapsed." + M.projectId, [...UI.collapsed]); }
+const gridFullWidth = () => lsGet("pm.split", null) ?? Math.round(($("split").clientWidth || innerWidth) * 2 / 3);
+// Keyed by the plan's file id too: task ids restart at 1 in every file, so another plan mustn't inherit this one's state.
+const collapsedKey = () => `pm.collapsed.${readFileId(db) || "?"}.${M.projectId}`;
+function loadCollapsed() { UI.collapsedFor = collapsedKey(); UI.collapsed = new Set(lsGet(UI.collapsedFor, [])); }
+function saveCollapsed() { lsSet(collapsedKey(), [...UI.collapsed]); }
 
 function filterActive() { return !!(UI.search.trim() || UI.person); }
 function matchesFilter(t) {
@@ -53,7 +56,7 @@ function computeRows() {
 }
 
 function renderGridHead() {
-  $("gridHead").innerHTML = `<div class="ghead-row" style="width:${gridWidth() + 40}px">${COLS.map(c => `<div class="gh" style="width:${c.w}px">${c.label}</div>`).join("")}</div>`;
+  setHtml($("gridHead"), html`<div class="ghead-row" style="width:${gridWidth() + 40}px">${COLS.map(c => html`<div class="gh" style="width:${c.w}px">${c.label}</div>`)}</div>`);
 }
 function renderGrid() {
   const canvas = $("gridCanvas");
@@ -65,25 +68,31 @@ function renderGrid() {
 const warnTasks = () => { const s = new Set(); for (const i of M.issues) if (i.level === "warn") s.add(i.task.id); return s; };
 let _warnSet = new Set();
 
-function chipFor(r, inherited) {
+function chipFor(r, inherited, note = inherited ? " (inherited)" : "") {
   const p = M.parties.get(r.party_id); if (!p) return "";
-  return `<span class="chip ${p.kind === "team" ? "team" : ""} ${inherited ? "inh" : ""} ${p.active ? "" : "inactive"}" title="${esc(p.name)}${p.kind === "team" ? " (team)" : ""}${inherited ? " (inherited)" : ""}">${p.kind === "team" ? "👥 " : ""}${esc(p.name)}</span>`;
+  const team = p.kind === "team";
+  return html`<span class="chip ${team ? "team" : ""} ${inherited ? "inh" : ""} ${p.active ? "" : "inactive"}" title="${p.name}${team ? " (team)" : ""}${note}">${team ? "👥 " : ""}${p.name}</span>`;
 }
+const rChips = t => { const r = responsible(t); return r.list.map(x => chipFor(x, r.same, r.same ? " (same as Accountable)" : "")); };
 function cellHtml(t, c) {
   switch (c.key) {
-    case "wbs": return esc(t.wbs);
+    case "wbs": return t.wbs;
     case "name": {
-      const caret = t.isSummary ? `<span class="caret" data-caret>${UI.collapsed.has(t.id) && !filterActive() ? "▶" : "▼"}</span>` : `<span class="caret"></span>`;
-      return `<span style="width:${t.depth * 16}px;flex:none"></span>${caret}${t.isMilestone ? '<span class="ms-ico">◆</span>' : ""}<span class="nm">${esc(t.name)}</span>${_warnSet.has(t.id) ? '<span class="warn-dot" title="Has warnings, see Issues">⚠</span>' : ""}`;
+      const caret = t.isSummary ? html`<span class="caret" data-caret>${UI.collapsed.has(t.id) && !filterActive() ? "▶" : "▼"}</span>` : html`<span class="caret"></span>`;
+      const notes = M.noteCount.get(t.id) || 0, mits = M.mitByTask.get(t.id)?.length || 0;
+      const warn = _warnSet.has(t.id) ? html`<span class="warn-dot" title="Has warnings, see Issues">⚠</span>` : "";
+      const nc = notes ? html`<span class="nc" title="${notes} work note(s)">💬${notes}</span>` : "";
+      const mc = mits ? html`<span class="nc" title="Implements ${mits} risk mitigant(s)">🛡${mits}</span>` : "";
+      return html`<span style="width:${t.depth * 16}px;flex:none"></span>${caret}${t.isMilestone ? html`<span class="ms-ico">◆</span>` : ""}<span class="nm">${t.name}</span>${warn}${nc}${mc}<span class="open-rec" data-open title="Open record form">↗</span>`;
     }
     case "start": return fmtShort(t.S);
     case "finish": return fmtShort(t.F);
     case "duration": return t.dur == null ? "" : t.dur + "d";
     case "percent": return t.P + "%";
-    case "status": return `<span class="st ${stClass(t.ST)}">${esc(t.ST)}</span>`;
-    case "pred": return esc(predText(t));
-    case "R": return `<span class="chips">${rolesOf(t.id, "R").map(r => chipFor(r)).join("")}</span>`;
-    case "A": { const a = accountable(t); return `<span class="chips">${a.list.map(r => chipFor(r, a.inherited)).join("")}</span>`; }
+    case "status": return html`<span class="st ${stClass(t.ST)}">${t.ST}</span>`;
+    case "pred": return predText(t);
+    case "R": return html`<span class="chips">${rChips(t)}</span>`;
+    case "A": { const a = accountable(t); return html`<span class="chips">${a.list.map(r => chipFor(r, a.inherited))}</span>`; }
   }
   return "";
 }
@@ -93,36 +102,37 @@ function renderGridRows() {
   const body = $("gridBody"), canvas = $("gridRows");
   _warnSet = warnTasks();
   if (!UI.rows.length) {
-    canvas.innerHTML = `<div class="empty" style="width:${Math.min(gridWidth(), body.clientWidth || 600)}px">${filterActive() ? "No tasks match the filter." : "No tasks yet. Click <b>＋ Task</b> or press <kbd>Insert</kbd> to add one, or import a spreadsheet from the File menu."}</div>`;
+    setHtml(canvas, html`<div class="empty" style="width:${Math.min(gridWidth(), body.clientWidth || 600)}px">${filterActive() ? "No tasks match the filter." : html`No tasks yet. Click <b>＋ Task</b> or press <kbd>Insert</kbd> to add one, or import a spreadsheet from the File menu.`}</div>`);
     return;
   }
   const first = Math.max(0, Math.floor(body.scrollTop / ROW) - 8);
   const last = Math.min(UI.rows.length, Math.ceil((body.scrollTop + body.clientHeight) / ROW) + 8);
-  let html = "";
+  const rows = [];
   for (let i = first; i < last; i++) {
-    const t = UI.rows[i];
-    html += `<div class="grow ${t.isSummary ? "summary" : ""} ${t.id === UI.selId ? "sel" : ""}" data-id="${t.id}" style="top:${i * ROW}px;width:${gridWidth()}px">`;
-    for (const c of COLS) {
-      const ro = (t.isSummary && ROLLED.has(c.key)) ? " ro" : "";
-      const cur = t.id === UI.selId && c.key === UI.col ? " cur" : "";
-      html += `<div class="gc c-${c.key}${ro}${cur}" data-col="${c.key}" style="width:${c.w}px"${c.key === "wbs" ? ' title="Drag to move"' : ""}>${cellHtml(t, c)}</div>`;
-    }
-    html += `</div>`;
+    const t = UI.rows[i], sel = t.id === UI.selId;
+    const expanded = t.isSummary ? html` aria-expanded="${String(!(UI.collapsed.has(t.id) && !filterActive()))}"` : "";
+    const cells = COLS.map(c => {
+      const ro = (t.isSummary && ROLLED.has(c.key)) ? " ro" : "", cur = sel && c.key === UI.col ? " cur" : "";
+      return html`<div class="gc c-${c.key}${ro}${cur}" role="gridcell" aria-label="${c.label}" data-col="${c.key}" style="width:${c.w}px"${c.key === "wbs" ? html` title="Drag to move"` : ""}>${cellHtml(t, c)}</div>`;
+    });
+    rows.push(html`<div class="grow ${t.isSummary ? "summary" : ""} ${sel ? "sel" : ""}" id="gr-${t.id}" role="row" aria-rowindex="${i + 1}" aria-level="${t.depth + 1}" aria-selected="${String(sel)}"${expanded} data-id="${t.id}" style="top:${i * ROW}px;width:${gridWidth()}px">${cells}</div>`);
   }
-  canvas.innerHTML = html;
+  setHtml(canvas, html`${rows}`);
+  body.setAttribute("aria-rowcount", UI.rows.length);
+  if (UI.selId != null && $("gr-" + UI.selId)) body.setAttribute("aria-activedescendant", "gr-" + UI.selId); else body.removeAttribute("aria-activedescendant");
 }
 
 // ---------- Selection ----------
 function selectTask(id, { scroll = true, col } = {}) {
   UI.selId = id; if (col) UI.col = col;
   if (id != null && scroll) revealTask(id);
-  renderGridRows(); renderGanttRows(); renderDrawer();
+  redraw("gridRows", "ganttRows", "form");
 }
 function revealTask(id) {
   const t = M.tasks.get(id); if (!t) return;
   let changed = false;
   for (let x = t.parent; x; x = x.parent) if (UI.collapsed.delete(x.id)) changed = true;
-  if (changed) { saveCollapsed(); computeRows(); renderGrid(); renderGantt(); }
+  if (changed) { saveCollapsed(); computeRows(); redraw("rows"); drawNow(); } // the scrolling below needs the new height
   if (t.row == null || UI.rows[t.row] !== t) return;
   const body = $("gridBody"), top = t.row * ROW;
   if (top < body.scrollTop) body.scrollTop = top;
@@ -138,19 +148,19 @@ function moveSel(dr) {
   i = clamp(i + dr, 0, UI.rows.length - 1);
   selectTask(UI.rows[i].id);
 }
-function moveCol(dc) { UI.col = COLS[clamp(colIndex(UI.col) + dc, 1, COLS.length - 1)].key; if (UI.selId) revealTask(UI.selId); renderGridRows(); }
+function moveCol(dc) { UI.col = COLS[clamp(colIndex(UI.col) + dc, 1, COLS.length - 1)].key; if (UI.selId) revealTask(UI.selId); redraw("gridRows"); }
 
 function toggleCollapse(id, force) {
   const has = UI.collapsed.has(id), want = force ?? !has;
   if (want === has) return;
   want ? UI.collapsed.add(id) : UI.collapsed.delete(id);
-  saveCollapsed(); computeRows(); renderGrid(); renderGantt();
+  saveCollapsed(); computeRows(); redraw("rows");
 }
 function showLevel(level) {
   UI.collapsed.clear();
   if (level !== "all") for (const t of M.order) if (t.isSummary && t.depth >= +level - 1) UI.collapsed.add(t.id);
   if (UI.selId && UI.collapsed.size) { const t = selTask(); if (t && t.depth >= +level) UI.selId = t.parent ? ancestorAtDepth(t, +level - 1).id : t.id; }
-  saveCollapsed(); computeRows(); renderGrid(); renderGantt(); renderDrawer();
+  saveCollapsed(); computeRows(); redraw("rows", "form");
 }
 function ancestorAtDepth(t, d) { let x = t; while (x.depth > d && x.parent) x = x.parent; return x; }
 
@@ -160,7 +170,7 @@ function startEdit(colKey = UI.col, initial = null) {
   const c = colByKey(colKey); if (!c || !c.edit) return;
   if (UI.editing) commitEdit(0, 0, true);
   if (t.isSummary && ROLLED.has(c.key)) { toast("Summary rows roll up from their subtasks"); return; }
-  UI.col = colKey; revealTask(t.id); renderGridRows();
+  UI.col = colKey; revealTask(t.id); redraw("gridRows"); drawNow(); // the cell is looked up next
   const cell = $("gridCanvas").querySelector(`.grow[data-id="${t.id}"] [data-col="${colKey}"]`);
   if (!cell) return;
   if (c.edit === "party") { openPartyPicker(cell.getBoundingClientRect(), t.id, colKey); return; }
@@ -189,17 +199,20 @@ function startEdit(colKey = UI.col, initial = null) {
   if (el.select && initial == null && el.type === "text") el.select();
   if (el.tagName === "SELECT" && el.showPicker) try { el.showPicker(); } catch { }
 }
-function cancelEdit() { if (!UI.editing) return; const e = UI.editing; UI.editing = null; e.el.remove(); $("gridBody").focus(); renderGridRows(); }
+function cancelEdit() { if (!UI.editing) return; const e = UI.editing; UI.editing = null; e.el.remove(); $("gridBody").focus(); redraw("gridRows"); }
 function commitEdit(dr, dc, fromBlur) {
   const e = UI.editing; if (!e || e.done) return;
   e.done = true; UI.editing = null;
-  const val = e.el.value; e.el.remove();
+  const val = e.el.value;
   const t = M.tasks.get(e.taskId);
   const orig = t && { name: t.name, start: fmtYMD(t.S), finish: fmtYMD(t.F), duration: t.dur == null ? "" : t.dur + "d", percent: String(t.P), pred: predText(t), status: t.ST }[e.col];
   if (t && val !== orig && !(e.col === "duration" && parseDuration(val) === t.dur)) {
-    if (e.col === "pred") mutate(`Task ${t.wbs}: predecessors → “${val || "none"}”`, () => opSetPredText(t.id, val));
-    else mutate(`Task ${t.wbs}: ${e.col} → “${val}”`, () => opSetField(t.id, e.col, val));
-  } else renderGridRows();
+    const ok = e.col === "pred" ? mutate(`Task ${t.wbs}: predecessors → “${val || "none"}”`, () => opSetPredText(t.id, val))
+      : mutate(`Task ${t.wbs}: ${e.col} → “${val}”`, () => opSetField(t.id, e.col, val));
+    // Refused (bad date, finish before start…): keep the editor open with what was typed, so it can be fixed.
+    if (!ok && M.tasks.has(e.taskId)) { e.done = false; UI.editing = e; e.el.focus(); e.el.select?.(); return; }
+    e.el.remove();
+  } else { e.el.remove(); redraw("gridRows"); }
   if (!fromBlur) {
     $("gridBody").focus();
     if (dr) moveSel(dr);
@@ -238,8 +251,10 @@ function cmdStructure(op) {
 function cmdDelete() {
   const t = selTask(); if (!t) return;
   const n = countDesc(t);
-  if (n && !confirm(`Delete “${t.name}” and its ${n} subtask${n > 1 ? "s" : ""}?`)) return;
-  const next = UI.rows[t.row + 1 + (UI.collapsed.has(t.id) ? 0 : n)] || UI.rows[t.row - 1];
+  const notes = [t, ...M.order.slice(t.index + 1, t.index + 1 + n)].reduce((s, x) => s + (M.noteCount.get(x.id) || 0), 0);
+  const parts = [n ? `its ${n} subtask${n > 1 ? "s" : ""}` : "", notes ? `${notes} work note${notes > 1 ? "s" : ""}` : ""].filter(Boolean);
+  if (parts.length && !confirm(`Delete “${t.name}” and ${parts.join(" and ")}? (Undo is available.)`)) return;
+  const next = UI.rows.slice(t.row + 1).find(r => !isAncestor(t, r)) || UI.rows[t.row - 1]; // first visible row after the subtree
   if (mutate(`Deleted “${t.name}”${n ? ` (+${n} subtasks)` : ""}`, () => opDelete(t.id))) selectTask(next && M.tasks.has(next.id) ? next.id : null);
 }
 const countDesc = t => t.children.reduce((s, c) => s + 1 + countDesc(c), 0);
@@ -252,12 +267,13 @@ function initGrid() {
   body.addEventListener("scroll", () => {
     $("gridHead").scrollLeft = body.scrollLeft;
     if ($("ganttBody").scrollTop !== body.scrollTop) $("ganttBody").scrollTop = body.scrollTop;
-    renderGridRows();
+    redraw("gridRows");
   });
   body.addEventListener("pointerdown", e => {
     if (e.target.closest(".cell-editor")) return;
     const row = e.target.closest(".grow"); if (!row) return;
     const id = +row.dataset.id, cell = e.target.closest(".gc");
+    if (e.target.closest("[data-open]")) { e.preventDefault(); openRecord(id); return; }
     if (e.target.closest("[data-caret]")) { toggleCollapse(id); return; }
     const col = cell?.dataset.col;
     if (col === "wbs") { beginRowDrag(e, id); }
@@ -266,7 +282,6 @@ function initGrid() {
     lastDown = { id, col, t: now };
     const wasSel = UI.selId === id && UI.col === col;
     if (!wasSel) selectTask(id, { scroll: false, col: col && col !== "wbs" ? col : UI.col });
-    else if (UI.drawer) renderDrawer();
     // Deferred so the browser's own mousedown focus handling can't steal focus from the editor/picker.
     if (col && col !== "wbs" && (dbl || (wasSel && colByKey(col)?.edit === "party"))) { e.preventDefault(); lastDown = null; setTimeout(() => startEdit(col), 0); }
   });
@@ -279,6 +294,8 @@ function gridKey(e) {
   const t = selTask();
   if (e.key === "ArrowDown" && e.altKey && e.shiftKey) { e.preventDefault(); return cmdStructure("down"); }
   if (e.key === "ArrowUp" && e.altKey && e.shiftKey) { e.preventDefault(); return cmdStructure("up"); }
+  if (e.key === "ArrowRight" && e.altKey && e.shiftKey) { e.preventDefault(); return cmdStructure("indent"); }
+  if (e.key === "ArrowLeft" && e.altKey && e.shiftKey) { e.preventDefault(); return cmdStructure("outdent"); }
   if (e.key === "ArrowLeft" && e.altKey) { e.preventDefault(); if (t?.isSummary) toggleCollapse(t.id, true); return; }
   if (e.key === "ArrowRight" && e.altKey) { e.preventDefault(); if (t?.isSummary) toggleCollapse(t.id, false); return; }
   switch (e.key) {
@@ -290,13 +307,14 @@ function gridKey(e) {
     case "PageUp": e.preventDefault(); return moveSel(-Math.floor($("gridBody").clientHeight / ROW));
     case "Home": if (ctrl) { e.preventDefault(); return UI.rows[0] && selectTask(UI.rows[0].id); } return;
     case "End": if (ctrl) { e.preventDefault(); return UI.rows.length && selectTask(UI.rows.at(-1).id); } return;
-    case "Tab": e.preventDefault(); return cmdStructure(e.shiftKey ? "outdent" : "indent");
+    case "Tab": if (!t) return; e.preventDefault(); return cmdStructure(e.shiftKey ? "outdent" : "indent"); // no selection: Tab leaves the grid
     case "Enter": case "F2": e.preventDefault(); return startEdit();
     case "Insert": e.preventDefault(); return cmdAdd("task", ctrl);
     case "Delete": e.preventDefault(); return cmdDelete();
-    case "Escape": return;
+    case "Escape": if (!UI.form && t) selectTask(null); return;
   }
-  if (!ctrl && !e.altKey && e.key.length === 1 && t) {
+  const altGr = e.getModifierState?.("AltGraph"); // AltGr arrives as Ctrl+Alt on Windows: "@" or "{" on many layouts
+  if ((altGr || (!ctrl && !e.altKey)) && e.key.length === 1 && t) {
     const c = colByKey(UI.col);
     if (c?.edit === "text" || c?.edit === "date") { e.preventDefault(); startEdit(UI.col, e.key); }
     else if (c?.edit === "party" || c?.edit === "select") { e.preventDefault(); startEdit(UI.col); }
@@ -305,16 +323,21 @@ function gridKey(e) {
 
 // ---------- Drag rows to reorder / re-parent ----------
 function beginRowDrag(e, id) {
-  const sx = e.clientX, sy = e.clientY; let active = false, drop = null, timer = null;
+  const sx = e.clientX, sy = e.clientY; let active = false, drop = null, timer = null, last = null;
   const body = $("gridBody");
   const clear = () => $$(".grow.drop-before,.grow.drop-after,.grow.drop-child").forEach(r => r.classList.remove("drop-before", "drop-after", "drop-child"));
   const move = ev => {
     if (!active && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return;
-    active = true; document.body.style.cursor = "grabbing";
+    active = true; document.body.style.cursor = "grabbing"; last = ev;
     const r = body.getBoundingClientRect();
     clearInterval(timer);
-    if (ev.clientY < r.top + 24) timer = setInterval(() => body.scrollTop -= 12, 30);
-    else if (ev.clientY > r.bottom - 24) timer = setInterval(() => body.scrollTop += 12, 30);
+    // Scrolling re-renders the rows, so the target is found again on every tick, under the pointer.
+    const dy = ev.clientY < r.top + 24 ? -12 : ev.clientY > r.bottom - 24 ? 12 : 0;
+    if (dy) timer = setInterval(() => { body.scrollTop += dy; redraw("gridRows"); drawNow(); hit(last); }, 30); // hit() reads the new rows
+    hit(ev);
+  };
+  const hit = ev => {
+    const r = body.getBoundingClientRect();
     clear(); drop = null;
     const row = document.elementFromPoint(r.left + 20, ev.clientY)?.closest(".grow");
     if (!row) return;
@@ -326,16 +349,18 @@ function beginRowDrag(e, id) {
     row.classList.add("drop-" + where); drop = { tid, where };
     showTip(ev, `${where === "child" ? "Make subtask of" : "Move " + where} ${target.wbs} ${target.name}`);
   };
-  const up = () => {
-    window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
-    clearInterval(timer); clear(); hideTip(); document.body.style.cursor = "";
-    if (active && drop) {
+  const stop = () => { clearInterval(timer); clear(); hideTip(); document.body.style.cursor = ""; };
+  trackDrag(window, {
+    move,
+    drop: () => {
+      stop();
+      if (!active || !drop) return;
       const self = M.tasks.get(id), target = M.tasks.get(drop.tid);
       if (drop.where === "child") { UI.collapsed.delete(drop.tid); saveCollapsed(); }
       if (mutate(`Moved “${self.name}” ${drop.where === "child" ? "under" : drop.where} “${target.name}”`, () => opMoveTo(id, drop.tid, drop.where))) selectTask(id);
-    }
-  };
-  window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    },
+    cancel: stop,
+  });
 }
 function showTip(ev, text) { const tip = $("dragTip"); tip.hidden = false; tip.textContent = text; tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY + 14 + "px"; }
 function hideTip() { $("dragTip").hidden = true; }

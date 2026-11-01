@@ -4,19 +4,77 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+// The one way markup is built (DECISIONS #74). html`<b>${name}</b>` escapes every ${value} unless the value is itself
+// an html`` result, or an array of them; null, undefined and false add nothing (use String(x) for "false" in an
+// attribute). setHtml() and h(..., { html }) accept only html`` results, so a plain string can never become markup.
+// Joining results with + or a plain `${}` would turn them back into a string, so that throws: nest them in html`` instead.
+class SafeHtml { constructor(s) { this.s = s; } toString() { throw new TypeError("Nest html`…` results inside html`…`; don't join them with + or a plain template"); } }
+const htmlPart = v => v instanceof SafeHtml ? v.s : Array.isArray(v) ? v.map(htmlPart).join("") : v == null || v === false ? "" : esc(v);
+function html(strings, ...vals) { let s = strings[0]; for (let i = 0; i < vals.length; i++) s += htmlPart(vals[i]) + strings[i + 1]; return new SafeHtml(s); }
+function setHtml(el, v) {
+  if (!(v instanceof SafeHtml)) throw new TypeError("setHtml takes an html`…` result, not a string");
+  el.innerHTML = v.s;
+}
 
 function h(tag, attrs = {}, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false) continue;
     if (k === "class") el.className = v;
-    else if (k === "html") el.innerHTML = v;
+    else if (k === "html") setHtml(el, v);
     else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
     else if (k === "style" && typeof v === "object") Object.assign(el.style, v);
     else el.setAttribute(k, v === true ? "" : v);
   }
   for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(kid));
   return el;
+}
+
+// Pointer-drag plumbing shared by every drag. It ends with drop(ev) on pointerup, or cancel(ev) on
+// pointercancel, the window losing focus, or Escape, and always removes its listeners.
+function trackDrag(target, { move, drop, cancel = () => { } }) {
+  let done = false;
+  const end = (ev, ok) => {
+    if (done) return; done = true;
+    target.removeEventListener("pointermove", move); target.removeEventListener("pointerup", onUp); target.removeEventListener("pointercancel", onCancel);
+    window.removeEventListener("blur", onCancel); document.removeEventListener("keydown", onKey, true);
+    (ok ? drop : cancel)(ev);
+  };
+  const onUp = ev => end(ev, true), onCancel = ev => end(ev, false);
+  const onKey = ev => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); end(ev, false); } };
+  target.addEventListener("pointermove", move); target.addEventListener("pointerup", onUp); target.addEventListener("pointercancel", onCancel);
+  window.addEventListener("blur", onCancel); document.addEventListener("keydown", onKey, true);
+}
+
+// Rebuilding part of the page throws away the element that had focus (DECISIONS #76). markFocus(root) remembers it
+// by its data-* attributes under its nearest marked ancestor; an unmarked control by its place among the same tags
+// in that ancestor (a row's second person button); lacking both, by its text. It also keeps the caret and any typing
+// not yet saved. refocus(root, mark) finds the one matching element in the new markup.
+const dataSel = el => [...el.attributes].filter(a => a.name.startsWith("data-")).map(a => `[${a.name}="${CSS.escape(a.value)}"]`).join("");
+function markFocus(root) {
+  const el = document.activeElement;
+  if (!el || el === root || !root.contains(el)) return null;
+  let up = el.parentElement; while (up && up !== root && !dataSel(up)) up = up.parentElement;
+  const upSel = up && up !== root ? dataSel(up) : "", tag = el.tagName.toLowerCase();
+  const sel = dataSel(el) ? (upSel ? upSel + " " : "") + tag + dataSel(el) : null;
+  const pos = !sel && upSel ? { upSel, i: [...up.querySelectorAll(tag)].indexOf(el), cls: el.className } : null;
+  const typed = "_orig" in el && el.value !== el._orig ? el.value : null;
+  return { sel, pos, tag, text: el.textContent.trim(), typed, caret: el.selectionStart != null ? [el.selectionStart, el.selectionEnd] : null };
+}
+function refocus(root, mark, { typed = true } = {}) {
+  if (!mark) return false;
+  let found = [];
+  if (mark.sel) found = [...root.querySelectorAll(mark.sel)];
+  else if (mark.pos) {
+    const ups = root.querySelectorAll(mark.pos.upSel), c = ups.length === 1 ? ups[0].querySelectorAll(mark.tag)[mark.pos.i] : null;
+    if (c && c.className === mark.pos.cls) found = [c];
+  } else if (mark.text) found = [...root.querySelectorAll(mark.tag)].filter(x => x.textContent.trim() === mark.text);
+  if (found.length !== 1) return false; // gone, or ambiguous: better nowhere than on the wrong button
+  const el = found[0];
+  if (typed && mark.typed != null && "value" in el) el.value = mark.typed;
+  el.focus({ preventScroll: true });
+  if (mark.caret) try { el.setSelectionRange(...mark.caret); } catch { }
+  return document.activeElement === el;
 }
 
 let toastTimer;
@@ -35,7 +93,8 @@ function parseYMD(s) {
   if (!s) return null;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) return null;
-  return Math.round(Date.UTC(+m[1], +m[2] - 1, +m[3]) / DAY);
+  const n = Math.round(Date.UTC(+m[1], +m[2] - 1, +m[3]) / DAY);
+  return fmtYMD(n) === s ? n : null; // "2026-02-30" isn't a date (Date.UTC would roll it to March 2)
 }
 function fmtYMD(n) {
   if (n == null) return "";
@@ -50,11 +109,12 @@ function wdIndex(n) { const m = n + 3; const w = Math.floor(m / 7), r = m - w * 
 // Day number of working-day index i.
 function wdDay(i) { const w = Math.floor(i / 5), r = i - w * 5; return w * 7 + r - 3; }
 const nextWorkday = n => wdDay(wdIndex(n));
-// Half-open working-day span of a task: [s, e). Milestones have e === s.
+// Half-open working-day span of a task: [s, e). A milestone falls at the end of its day (as MS Project's
+// 5 pm finish), so a predecessor finishing that day doesn't conflict with it (DECISIONS #65).
 function span(start, finish, milestone) {
   if (start == null) return null;
+  if (milestone) { const m = wdIndex(start + 1); return { s: m, e: m }; }
   const s = wdIndex(start);
-  if (milestone) return { s, e: s };
   const e = wdIndex((finish ?? start) + 1);
   return { s, e: Math.max(e, s) };
 }

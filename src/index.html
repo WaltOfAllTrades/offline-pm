@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="__CSP__">
 <title>Offline PM</title>
 <style>/*__CSS__*/</style>
 </head>
@@ -15,6 +16,7 @@
   </div>
   <nav class="tabs" role="tablist">
     <button class="tab active" data-view="plan">Plan</button>
+    <button class="tab" data-view="risks">Risks <span id="riskGapCount" class="badge" hidden title="Risks with gaps"></span></button>
     <button class="tab" data-view="raci">RACI matrix</button>
     <button class="tab" data-view="people">People &amp; teams</button>
     <button class="tab" data-view="issues">Issues <span id="issueBadge" class="badge" hidden></span></button>
@@ -29,9 +31,11 @@
       <button data-act="new">New plan file…</button>
       <button data-act="open">Open plan file…</button>
       <button data-act="copy">Save a copy as…</button>
+      <button data-act="backups">Recover replaced copies…</button>
       <button data-act="reconnect" id="mReconnect" hidden>Reconnect to file</button>
       <hr>
       <button data-act="import">Import from Excel / CSV…</button>
+      <button data-act="riskImport">Import risks from Excel / CSV…</button>
       <button data-act="xlsx">Export to Excel (.xlsx)</button>
       <button data-act="csv">Export tasks (.csv)</button>
       <hr>
@@ -40,6 +44,7 @@
     </div>
   </div>
 </header>
+<div id="roBanner" class="ro-banner" hidden role="status"><span id="roText"></span> <button id="roTake">Take over editing here</button></div>
 
 <main id="views">
   <section id="view-plan" class="view">
@@ -66,7 +71,7 @@
       </div>
       <div class="spacer"></div>
       <div class="grp">
-        <button id="detailsBtn" title="Show task details (Ctrl+I)">Details</button>
+        <button id="detailsBtn" title="Open the record form for the selected task (Ctrl+I)">📄 Record</button>
       </div>
       <div class="grp seg" id="grainSeg">
         <button data-grain="day">Day</button><button data-grain="week" class="on">Week</button>
@@ -76,27 +81,47 @@
       <button id="todayBtn" title="Scroll to today">Today</button>
     </div>
     <div class="split" id="split">
+      <section id="formPane" class="form-pane" aria-hidden="true"></section>
       <div class="grid-pane" id="gridPane">
         <div class="grid-head" id="gridHead"></div>
-        <div class="grid-body" id="gridBody" tabindex="0"><div class="grid-canvas" id="gridCanvas"><div id="gridRows"></div></div></div>
+        <div class="grid-body" id="gridBody" tabindex="0" role="treegrid" aria-label="Plan outline" aria-readonly="false"><div class="grid-canvas" id="gridCanvas"><div id="gridRows"></div></div></div>
       </div>
       <div class="splitter" id="splitter" title="Drag to resize"></div>
       <div class="gantt-pane" id="ganttPane">
         <div class="gantt-head" id="ganttHead"><svg id="ganttHeadSvg"></svg></div>
         <div class="gantt-body" id="ganttBody"><svg id="ganttSvg"></svg></div>
       </div>
-      <aside id="drawer" class="drawer" hidden></aside>
+    </div>
+  </section>
+
+  <section id="view-risks" class="view" hidden>
+    <div class="toolbar">
+      <div class="grp"><button id="addRiskBtn" class="primary" title="New risk">＋ Risk</button></div>
+      <div class="grp seg" id="riskSeg"><button data-f="all" class="on">All</button><button data-f="gaps" title="Risks with something not covered">Gaps</button></div>
+      <div class="grp"><input id="riskSearch" type="search" placeholder="Filter risks…" size="16"></div>
+      <div class="spacer"></div>
+      <span class="hint">Drag ⠿ onto a task to link it, or between tasks to create one</span>
+      <div class="grp"><button id="riskImportBtn">Import risks…</button><button id="closeoutBtn">Closeout report</button></div>
+    </div>
+    <div class="split" id="riskSplit">
+      <section id="riskFormPane" class="form-pane" aria-hidden="true"></section>
+      <div class="rk-pane" id="riskBody"></div>
+      <div class="rp-pane">
+        <div class="rp-head"><b>Plan</b><input id="planSearch" type="search" placeholder="Find task…"></div>
+        <div class="rp-list" id="riskPlanList"></div>
+      </div>
     </div>
   </section>
 
   <section id="view-raci" class="view" hidden>
     <div class="toolbar">
+      <div class="grp seg" id="raciBySeg"><button data-by="team">By team</button><button data-by="person">By person</button></div>
       <div class="grp"><label><input type="checkbox" id="raciOnlyUsed" checked> Only people/teams with assignments</label></div>
       <div class="grp"><label><input type="checkbox" id="raciLeaves"> Hide summary tasks</label></div>
       <div class="spacer"></div>
-      <span class="hint">Click a cell to cycle: — → R → A → C → I → —</span>
+      <span class="hint" id="raciHint"></span>
     </div>
-    <div class="raci-wrap" id="raciWrap"></div>
+    <div class="split" id="raciSplit"><div class="raci-wrap" id="raciWrap"></div></div>
   </section>
 
   <section id="view-people" class="view" hidden>
@@ -128,11 +153,11 @@
   </div>
   <ol id="logList"></ol>
 </div>
-<div id="modalBack" class="modal-back" hidden><div id="modal" class="modal" role="dialog" aria-modal="true"></div></div>
+<div id="modalBack" class="modal-back" hidden><div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1"></div></div>
 <div id="pop" class="pop" hidden></div>
 <div id="dragTip" class="dragtip" hidden></div>
 <div id="printRoot" class="print-root"></div>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>/*__SQLJS__*/</script>
 <script>/*__XLSX__*/</script>

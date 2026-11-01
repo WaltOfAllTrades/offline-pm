@@ -36,30 +36,67 @@ let W = null; // wizard state
 function autoMap(headers) {
   const map = {}; const used = new Set();
   const nh = headers.map(normHdr);
+  // Exact matches go by synonym order, so "Start" beats "Baseline Start" and "Task Name" beats "Description"
+  // wherever they sit in the sheet. Date-like headers never count as "% complete" ("Completed On").
   for (const pass of ["exact", "contains"]) {
     for (const f of IMPORT_FIELDS) {
       if (used.has(f.key)) continue;
       const syns = [normHdr(f.label), ...f.syn.map(normHdr)];
-      const i = nh.findIndex((h0, idx) => map[idx] == null && h0 && (pass === "exact" ? syns.includes(h0) : syns.some(s => s.length >= 4 && (h0.includes(s)))));
+      const free = idx => map[idx] == null && nh[idx];
+      let i = -1;
+      if (pass === "exact") { for (const s of syns) { i = nh.findIndex((h0, idx) => free(idx) && h0 === s); if (i >= 0) break; } }
+      else i = nh.findIndex((h0, idx) => free(idx) && !(f.key === "percent" && /\b(date|on|by|at)\b/.test(h0)) && syns.some(s => s.length >= 4 && h0.includes(s)));
       if (i >= 0) { map[i] = f.key; used.add(f.key); }
     }
   }
   return map;
 }
 
+// CSV text is UTF-8 when it decodes cleanly; otherwise it's what Excel's plain "CSV (Comma delimited)" writes
+// on Western Windows (Windows-1252), so "José" doesn't turn into "Jos�" (DECISIONS #67).
+function decodeCsv(buf) {
+  try { return { text: new TextDecoder("utf-8", { fatal: true }).decode(buf), encoding: "utf-8" }; }
+  catch { return { text: new TextDecoder("windows-1252").decode(buf), encoding: "windows-1252" }; }
+}
 function readWorkbook(file, buf) {
   const isCsv = /\.(csv|txt|tsv)$/i.test(file.name);
-  const wb = isCsv ? XLSX.read(new TextDecoder().decode(buf), { type: "string", raw: true }) : XLSX.read(buf, { type: "array", cellDates: false });
-  return { wb, isCsv, date1904: !!wb.Workbook?.WBProps?.date1904 };
+  const csv = isCsv ? decodeCsv(buf) : null;
+  const wb = isCsv ? XLSX.read(csv.text, { type: "string", raw: true }) : XLSX.read(buf, { type: "array", cellDates: false });
+  return { wb, isCsv, encoding: csv?.encoding ?? null, date1904: !!wb.Workbook?.WBProps?.date1904 };
+}
+// The task id an ID cell refers to: whole numbers only, so "12b", "1.9" or "1,234" never update task 12, 1 or 1.
+const idKey = v => { const s = String(v ?? "").trim(); return /^\d+$/.test(s) ? String(+s) : null; };
+// Update mode: which rows update which existing task. Only the first row with a given ID does; later copies
+// (a row copied and pasted to make a new task) are added as new tasks (DECISIONS #67).
+function updateMatches(plan, taskIds) {
+  const match = new Map(), seen = new Set(), dupRows = [];
+  for (const it of plan.items) {
+    const k = idKey(it.srcId); if (k == null || !taskIds.has(k)) continue;
+    if (seen.has(k)) { dupRows.push(it.rowNo); continue; }
+    seen.add(k); match.set(it, taskIds.get(k));
+  }
+  return { match, dupRows };
+}
+// A sheet's declared range can be far bigger than its cells (whole columns formatted, say), and reading it
+// would freeze the tab. Read only up to the last real cell, and at most MAX_ROWS × MAX_COLS.
+const MAX_ROWS = 100000, MAX_COLS = 300;
+function trimRange(ws) {
+  if (!ws["!ref"]) return false;
+  const decl = XLSX.utils.decode_range(ws["!ref"]); let maxR = decl.s.r, maxC = decl.s.c;
+  for (const k in ws) { if (k[0] === "!") continue; const c = XLSX.utils.decode_cell(k); if (c.r > maxR) maxR = c.r; if (c.c > maxC) maxC = c.c; }
+  const e = { r: Math.min(maxR, decl.e.r, decl.s.r + MAX_ROWS), c: Math.min(maxC, decl.e.c, decl.s.c + MAX_COLS - 1) };
+  ws["!ref"] = XLSX.utils.encode_range({ s: decl.s, e });
+  return maxR > e.r || maxC > e.c;
 }
 function sheetRows(ws) {
+  if (trimRange(ws)) toast(`Only the first ${MAX_ROWS.toLocaleString()} rows and ${MAX_COLS} columns of that sheet are read.`, "err");
   const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "", blankrows: false });
   const text = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "", blankrows: false });
   return { raw, text };
 }
 function readMeta(wb) {
   const ws = wb.Sheets["_meta"]; if (!ws) return null;
-  const o = {}; for (const [k, v] of XLSX.utils.sheet_to_json(ws, { header: 1, raw: true })) if (k) o[k] = v;
+  const o = Object.create(null); for (const [k, v] of XLSX.utils.sheet_to_json(ws, { header: 1, raw: true })) if (k) o[k] = v;
   return o.app === "offline-pm" ? o : null;
 }
 
@@ -74,12 +111,12 @@ function startImport() {
 }
 
 async function loadImportFile(name, buf) {
-  const { wb, isCsv, date1904 } = readWorkbook({ name }, buf);
+  const { wb, isCsv, encoding, date1904 } = readWorkbook({ name }, buf);
   const meta = readMeta(wb);
   const sheetName = meta && wb.Sheets.Tasks ? "Tasks" : wb.SheetNames.find(n => n !== "_meta") || wb.SheetNames[0];
   // Default to "update" only for an export of this same project from this same .db (ids mean nothing elsewhere).
   const sameFile = meta && +meta.project_id === M.projectId && meta.file_id && meta.file_id === scalar("SELECT value FROM meta WHERE key='file_id'");
-  W = { fileName: name, wb, isCsv, date1904, meta, sheetName, headerRow: 0, map: {}, hierarchy: "auto", predRef: "auto", dateOrder: "MDY", mode: sameFile ? "update" : "new", projectName: (meta?.project || name.replace(/\.[^.]+$/, "")), statusMap: {}, peopleMap: {}, step: 1 };
+  W = { fileName: name, wb, isCsv, encoding, sameFile: !!sameFile, updateConfirmed: false, date1904, meta, sheetName, risks: meta ? readRiskSheets(wb) : null, headerRow: 0, map: {}, hierarchy: "auto", predRef: "auto", dateOrder: "MDY", mode: sameFile ? "update" : "new", projectName: (meta?.project || name.replace(/\.[^.]+$/, "")), statusMap: Object.create(null), peopleMap: Object.create(null), step: 1 }; // keyed by file text: no prototype keys
   loadSheet();
   renderWizard();
 }
@@ -107,9 +144,9 @@ function applyHeaderRow() {
   if (W.saved) {
     try {
       const cfg = JSON.parse(W.saved.config);
-      W.map = {}; W.headers.forEach((hd, i) => { const k = cfg.map[normHdr(hd)]; if (k) W.map[i] = k; });
+      W.map = {}; W.headers.forEach((hd, i) => { const k = Object.hasOwn(cfg.map, normHdr(hd)) && cfg.map[normHdr(hd)]; if (k) W.map[i] = k; });
       Object.assign(W, { hierarchy: cfg.hierarchy || "auto", predRef: cfg.predRef || "auto", dateOrder: cfg.dateOrder || W.dateOrder });
-      W.statusMap = cfg.statusMap || {};
+      W.statusMap = Object.assign(Object.create(null), cfg.statusMap);
     } catch { }
   } else W.dateOrder = guessDateOrder();
 }
@@ -156,7 +193,7 @@ function buildPlan() {
   const errors = [], warnings = [];
   const nc = colOf("name");
   if (nc < 0) return { items: [], errors: ["Map a column to “Task name”."], warnings, mode: "flat" };
-  const unguard = s => /^'[=+\-@]/.test(s) ? s.slice(1) : s; // undo our CSV formula-injection guard
+  const unguard = s => W.isCsv && /^'[=+\-@\t\r]/.test(s) ? s.slice(1) : s; // undo our CSV formula-injection guard (CSV only)
   const txt = (r, key) => { const c = colOf(key); return c < 0 ? "" : unguard(String(W.text[r][c] ?? "").trim()); };
   // A % column holding only plain numbers 0..1 is fractions (Excel "General" format); otherwise numbers are percents.
   const pcol = colOf("percent");
@@ -202,7 +239,7 @@ function buildPlan() {
     it.status = st ? (W.statusMap[st] || STATUS_GUESS(st)) : it.percent === 100 ? "Done" : it.percent > 0 ? "In progress" : colOf("status") >= 0 ? "Not started" : null;
     if (it.status === "Done") it.percent = 100;
     else if (it.percent === 100 && it.status) it.status = "Done";
-    it.code = txt(r, "code"); it.notes = colOf("notes") >= 0 ? String(W.text[r][colOf("notes")] ?? "") : null;
+    it.code = txt(r, "code"); it.notes = colOf("notes") >= 0 ? unguard(String(W.text[r][colOf("notes")] ?? "")) : null;
     it.pred = txt(r, "pred");
     it.people = {}; for (const role of ROLES) if (colOf(role) >= 0) it.people[role] = splitNames(txt(r, role), W.own);
     items.push(it);
@@ -267,7 +304,29 @@ function buildPlan() {
   const ordered = []; const walk = (l, depth, prefix) => l.forEach((it, i) => { it.depth = depth; it.newWbs = prefix + (i + 1); ordered.push(it); walk(it.children, depth + 1, it.newWbs + "."); });
   walk(roots, 0, "");
   if (!items.length) errors.push("No rows with a task name were found.");
-  return { items: ordered, roots, errors, warnings, mode, predMode: resolvePredRef() };
+  const plan = { items: ordered, roots, errors, warnings, mode, predMode: resolvePredRef() };
+  if (colOf("pred") >= 0) resolvePreds(plan);
+  return plan;
+}
+// Resolve each row's predecessor tokens against the sheet now, so the preview lists the ones that won't work.
+// A row with an unresolved token keeps its existing links in update mode (see applyPlan).
+const PRED_TOKEN = /^#?(.+?)\s*(FS|SS|FF|SF)?\s*(?:([+-])\s*(\d+(?:\.\d+)?)\s*(d|days?|w|wks?|weeks?|ed|edays?|h|hrs?)?)?$/i;
+function resolvePreds(plan) {
+  const ref = new Map();
+  for (const it of plan.items) {
+    if (plan.predMode === "wbs" && it.srcWbs) ref.set(it.srcWbs, it);
+    if (plan.predMode === "id" && it.srcId) ref.set(it.srcId, it);
+    if (plan.predMode === "row") ref.set(String(it.r + 1), it);
+  }
+  for (const it of plan.items) {
+    it.predLinks = []; it.predBad = false;
+    for (const tok of String(it.pred || "").split(/[,;]+/).map(s => s.trim()).filter(Boolean)) {
+      const m = PRED_TOKEN.exec(tok), target = m && ref.get(m[1].trim().replace(/\.$/, ""));
+      if (!target || target === it) { it.predBad = true; plan.warnings.push(`Row ${it.rowNo}: predecessor “${tok}” not found${W.mode === "update" ? "; this row's existing links are kept" : ""}`); continue; }
+      let lag = m[4] ? parseFloat(m[4]) : 0; if (m[5] && /^w/i.test(m[5])) lag *= 5; if (m[5] && /^h/i.test(m[5])) lag /= 8; if (m[3] === "-") lag = -lag;
+      it.predLinks.push({ tok, target, type: (m[2] || "FS").toUpperCase(), lag: Math.round(lag) });
+    }
+  }
 }
 
 // People names → actions. Returns Map(lowerName → {name, kind, action, partyId})
@@ -275,17 +334,18 @@ function collectPeople(plan) {
   const out = new Map();
   const extra = W.meta ? metaParties() : [];
   const parse = raw => { const m = /^(team|user|person)\s*:\s*(.+)$/i.exec(raw); return { kind: m ? (m[1].toLowerCase() === "team" ? "team" : "person") : null, name: (m ? m[2] : raw).trim() }; };
+  const sources = [...plan.items.map(it => it.people), ...(W.risks ? [...W.risks.risks, ...W.risks.mits] : [])]; // { R: [...], A: [...] }
   const prefixed = new Map(); // name → kind, when the file uses a team:/user: prefix somewhere
-  for (const it of plan.items) for (const role of ROLES) for (const raw of it.people[role] || []) { const p = parse(raw); if (p.kind) prefixed.set(p.name.toLowerCase(), p.kind); }
+  for (const src of sources) for (const role of ROLES) for (const raw of src[role] || []) { const p = parse(raw); if (p.kind) prefixed.set(p.name.toLowerCase(), p.kind); }
   W.prefixed = prefixed;
-  for (const it of plan.items) for (const role of ROLES) for (const raw of it.people[role] || []) {
+  for (const src of sources) for (const role of ROLES) for (const raw of src[role] || []) {
     const pr = parse(raw);
     const kind = pr.kind || prefixed.get(pr.name.toLowerCase()) || null;
     const name = pr.name; const key = (kind ? kind + ":" : "") + name.toLowerCase();
     if (out.has(key)) continue;
     const existing = [...M.parties.values()].find(p => (p.name.toLowerCase() === name.toLowerCase() || (p.email && p.email.toLowerCase() === name.toLowerCase())) && (!kind || p.kind === kind));
     const fromSheet = extra.find(p => p.name.toLowerCase() === name.toLowerCase() && (!kind || p.kind === kind));
-    const saved = W.peopleMap[key];
+    const saved = Object.hasOwn(W.peopleMap, key) ? W.peopleMap[key] : null;
     out.set(key, { name, kind: kind || fromSheet?.kind || "person", action: saved || (existing ? "map:" + existing.id : (kind || fromSheet?.kind) === "team" ? "team" : "person") });
   }
   return out;
@@ -315,33 +375,46 @@ function applyPlan(plan, people) {
   const report = { added: 0, updated: 0, deps: 0, people: 0, warnings: [] };
   let pid = M.projectId;
   if (W.mode === "new") pid = opAddProject(W.projectName || "Imported plan");
-  // parties
-  const partyId = new Map();
+  // parties. Names match case-insensitively in JS (SQLite's lower() only folds ASCII, so "Élodie" would duplicate).
+  const partyId = new Map(); // "kind:lower name" → id
+  for (const p of q("SELECT id, kind, name FROM party")) if (!partyId.has(p.kind + ":" + p.name.toLowerCase())) partyId.set(p.kind + ":" + p.name.toLowerCase(), p.id);
+  const decision = (name, kind) => people.get(kind + ":" + name.toLowerCase()) || people.get(name.toLowerCase()); // step-3 choice, if the name is used
   for (const p of metaParties()) {
-    let ex = one("SELECT id FROM party WHERE lower(name)=lower(?) AND kind=?", [p.name, p.kind]);
-    if (!ex) { opAddParty(p.kind, p.name, p); ex = { id: lastId() }; if (!p.active) opUpdateParty(ex.id, { active: false }); report.people++; }
-    partyId.set(p.kind + ":" + p.name.toLowerCase(), ex.id);
+    const key = p.kind + ":" + p.name.toLowerCase(), d = decision(p.name, p.kind);
+    if (d && d.action === "ignore") continue; // step 3 wins over the People sheet
+    if (d && d.action.startsWith("map:")) { partyId.set(key, +d.action.slice(4)); continue; }
+    if (partyId.has(key)) continue;
+    const id = opAddParty(p.kind, p.name, p); if (!p.active) opUpdateParty(id, { active: false }); report.people++;
+    partyId.set(key, id);
   }
+  // Team members from the People sheet; a person stays on one team (DECISIONS #60).
   for (const p of metaParties()) if (p.kind === "team" && p.members.length) {
-    const tid = partyId.get("team:" + p.name.toLowerCase());
-    for (const m of p.members) { const mid = partyId.get("person:" + m.toLowerCase()) ?? one("SELECT id FROM party WHERE lower(name)=lower(?) AND kind='person'", [m])?.id; if (mid) run("INSERT OR IGNORE INTO team_member VALUES (?,?)", [tid, mid]); }
+    const tid = partyId.get("team:" + p.name.toLowerCase()); if (!tid) continue;
+    for (const m of p.members) {
+      const mid = partyId.get("person:" + m.toLowerCase()); if (!mid) continue;
+      const cur = scalar("SELECT team_id FROM team_member WHERE person_id=? LIMIT 1", [mid]);
+      if (cur == null) run("INSERT INTO team_member VALUES (?,?)", [tid, mid]);
+      else if (cur !== tid) report.warnings.push(`${m} is already on team “${scalar("SELECT name FROM party WHERE id=?", [cur])}”, so wasn't added to “${p.name}”`);
+    }
   }
   const resolved = new Map();
   for (const [key, v] of people) {
     if (v.action === "ignore") continue;
     if (v.action.startsWith("map:")) { resolved.set(key, +v.action.slice(4)); continue; }
-    const known = partyId.get(v.action + ":" + v.name.toLowerCase()) ?? one("SELECT id FROM party WHERE lower(name)=lower(?) AND kind=?", [v.name, v.action])?.id;
+    const known = partyId.get(v.action + ":" + v.name.toLowerCase());
     if (known) { resolved.set(key, known); continue; }
-    resolved.set(key, opAddParty(v.action, v.name)); report.people++;
+    const id = opAddParty(v.action, v.name); partyId.set(v.action + ":" + v.name.toLowerCase(), id);
+    resolved.set(key, id); report.people++;
   }
   const lookupParty = raw => { const m = /^(team|user|person)\s*:\s*(.+)$/i.exec(raw); const name = (m ? m[2] : raw).trim(); const kind = m ? (m[1].toLowerCase() === "team" ? "team" : "person") : (W.prefixed?.get(name.toLowerCase()) || null); return resolved.get((kind ? kind + ":" : "") + name.toLowerCase()); };
 
   // tasks
   const existing = W.mode === "update" ? new Map(q("SELECT id FROM task WHERE project_id=?", [pid]).map(r => [String(r.id), r.id])) : new Map();
+  const { match: matches } = W.mode === "update" ? updateMatches(plan, existing) : { match: new Map() };
   const nextPos = new Map(); const posFor = parent => { if (!nextPos.has(parent)) nextPos.set(parent, scalar("SELECT COALESCE(MAX(position)+1,0) FROM task WHERE project_id=? AND parent_id IS ?", [pid, parent])); const p = nextPos.get(parent); nextPos.set(parent, p + 1); return p; };
   const mapped = k => colOf(k) >= 0;
   for (const it of plan.items) {
-    const match = W.mode === "update" && it.srcId && existing.get(String(parseInt(it.srcId, 10)));
+    const match = matches.get(it);
     if (match) {
       it.taskId = match;
       const cols = { name: it.name };
@@ -365,30 +438,32 @@ function applyPlan(plan, people) {
     // RACI: later roles win when one party appears twice (A strongest).
     const roleCols = ["I", "C", "R", "A"].filter(r => it.people[r]);
     if (match) for (const role of roleCols) run("DELETE FROM raci WHERE task_id=? AND role=?", [it.taskId, role]);
-    for (const role of roleCols) for (const raw of it.people[role]) { const p = lookupParty(raw); if (p) opSetRole(it.taskId, p, role); }
+    if (match && it.people.R) run("UPDATE task SET r_is_a=0 WHERE id=?", [it.taskId]);
+    // Export writes the Accountable into Responsible for "same as Accountable" tasks, so an R that equals the
+    // task's own A turns the switch back on instead of becoming R rows (DECISIONS #48). An R equal to an inherited
+    // A stays as R rows: the sheet can't tell that apart from naming the same person on purpose.
+    const ids = role => [...new Set((it.people[role] || []).map(lookupParty).filter(Boolean))].sort((x, y) => x - y);
+    const rIds = ids("R"), aIds = ids("A");
+    const rIsA = rIds.length > 0 && rIds.join() === aIds.join();
+    for (const role of roleCols) if (!(role === "R" && rIsA)) for (const raw of it.people[role]) { const p = lookupParty(raw); if (p) opSetRole(it.taskId, p, role); }
+    if (rIsA) opSetRIsA(it.taskId, true);
   }
   // dependencies
   if (mapped("pred")) {
-    const ref = new Map();
-    for (const it of plan.items) {
-      if (plan.predMode === "wbs" && it.srcWbs) ref.set(it.srcWbs, it);
-      if (plan.predMode === "id" && it.srcId) ref.set(it.srcId, it);
-      if (plan.predMode === "row") ref.set(String(it.r + 1), it);
+    if (!plan.items.every(it => it.predLinks)) resolvePreds(plan);
+    // Update mode replaces only links between tasks that are both in the sheet; links from rows a teammate removed survive,
+    // and so do those of a row with a predecessor that can't be found. They all go first, so a link reversed in the
+    // sheet doesn't trip over the old one.
+    if (W.mode === "update") {
+      const inSheet = JSON.stringify(plan.items.map(i => i.taskId)), matched = JSON.stringify(plan.items.filter(i => existing.has(String(i.taskId)) && !i.predBad).map(i => i.taskId));
+      run("DELETE FROM dep WHERE succ_id IN (SELECT value FROM json_each(?)) AND pred_id IN (SELECT value FROM json_each(?))", [matched, inSheet]);
     }
-    const inSheet = plan.items.map(i => i.taskId);
-    for (const it of plan.items) {
-      // Update mode replaces only links between tasks that are both in the sheet; links from rows a teammate removed survive.
-      if (W.mode === "update" && existing.has(String(it.taskId))) run(`DELETE FROM dep WHERE succ_id=? AND pred_id IN (${inSheet.map(() => "?").join(",")})`, [it.taskId, ...inSheet]);
-      for (const tok of String(it.pred || "").split(/[,;]+/).map(s => s.trim()).filter(Boolean)) {
-        const m = /^(.+?)\s*(FS|SS|FF|SF)?\s*(?:([+-])\s*(\d+(?:\.\d+)?)\s*(d|days?|w|wks?|weeks?|ed|edays?|h|hrs?)?)?$/i.exec(tok);
-        const target = m && ref.get(m[1].trim().replace(/\.$/, ""));
-        if (!target) { report.warnings.push(`Row ${it.rowNo}: predecessor “${tok}” not found`); continue; }
-        let lag = m[4] ? parseFloat(m[4]) : 0; if (m[5] && /^w/i.test(m[5])) lag *= 5; if (m[5] && /^h/i.test(m[5])) lag /= 8; if (m[3] === "-") lag = -lag;
-        try { opAddDep(target.taskId, it.taskId, (m[2] || "FS").toUpperCase(), Math.round(lag)); report.deps++; }
-        catch (e) { report.warnings.push(`Row ${it.rowNo}: link from “${tok}” skipped (${e.message})`); }
-      }
+    for (const it of plan.items) for (const l of it.predLinks) {
+      try { opAddDep(l.target.taskId, it.taskId, l.type, l.lag); report.deps++; }
+      catch (e) { report.warnings.push(`Row ${it.rowNo}: link from “${l.tok}” skipped (${e.message})`); }
     }
   }
+  if (W.risks) applyRisks(pid, plan, lookupParty, report);
   // remember mapping
   const cfg = { map: Object.fromEntries(Object.entries(W.map).map(([i, k]) => [normHdr(W.headers[i]), k])), hierarchy: W.hierarchy, predRef: W.predRef, dateOrder: W.dateOrder, statusMap: W.statusMap };
   run("INSERT OR REPLACE INTO import_map(signature, config, updated_at) VALUES (?,?,?)", [W.signature, JSON.stringify(cfg), nowIso()]);
@@ -444,7 +519,7 @@ function renderWizard() {
       body.append(h("h4", { style: { margin: "0 0 6px" } }, "Status values"));
       const tb = h("table", { class: "map" }, h("tr", {}, h("th", {}, "In your file"), h("th", {}, "Becomes")));
       for (const v of vals) {
-        if (!W.statusMap[v]) W.statusMap[v] = STATUS_GUESS(v);
+        if (!Object.hasOwn(W.statusMap, v)) W.statusMap[v] = STATUS_GUESS(v);
         const sel = h("select", {}, ...STATUSES.map(s => h("option", { selected: W.statusMap[v] === s }, s)));
         sel.addEventListener("change", () => W.statusMap[v] = sel.value);
         tb.append(h("tr", {}, h("td", {}, v), h("td", {}, sel)));
@@ -476,22 +551,36 @@ function renderWizard() {
     mode.addEventListener("change", () => { W.mode = mode.value; renderWizard(); });
     pname.addEventListener("input", () => W.projectName = pname.value);
     body.append(h("div", { class: "opts" }, h("label", {}, "Import into", mode), W.mode === "new" ? h("label", {}, "New project name", pname) : h("span")));
+    if (W.encoding === "windows-1252") body.append(h("div", { class: "msg" }, "This CSV isn't UTF-8, so it was read as Windows-1252 (Excel's plain “CSV (Comma delimited)”). Check that accented names look right below."));
+    let needConfirm = false;
     if (W.mode === "update") {
-      const ids = new Set(M.order.map(t => String(t.id)));
-      const n = plan.items.filter(it => it.srcId && ids.has(String(parseInt(it.srcId, 10)))).length;
+      const { match, dupRows } = updateMatches(plan, new Map(M.order.map(t => [String(t.id), t.id])));
+      const n = match.size;
       body.append(h("div", { class: colOf("id") < 0 ? "msg err" : "msg" }, colOf("id") < 0 ? "Map an ID column to update existing tasks." : `${n} rows match existing tasks and will be updated; ${plan.items.length - n} new rows will be added. Hierarchy of existing tasks isn't changed.`));
+      if (dupRows.length) body.append(h("div", { class: "msg warn" }, `${dupRows.length === 1 ? "Row" : "Rows"} ${dupRows.slice(0, 20).join(", ")}${dupRows.length > 20 ? "…" : ""} repeat an ID used by an earlier row, so they'll be added as new tasks instead of overwriting it.`));
+      // Task ids restart at 1 in every file, so updating from another file's sheet overwrites unrelated tasks (DECISIONS #31).
+      if (!W.sameFile && colOf("id") >= 0) {
+        needConfirm = !W.updateConfirmed;
+        const cb = h("input", { type: "checkbox", checked: W.updateConfirmed });
+        cb.addEventListener("change", () => { W.updateConfirmed = cb.checked; renderWizard(); });
+        body.append(h("div", { class: "msg err" }, W.isCsv ? "A CSV doesn't record which plan it came from. " : "This workbook wasn't exported from this plan file and project. ",
+          "IDs only mean something in the plan they came from: in any other plan they'd overwrite unrelated tasks. ",
+          h("label", { style: { display: "block", marginTop: "6px", fontWeight: 600 } }, cb, " This sheet came from this project: update tasks by ID anyway")));
+      }
     }
     for (const e of plan.errors) body.append(h("div", { class: "msg err" }, e));
     body.append(h("p", {}, `${plan.items.length} tasks · hierarchy from `, h("b", {}, plan.mode), colOf("pred") >= 0 ? ` · predecessors by ${plan.predMode}` : ""));
-    if (plan.warnings.length) {
-      const det = h("details", {}, h("summary", { class: "msg warn" }, `${plan.warnings.length} warning${plan.warnings.length > 1 ? "s" : ""} (rows still import)`), h("ul", {}, ...plan.warnings.slice(0, 200).map(w => h("li", {}, w))));
+    if (W.risks) body.append(h("p", {}, riskPreviewText()));
+    const warns = [...plan.warnings, ...(W.risks?.warnings || [])];
+    if (warns.length) {
+      const det = h("details", {}, h("summary", { class: "msg warn" }, `${warns.length} warning${warns.length > 1 ? "s" : ""} (rows still import)`), h("ul", {}, ...warns.slice(0, 200).map(w => h("li", {}, w))));
       body.append(det);
     }
     const rows = [["WBS", "Task", "Start", "Finish", "Status", "%", "R", "A"]];
     for (const it of plan.items.slice(0, 400)) rows.push([it.newWbs, "  ".repeat(it.depth) + (it.kind === "milestone" ? "◆ " : "") + it.name, fmtYMD(it.start), fmtYMD(it.finish), it.status || "", it.percent ?? "", (it.people.R || []).join(", "), (it.people.A || []).join(", ")]);
     body.append(previewTable(rows, true));
     if (plan.items.length > 400) body.append(h("p", { class: "hint" }, `…and ${plan.items.length - 400} more.`));
-    const go = h("button", { class: "primary", disabled: !!plan.errors.length || (W.mode === "update" && colOf("id") < 0), onclick: () => doImport() }, `Import ${plan.items.length} tasks`);
+    const go = h("button", { class: "primary", disabled: !!plan.errors.length || needConfirm || (W.mode === "update" && colOf("id") < 0), onclick: () => doImport() }, `Import ${plan.items.length} tasks`);
     foot.append(back, go);
   }
   const keep = W._lastStep === W.step ? $("modal").querySelector(".modal-b")?.scrollTop : 0;
@@ -511,8 +600,8 @@ function doImport() {
   if (!ok) return;
   closeModal();
   if (report.projectId !== M.projectId) switchProject(report.projectId);
-  const warn = plan.warnings.length + report.warnings.length;
-  toast(`Imported: ${report.added} added, ${report.updated} updated, ${report.deps} links${report.people ? `, ${report.people} people/teams created` : ""}${warn ? ` · ${warn} warnings` : ""}`);
+  const warn = plan.warnings.length + (W.risks?.warnings.length || 0) + report.warnings.length, rk = report.risks;
+  toast(`Imported: ${report.added} added, ${report.updated} updated, ${report.deps} links${rk ? `, ${rk.added + rk.updated} risks, ${rk.mitAdded + rk.mitUpdated} mitigants` : ""}${report.people ? `, ${report.people} people/teams created` : ""}${warn ? ` · ${warn} warnings` : ""}`);
   if (report.warnings.length) logInfo("Import warnings: " + report.warnings.slice(0, 20).join(" | "));
   return report;
 }
@@ -528,7 +617,7 @@ function exportWorkbook() {
   const aoa = [EXPORT_COLS];
   const dateCells = [];
   for (const t of M.order) {
-    const names = role => rolesOf(t.id, role).map(r => partyLabel(r.party_id)).join("; ");
+    const names = role => (role === "R" ? responsible(t).list : rolesOf(t.id, role)).map(r => partyLabel(r.party_id)).join("; ");
     const r = aoa.length;
     aoa.push([t.id, t.wbs, t.depth + 1, t.name, t.isSummary ? "Summary" : t.isMilestone ? "Milestone" : "Task", "", "", t.dur == null ? "" : t.dur + "d", t.P / 100, t.ST, predText(t), names("R"), names("A"), names("C"), names("I"), t.code || "", t.notes || ""]);
     if (t.S != null) dateCells.push([r, 5, t.S]); if (t.F != null) dateCells.push([r, 6, t.F]);
@@ -546,18 +635,155 @@ function exportWorkbook() {
   XLSX.utils.book_append_sheet(wb, ws, "Tasks");
   const pws = XLSX.utils.aoa_to_sheet(people); pws["!cols"] = [24, 8, 26, 20, 7, 40].map(w => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, pws, "People");
+  // Work notes travel as a read-only sheet; import ignores it (DECISIONS #42).
+  const notes = [["Task ID", "WBS", "Task", "Created", "Edited", "Note"]];
+  const localTs = iso => { if (!iso) return ""; const d = new Date(iso); return isNaN(d) ? iso : `${fmtYMD(Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY))} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+  for (const t of M.order) for (const n of notesFor(t.id).reverse()) notes.push([t.id, t.wbs, t.name, localTs(n.created_at), localTs(n.updated_at), n.body]);
+  const nws = XLSX.utils.aoa_to_sheet(notes); nws["!cols"] = [7, 8, 32, 16, 16, 80].map(w => ({ wch: w }));
+  XLSX.utils.book_append_sheet(wb, nws, "Notes");
+  if (M.risks.length) {
+    const { risks, mits } = riskSheets();
+    XLSX.utils.book_append_sheet(wb, risks, "Risk register"); XLSX.utils.book_append_sheet(wb, mits, "Mitigants");
+    XLSX.utils.book_append_sheet(wb, closeoutSheet(), "Risk closeout"); // the report, for reading; import ignores it
+  }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(meta), "_meta");
   return wb;
 }
+// ---------- Risks in the plan workbook (DECISIONS #73) ----------
+// Two sheets meant for loading back: one row per risk, and one per mitigant with its risk's ID and its tasks' IDs.
+// People are written the way the Tasks sheet writes them: an own Accountable, and the Accountable in Responsible
+// when "same as Accountable" is on.
+const RISK_COLS = ["ID", "Risk", "Description", "Mitigation plan", "Response", "Reason accepted", "Probability", "Impact", "Accountable", "Responsible"];
+const MIT_COLS = ["ID", "Risk ID", "Mitigant", "Control", "Status", "Tasks", "Accountable", "Responsible", "Testing", "Handed to"];
+function riskSheets() {
+  const names = list => list.map(p => partyLabel(p.party_id)).join("; ");
+  const lmh = v => v ? LMH[v] : "";
+  const risks = [RISK_COLS], mits = [MIT_COLS];
+  for (const r of M.risks) {
+    risks.push([r.id, r.name, r.description, r.plan, r.response === "accept" ? "Accept" : "Mitigate", r.accept_reason, lmh(r.probability), lmh(r.impact), names(recRoles(r, "A")), names(recResponsible(r).list)]);
+    // Status is the one set by hand: with tasks linked, the tasks decide it (DECISIONS #53), so it's blank or Tested.
+    for (const x of r.mitigants) mits.push([x.id, r.id, x.text, x.is_control ? "Yes" : "No", x.status, x.tasks.map(t => t.id).join(", "), names(recRoles(x, "A")), names(recResponsible(x).list), x.testing, x.handed_to]);
+  }
+  const rws = XLSX.utils.aoa_to_sheet(risks); rws["!cols"] = [6, 34, 40, 40, 10, 30, 11, 9, 20, 20].map(w => ({ wch: w }));
+  const mws = XLSX.utils.aoa_to_sheet(mits); mws["!cols"] = [6, 7, 44, 8, 12, 14, 20, 20, 30, 20].map(w => ({ wch: w }));
+  return { risks: rws, mits: mws };
+}
+// Reads them back from our own export (pure: no DB writes). A missing column means "leave it as it is".
+function readRiskSheets(wb) {
+  const rs = wb.Sheets["Risk register"]; if (!rs) return null;
+  const warnings = [];
+  const rowsOf = (ws, label) => {
+    if (!ws) return [];
+    trimRange(ws);
+    const all = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "", blankrows: true });
+    const hd = (all[0] || []).map(x => String(x).trim());
+    const out = [];
+    all.slice(1).forEach((r, i) => {
+      if (!r.some(c => String(c).trim())) return;
+      out.push({ where: `${label} row ${i + 2}`, get: k => { const c = hd.indexOf(k); return c < 0 ? undefined : String(r[c] ?? "").trim(); } });
+    });
+    return { rows: out, has: k => hd.includes(k) };
+  };
+  const given = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+  const ppl = v => v === undefined ? undefined : splitNames(v, true);
+  const lmh = (row, k) => { const v = row.get(k); if (v === undefined || v === "") return v; const x = toLMH(v); if (!x) warnings.push(`${row.where}: ${k} “${v}” isn't Low, Medium or High, so it's left as it is`); return x || undefined; };
+  const R = rowsOf(rs, "Risk register");
+  if (!R.has("Risk")) return { risks: [], mits: [], warnings: ["The Risk register sheet has no Risk column, so no risks are imported"] };
+  const risks = [];
+  for (const row of R.rows) {
+    const name = row.get("Risk");
+    if (!name) { warnings.push(`${row.where}: no risk name, so it's skipped`); continue; }
+    let response = row.get("Response");
+    if (response !== undefined) { const s = response.toLowerCase(); response = /^acc/.test(s) ? "accept" : /^mit/.test(s) || !s ? "mitigate" : (warnings.push(`${row.where}: response “${response}” isn't Accept or Mitigate, so it's left as it is`), undefined); }
+    risks.push({ where: row.where, srcId: idKey(row.get("ID")), A: ppl(row.get("Accountable")), R: ppl(row.get("Responsible")),
+      f: given({ name, description: row.get("Description"), plan: row.get("Mitigation plan"), response, accept_reason: row.get("Reason accepted"), probability: lmh(row, "Probability"), impact: lmh(row, "Impact") }) });
+  }
+  const mits = [];
+  const MS = rowsOf(wb.Sheets.Mitigants, "Mitigants");
+  if (MS.rows) for (const row of MS.rows) {
+    const text = row.get("Mitigant");
+    if (!text) { warnings.push(`${row.where}: no mitigant text, so it's skipped`); continue; }
+    let status = row.get("Status");
+    if (status) { const s = MIT_STATUSES.find(x => x.toLowerCase() === status.toLowerCase()); if (!s) warnings.push(`${row.where}: status “${status}” isn't one of ${MIT_STATUSES.join(", ")}, so it's left as it is`); status = s; }
+    const ctl = row.get("Control"), tv = row.get("Tasks");
+    const tasks = tv === undefined ? undefined : tv.split(/[,;\s]+/).filter(Boolean).filter(x => idKey(x) != null || (warnings.push(`${row.where}: “${x}” isn't a task ID, so that link is skipped`), false)).map(idKey);
+    mits.push({ where: row.where, srcId: idKey(row.get("ID")), riskSrc: idKey(row.get("Risk ID")), tasks, A: ppl(row.get("Accountable")), R: ppl(row.get("Responsible")),
+      f: given({ text, is_control: ctl === undefined ? undefined : /^(yes|y|true|1|x|✓)$/i.test(ctl) ? 1 : 0, status, testing: row.get("Testing"), handed_to: row.get("Handed to") }) });
+  }
+  return { risks, mits, warnings };
+}
+// Update mode matches by ID within the project, like tasks; anything else adds. Nothing missing from the sheet is deleted.
+function riskIdMatches(pid) {
+  const upd = W.mode === "update", seenR = new Set(), seenM = new Set();
+  const riskIn = k => upd && k != null ? scalar("SELECT id FROM risk WHERE id=? AND project_id=?", [+k, pid]) : null;
+  const mitIn = k => upd && k != null ? scalar("SELECT m.id FROM mitigant m JOIN risk r ON r.id=m.risk_id WHERE m.id=? AND r.project_id=?", [+k, pid]) : null;
+  const risks = W.risks.risks.map(r => { const id = seenR.has(r.srcId) ? null : riskIn(r.srcId); if (r.srcId != null) seenR.add(r.srcId); return id; });
+  const mits = W.risks.mits.map(x => { const id = seenM.has(x.srcId) ? null : mitIn(x.srcId); if (x.srcId != null) seenM.add(x.srcId); return id; });
+  return { risks, mits, riskIn };
+}
+function riskPreviewText() {
+  const { risks, mits } = W.risks, n = W.mode === "update" ? riskIdMatches(M.projectId) : null;
+  const upd = a => n ? a.filter(Boolean).length : 0;
+  const nr = upd(n?.risks || []), nm = upd(n?.mits || []);
+  return `Also ${risks.length} risk${risks.length === 1 ? "" : "s"} and ${mits.length} mitigant${mits.length === 1 ? "" : "s"} from the Risk register and Mitigants sheets` +
+    (n ? ` (${nr} risk${nr === 1 ? "" : "s"} and ${nm} mitigant${nm === 1 ? "" : "s"} match existing ones by ID and will be updated; the rest are added).` : ".");
+}
+function applyRisks(pid, plan, lookupParty, report) {
+  const rk = report.risks = { added: 0, updated: 0, mitAdded: 0, mitUpdated: 0 };
+  const match = riskIdMatches(pid), upd = W.mode === "update";
+  // A task ID means the row with that ID in this sheet (first one wins), else in update mode an existing task of the project.
+  const taskOf = new Map(); for (const it of plan.items) { const k = idKey(it.srcId); if (k != null && !taskOf.has(k)) taskOf.set(k, it.taskId); }
+  const findTask = k => taskOf.get(k) ?? (upd ? scalar("SELECT id FROM task WHERE id=? AND project_id=?", [+k, pid]) : null);
+  // Same rule as tasks (DECISIONS #48): a Responsible equal to the record's own Accountable turns "same as Accountable" back on.
+  const setParties = (kind, id, rec) => {
+    const ids = list => [...new Set(list.map(lookupParty).filter(Boolean))].sort((a, b) => a - b);
+    const a = rec.A && ids(rec.A), r = rec.R && ids(rec.R);
+    if (a) opSetRecParties(kind, id, "A", a);
+    if (r) { if (a && r.length && r.join() === a.join()) opSetRecRIsA(kind, id, true); else opSetRecParties(kind, id, "R", r); }
+  };
+  const riskId = new Map(); // sheet ID → risk id
+  W.risks.risks.forEach((r, i) => {
+    let id = match.risks[i];
+    try {
+      if (id) { opUpdateRisk(id, r.f); rk.updated++; } else { id = opAddRisk({ ...r.f, projectId: pid }); rk.added++; }
+      setParties("risk", id, r);
+      if (r.srcId != null && !riskId.has(r.srcId)) riskId.set(r.srcId, id);
+    } catch (e) { report.warnings.push(`${r.where}: skipped (${e.message})`); }
+  });
+  W.risks.mits.forEach((x, i) => {
+    let id = match.mits[i];
+    const rid = x.riskSrc == null ? null : riskId.get(x.riskSrc) ?? match.riskIn(x.riskSrc);
+    if (x.riskSrc != null && !rid) return report.warnings.push(`${x.where}: risk ID ${x.riskSrc} isn't in the Risk register, so it's skipped`);
+    if (!rid && !id) return report.warnings.push(`${x.where}: no Risk ID, so it's skipped`);
+    try {
+      if (id) {
+        if (rid && rid !== scalar("SELECT risk_id FROM mitigant WHERE id=?", [id])) { run("UPDATE mitigant SET risk_id=? WHERE id=?", [rid, id]); placeAfter("mitigant", "risk_id", rid, id, null); }
+        opUpdateMitigant(id, x.f); rk.mitUpdated++;
+      } else { id = opAddMitigant(rid, x.f.text, null, x.f); rk.mitAdded++; }
+      setParties("mitigant", id, x);
+      if (x.tasks) {
+        run("DELETE FROM mitigant_task WHERE mitigant_id=?", [id]);
+        for (const k of x.tasks) { const t = findTask(k); if (t) opLinkTask(id, t); else report.warnings.push(`${x.where}: task ${k} isn't in the plan, so that link is skipped`); }
+      }
+    } catch (e) { report.warnings.push(`${x.where}: skipped (${e.message})`); }
+  });
+}
 const safeName = s => (s || "plan").replace(/[\\/:*?"<>|]+/g, "-").trim() || "plan";
 function exportXlsx() { const wb = exportWorkbook(); const name = safeName(M.projects.find(p => p.id === M.projectId)?.name) + ".xlsx"; XLSX.writeFile(wb, name); logInfo(`Exported ${name}`); }
-function exportCsv() {
+function csvText() {
   const wb = exportWorkbook(); const ws = wb.Sheets.Tasks;
   for (const k of Object.keys(ws)) if (ws[k] && ws[k].z === "yyyy-mm-dd") { ws[k] = { t: "s", v: fmtYMD(ws[k].v - 25569) }; }
   for (const k of Object.keys(ws)) if (ws[k] && ws[k].z === "0%") { ws[k] = { t: "s", v: Math.round(ws[k].v * 100) + "%" }; }
-  // Guard against spreadsheet formula injection: text starting with = + - @ gets a leading apostrophe (stripped again on import).
-  for (const k of Object.keys(ws)) if (k[0] !== "!" && ws[k].t === "s" && /^[=+\-@]/.test(ws[k].v)) ws[k] = { t: "s", v: "'" + ws[k].v };
-  const csv = XLSX.utils.sheet_to_csv(ws);
+  // One kind of line break (a lone CR isn't quoted and would split the row), and a guard against spreadsheet
+  // formula injection: text starting with = + - @ tab or CR gets a leading apostrophe (stripped again on import).
+  for (const k of Object.keys(ws)) if (k[0] !== "!" && ws[k].t === "s") {
+    const v = String(ws[k].v).replace(/\r\n?/g, "\n");
+    ws[k] = { t: "s", v: /^[=+\-@\t\r]/.test(v) ? "'" + v : v };
+  }
+  return XLSX.utils.sheet_to_csv(ws);
+}
+function exportCsv() {
+  const csv = csvText();
   const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
   const a = h("a", { href: URL.createObjectURL(blob), download: safeName(M.projects.find(p => p.id === M.projectId)?.name) + ".csv" });
   document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
@@ -575,25 +801,24 @@ function printPlan() {
     const chunk = rows.slice(p * PER_PAGE, (p + 1) * PER_PAGE);
     const H = 44 + chunk.length * ROW + 4;
     const local = new Map(chunk.map((t, i) => [t.id, i]));
-    let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W0} ${H}" font-family="system-ui,Segoe UI,sans-serif" font-size="12">${defs("p" + p)}`;
-    let x = 0; heads.forEach((hd, i) => { s += `<text x="${x + 4}" y="37" font-weight="600" fill="#555">${hd}</text>`; x += COLW[i]; });
-    s += `<g transform="translate(${TX},0)">${headerSvg(sc)}<g transform="translate(0,44)">${backgroundSvg(sc, chunk.length * ROW)}`;
-    for (const d of M.deps) if (local.has(d.pred_id) && local.has(d.succ_id)) s += depPath(sc, d, t => local.get(t.id), "p" + p);
-    chunk.forEach((t, i) => s += barSvg(sc, t, i * ROW, { print: true, noLabel: true }));
-    s += `</g></g><g transform="translate(0,44)">`;
-    chunk.forEach((t, i) => {
+    let x = 0; const headTexts = heads.map((hd, i) => { const tx = html`<text x="${x + 4}" y="37" font-weight="600" fill="#555">${hd}</text>`; x += COLW[i]; return tx; });
+    const links = M.deps.filter(d => local.has(d.pred_id) && local.has(d.succ_id)).map(d => depPath(sc, d, t => local.get(t.id), "p" + p));
+    const bars = chunk.map((t, i) => barSvg(sc, t, i * ROW, { print: true, noLabel: true }));
+    const table = chunk.map((t, i) => {
       const y = i * ROW + 19, a = accountable(t);
       const cells = [t.wbs, t.name, fmtShort(t.S), fmtShort(t.F), t.P + "%", rolesOf(t.id, "R").map(r => partyName(r.party_id)).join(", "), a.list.map(r => partyName(r.party_id)).join(", ")];
-      s += `<line x1="0" x2="${W0}" y1="${i * ROW + ROW}" y2="${i * ROW + ROW}" stroke="#e5e5e5"/>`;
-      let cx = 0; cells.forEach((c, j) => {
+      let cx = 0;
+      const texts = cells.map((c, j) => {
         const max = Math.floor((COLW[j] - 8 - (j === 1 ? t.depth * 14 : 0)) / 6.4); const txt = String(c).length > max ? String(c).slice(0, max - 1) + "…" : c;
-        s += `<text x="${cx + 4 + (j === 1 ? t.depth * 14 : 0)}" y="${y}"${j === 1 && t.isSummary ? ' font-weight="700"' : ""}>${esc(txt)}</text>`; cx += COLW[j];
+        const tx = html`<text x="${cx + 4 + (j === 1 ? t.depth * 14 : 0)}" y="${y}"${j === 1 && t.isSummary ? html` font-weight="700"` : ""}>${txt}</text>`; cx += COLW[j]; return tx;
       });
+      return html`<line x1="0" x2="${W0}" y1="${i * ROW + ROW}" y2="${i * ROW + ROW}" stroke="#e5e5e5"/>${texts}`;
     });
-    s += `</g></svg>`;
+    const chart = html`<g transform="translate(${TX},0)">${headerSvg(sc)}<g transform="translate(0,44)">${backgroundSvg(sc, chunk.length * ROW)}${links}${bars}</g></g>`;
+    const s = html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W0} ${H}" font-family="system-ui,Segoe UI,sans-serif" font-size="12">${defs("p" + p)}${headTexts}${chart}<g transform="translate(0,44)">${table}</g></svg>`;
     const page = h("div", { class: "pg" });
     if (p === 0) page.append(h("h1", {}, proj?.name || "Plan"), h("div", { class: "sub" }, `Printed ${new Date().toLocaleString()} · ${rows.length} tasks${filterActive() ? " (filtered)" : ""}`));
-    page.insertAdjacentHTML("beforeend", s);
+    const holder = h("div", { html: s }); page.append(...holder.childNodes);
     root.append(page);
   }
   setTimeout(() => window.print(), 50);
