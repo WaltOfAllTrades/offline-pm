@@ -1,8 +1,10 @@
 // ---------- Popover + modal helpers ----------
 // onClose runs when the popover is dismissed by clicking elsewhere (it's how pickers save); Escape cancels.
 let popOnClose = null;
+let popReturn = null, modalReturn = null; // where focus goes back to when they close
 function openPop(x, y, content, onClose = null) {
   closePop();
+  popReturn = document.activeElement;
   const pop = $("pop"); pop.innerHTML = ""; pop.append(content); pop.hidden = false; popOnClose = onClose;
   const r = pop.getBoundingClientRect();
   pop.style.left = clamp(x, 8, innerWidth - r.width - 8) + "px";
@@ -11,8 +13,10 @@ function openPop(x, y, content, onClose = null) {
 }
 function closePop(commit = false) {
   const pop = $("pop"), cb = popOnClose; popOnClose = null;
+  const hadFocus = pop.contains(document.activeElement);
   if (!pop.hidden) { pop.hidden = true; pop.innerHTML = ""; }
   if (commit && cb) cb();
+  if (hadFocus || document.activeElement === document.body) restoreFocus(popReturn); popReturn = null;
 }
 document.addEventListener("pointerdown", e => {
   if (!$("pop").hidden && !e.target.closest("#pop")) closePop(true);
@@ -22,14 +26,31 @@ document.addEventListener("pointerdown", e => {
 
 function openModal(title, body, footer, cls = "") {
   const m = $("modal"); m.className = "modal " + cls; m.innerHTML = "";
-  m.append(h("div", { class: "modal-h" }, h("h2", {}, title), h("button", { class: "icon", title: "Close", onclick: closeModal }, "✕")), body);
+  if ($("modalBack").hidden) modalReturn = document.activeElement;
+  m.append(h("div", { class: "modal-h" }, h("h2", { id: "modalTitle" }, title), h("button", { class: "icon", title: "Close", "aria-label": "Close", onclick: closeModal }, "✕")), body);
   if (footer) m.append(footer);
   $("modalBack").hidden = false;
+  (body.querySelector?.("input,select,textarea,button") || m).focus();
 }
-function closeModal() { $("modalBack").hidden = true; $("modal").innerHTML = ""; }
+function closeModal() { $("modalBack").hidden = true; $("modal").innerHTML = ""; restoreFocus(modalReturn); modalReturn = null; }
+// Back to the element that had focus, or to the outline when it's gone (keyboard shortcuts live there).
+function restoreFocus(el) {
+  if (el && el.isConnected && el !== document.body && !el.closest("[hidden]")) el.focus({ preventScroll: true });
+  else if (UI.view === "plan") $("gridBody").focus({ preventScroll: true });
+}
+// Tab stays inside an open dialog.
+document.addEventListener("keydown", e => {
+  if (e.key !== "Tab" || !modalOpen()) return;
+  const items = $$("#modal input:not([disabled]),#modal select:not([disabled]),#modal textarea:not([disabled]),#modal button:not([disabled]),#modal a[href]").filter(x => x.offsetParent);
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (e.shiftKey && (document.activeElement === first || !$("modal").contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
 const modalOpen = () => !$("modalBack").hidden;
 
-const avatarColor = p => { let hsh = 0; for (const c of p.name) hsh = (hsh * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${hsh % 360} 55% 48%)`; };
+// Dark enough for white initials to pass WCAG AA (4.5:1) at every hue, yellow included.
+const avatarColor = p => { let hsh = 0; for (const c of p.name) hsh = (hsh * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${hsh % 360} 55% 30%)`; };
 const initials = n => n.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("");
 
 // ---------- Party picker (R/A cells, record form) ----------
@@ -390,8 +411,8 @@ async function showBackups() {
 // ---------- Help ----------
 function showHelp() {
   const rows = [
-    ["Insert", "New task below"], ["Ctrl+Insert", "New subtask"], ["Tab / Shift+Tab", "Indent / outdent"], ["Alt+Shift+↑/↓", "Move task up / down"],
-    ["Alt+← / Alt+→", "Collapse / expand"], ["Enter or F2", "Edit cell (Enter again to save)"], ["Type", "Start editing the cell"], ["Esc", "Cancel edit"],
+    ["Insert", "New task below"], ["Ctrl+Insert", "New subtask"], ["Tab / Shift+Tab", "Indent / outdent (also Alt+Shift+→ / ←)"], ["Alt+Shift+↑/↓", "Move task up / down"],
+    ["Alt+← / Alt+→", "Collapse / expand"], ["Enter or F2", "Edit cell (Enter again to save)"], ["Type", "Start editing the cell"], ["Esc", "Cancel edit, or clear the selection so Tab moves on"],
     ["Delete", "Delete task (and subtasks)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+I", "Open / close the record form"], ["Arrows, PgUp/PgDn", "Move around"],
   ];
   const body = h("div", { class: "modal-b" },

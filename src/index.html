@@ -84,7 +84,7 @@
       <section id="formPane" class="form-pane" aria-hidden="true"></section>
       <div class="grid-pane" id="gridPane">
         <div class="grid-head" id="gridHead"></div>
-        <div class="grid-body" id="gridBody" tabindex="0"><div class="grid-canvas" id="gridCanvas"><div id="gridRows"></div></div></div>
+        <div class="grid-body" id="gridBody" tabindex="0" role="treegrid" aria-label="Plan outline" aria-readonly="false"><div class="grid-canvas" id="gridCanvas"><div id="gridRows"></div></div></div>
       </div>
       <div class="splitter" id="splitter" title="Drag to resize"></div>
       <div class="gantt-pane" id="ganttPane">
@@ -153,11 +153,11 @@
   </div>
   <ol id="logList"></ol>
 </div>
-<div id="modalBack" class="modal-back" hidden><div id="modal" class="modal" role="dialog" aria-modal="true"></div></div>
+<div id="modalBack" class="modal-back" hidden><div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1"></div></div>
 <div id="pop" class="pop" hidden></div>
 <div id="dragTip" class="dragtip" hidden></div>
 <div id="printRoot" class="print-root"></div>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>/*__SQLJS__*/</script>
 <script>/*__XLSX__*/</script>

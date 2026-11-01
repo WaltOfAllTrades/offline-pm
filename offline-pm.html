@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-yVBhl8r4CaB1tt7h2g02+xnacVj/6KiOewyWxdhiPJk=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-DhewrDzpL11HFUTGE90DjBau54+jtSmIYcRDV0jqNb8='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-yVBhl8r4CaB1tt7h2g02+xnacVj/6KiOewyWxdhiPJk=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-g9zZeMRHjtwCBTGCqqO1YSrC+F2LqqHA29CoCZp1y1o='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
 <title>Offline PM</title>
 <style>:root{
   --bg:#f5f6f8; --panel:#fff; --panel2:#fafbfc; --ink:#1b1f24; --muted:#667085; --line:#e4e7ec; --line2:#eef0f3;
@@ -90,6 +90,7 @@ hr{border:0;border-top:1px solid var(--line);margin:4px 0}
 /* Both panes always show both scrollbars with the same style, so their heights (and scroll ranges) match row for row. */
 .grid-body,.gantt-body{flex:1;overflow:scroll;position:relative;scrollbar-width:thin}
 .grid-body{outline:none}
+.grid-body:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .grid-canvas{position:relative}
 .gantt-body svg,.gantt-head svg{display:block}
 
@@ -525,7 +526,7 @@ table.raci tr.sel td{outline:1px solid var(--accent);outline-offset:-1px}
       <section id="formPane" class="form-pane" aria-hidden="true"></section>
       <div class="grid-pane" id="gridPane">
         <div class="grid-head" id="gridHead"></div>
-        <div class="grid-body" id="gridBody" tabindex="0"><div class="grid-canvas" id="gridCanvas"><div id="gridRows"></div></div></div>
+        <div class="grid-body" id="gridBody" tabindex="0" role="treegrid" aria-label="Plan outline" aria-readonly="false"><div class="grid-canvas" id="gridCanvas"><div id="gridRows"></div></div></div>
       </div>
       <div class="splitter" id="splitter" title="Drag to resize"></div>
       <div class="gantt-pane" id="ganttPane">
@@ -594,11 +595,11 @@ table.raci tr.sel td{outline:1px solid var(--accent);outline-offset:-1px}
   </div>
   <ol id="logList"></ol>
 </div>
-<div id="modalBack" class="modal-back" hidden><div id="modal" class="modal" role="dialog" aria-modal="true"></div></div>
+<div id="modalBack" class="modal-back" hidden><div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1"></div></div>
 <div id="pop" class="pop" hidden></div>
 <div id="dragTip" class="dragtip" hidden></div>
 <div id="printRoot" class="print-root"></div>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 // We are modularizing this manually because the current modularize setting in Emscripten has some issues:
@@ -2421,15 +2422,18 @@ function renderGridRows() {
   let html = "";
   for (let i = first; i < last; i++) {
     const t = UI.rows[i];
-    html += `<div class="grow ${t.isSummary ? "summary" : ""} ${t.id === UI.selId ? "sel" : ""}" data-id="${t.id}" style="top:${i * ROW}px;width:${gridWidth()}px">`;
+    const expanded = t.isSummary ? ` aria-expanded="${!(UI.collapsed.has(t.id) && !filterActive())}"` : "";
+    html += `<div class="grow ${t.isSummary ? "summary" : ""} ${t.id === UI.selId ? "sel" : ""}" id="gr-${t.id}" role="row" aria-rowindex="${i + 1}" aria-level="${t.depth + 1}" aria-selected="${t.id === UI.selId}"${expanded} data-id="${t.id}" style="top:${i * ROW}px;width:${gridWidth()}px">`;
     for (const c of COLS) {
       const ro = (t.isSummary && ROLLED.has(c.key)) ? " ro" : "";
       const cur = t.id === UI.selId && c.key === UI.col ? " cur" : "";
-      html += `<div class="gc c-${c.key}${ro}${cur}" data-col="${c.key}" style="width:${c.w}px"${c.key === "wbs" ? ' title="Drag to move"' : ""}>${cellHtml(t, c)}</div>`;
+      html += `<div class="gc c-${c.key}${ro}${cur}" role="gridcell" aria-label="${esc(c.label)}" data-col="${c.key}" style="width:${c.w}px"${c.key === "wbs" ? ' title="Drag to move"' : ""}>${cellHtml(t, c)}</div>`;
     }
     html += `</div>`;
   }
   canvas.innerHTML = html;
+  body.setAttribute("aria-rowcount", UI.rows.length);
+  if (UI.selId != null && $("gr-" + UI.selId)) body.setAttribute("aria-activedescendant", "gr-" + UI.selId); else body.removeAttribute("aria-activedescendant");
 }
 
 // ---------- Selection ----------
@@ -2604,6 +2608,8 @@ function gridKey(e) {
   const t = selTask();
   if (e.key === "ArrowDown" && e.altKey && e.shiftKey) { e.preventDefault(); return cmdStructure("down"); }
   if (e.key === "ArrowUp" && e.altKey && e.shiftKey) { e.preventDefault(); return cmdStructure("up"); }
+  if (e.key === "ArrowRight" && e.altKey && e.shiftKey) { e.preventDefault(); return cmdStructure("indent"); }
+  if (e.key === "ArrowLeft" && e.altKey && e.shiftKey) { e.preventDefault(); return cmdStructure("outdent"); }
   if (e.key === "ArrowLeft" && e.altKey) { e.preventDefault(); if (t?.isSummary) toggleCollapse(t.id, true); return; }
   if (e.key === "ArrowRight" && e.altKey) { e.preventDefault(); if (t?.isSummary) toggleCollapse(t.id, false); return; }
   switch (e.key) {
@@ -2615,11 +2621,11 @@ function gridKey(e) {
     case "PageUp": e.preventDefault(); return moveSel(-Math.floor($("gridBody").clientHeight / ROW));
     case "Home": if (ctrl) { e.preventDefault(); return UI.rows[0] && selectTask(UI.rows[0].id); } return;
     case "End": if (ctrl) { e.preventDefault(); return UI.rows.length && selectTask(UI.rows.at(-1).id); } return;
-    case "Tab": e.preventDefault(); return cmdStructure(e.shiftKey ? "outdent" : "indent");
+    case "Tab": if (!t) return; e.preventDefault(); return cmdStructure(e.shiftKey ? "outdent" : "indent"); // no selection: Tab leaves the grid
     case "Enter": case "F2": e.preventDefault(); return startEdit();
     case "Insert": e.preventDefault(); return cmdAdd("task", ctrl);
     case "Delete": e.preventDefault(); return cmdDelete();
-    case "Escape": return;
+    case "Escape": if (!UI.form && t) selectTask(null); return;
   }
   if (!ctrl && !e.altKey && e.key.length === 1 && t) {
     const c = colByKey(UI.col);
@@ -3976,8 +3982,10 @@ function initRisks() {
 // ---------- Popover + modal helpers ----------
 // onClose runs when the popover is dismissed by clicking elsewhere (it's how pickers save); Escape cancels.
 let popOnClose = null;
+let popReturn = null, modalReturn = null; // where focus goes back to when they close
 function openPop(x, y, content, onClose = null) {
   closePop();
+  popReturn = document.activeElement;
   const pop = $("pop"); pop.innerHTML = ""; pop.append(content); pop.hidden = false; popOnClose = onClose;
   const r = pop.getBoundingClientRect();
   pop.style.left = clamp(x, 8, innerWidth - r.width - 8) + "px";
@@ -3986,8 +3994,10 @@ function openPop(x, y, content, onClose = null) {
 }
 function closePop(commit = false) {
   const pop = $("pop"), cb = popOnClose; popOnClose = null;
+  const hadFocus = pop.contains(document.activeElement);
   if (!pop.hidden) { pop.hidden = true; pop.innerHTML = ""; }
   if (commit && cb) cb();
+  if (hadFocus || document.activeElement === document.body) restoreFocus(popReturn); popReturn = null;
 }
 document.addEventListener("pointerdown", e => {
   if (!$("pop").hidden && !e.target.closest("#pop")) closePop(true);
@@ -3997,14 +4007,31 @@ document.addEventListener("pointerdown", e => {
 
 function openModal(title, body, footer, cls = "") {
   const m = $("modal"); m.className = "modal " + cls; m.innerHTML = "";
-  m.append(h("div", { class: "modal-h" }, h("h2", {}, title), h("button", { class: "icon", title: "Close", onclick: closeModal }, "✕")), body);
+  if ($("modalBack").hidden) modalReturn = document.activeElement;
+  m.append(h("div", { class: "modal-h" }, h("h2", { id: "modalTitle" }, title), h("button", { class: "icon", title: "Close", "aria-label": "Close", onclick: closeModal }, "✕")), body);
   if (footer) m.append(footer);
   $("modalBack").hidden = false;
+  (body.querySelector?.("input,select,textarea,button") || m).focus();
 }
-function closeModal() { $("modalBack").hidden = true; $("modal").innerHTML = ""; }
+function closeModal() { $("modalBack").hidden = true; $("modal").innerHTML = ""; restoreFocus(modalReturn); modalReturn = null; }
+// Back to the element that had focus, or to the outline when it's gone (keyboard shortcuts live there).
+function restoreFocus(el) {
+  if (el && el.isConnected && el !== document.body && !el.closest("[hidden]")) el.focus({ preventScroll: true });
+  else if (UI.view === "plan") $("gridBody").focus({ preventScroll: true });
+}
+// Tab stays inside an open dialog.
+document.addEventListener("keydown", e => {
+  if (e.key !== "Tab" || !modalOpen()) return;
+  const items = $$("#modal input:not([disabled]),#modal select:not([disabled]),#modal textarea:not([disabled]),#modal button:not([disabled]),#modal a[href]").filter(x => x.offsetParent);
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (e.shiftKey && (document.activeElement === first || !$("modal").contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
 const modalOpen = () => !$("modalBack").hidden;
 
-const avatarColor = p => { let hsh = 0; for (const c of p.name) hsh = (hsh * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${hsh % 360} 55% 48%)`; };
+// Dark enough for white initials to pass WCAG AA (4.5:1) at every hue, yellow included.
+const avatarColor = p => { let hsh = 0; for (const c of p.name) hsh = (hsh * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${hsh % 360} 55% 30%)`; };
 const initials = n => n.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("");
 
 // ---------- Party picker (R/A cells, record form) ----------
@@ -4365,8 +4392,8 @@ async function showBackups() {
 // ---------- Help ----------
 function showHelp() {
   const rows = [
-    ["Insert", "New task below"], ["Ctrl+Insert", "New subtask"], ["Tab / Shift+Tab", "Indent / outdent"], ["Alt+Shift+↑/↓", "Move task up / down"],
-    ["Alt+← / Alt+→", "Collapse / expand"], ["Enter or F2", "Edit cell (Enter again to save)"], ["Type", "Start editing the cell"], ["Esc", "Cancel edit"],
+    ["Insert", "New task below"], ["Ctrl+Insert", "New subtask"], ["Tab / Shift+Tab", "Indent / outdent (also Alt+Shift+→ / ←)"], ["Alt+Shift+↑/↓", "Move task up / down"],
+    ["Alt+← / Alt+→", "Collapse / expand"], ["Enter or F2", "Edit cell (Enter again to save)"], ["Type", "Start editing the cell"], ["Esc", "Cancel edit, or clear the selection so Tab moves on"],
     ["Delete", "Delete task (and subtasks)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+I", "Open / close the record form"], ["Arrows, PgUp/PgDn", "Move around"],
   ];
   const body = h("div", { class: "modal-b" },

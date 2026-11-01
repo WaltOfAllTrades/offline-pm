@@ -103,15 +103,18 @@ function renderGridRows() {
   let html = "";
   for (let i = first; i < last; i++) {
     const t = UI.rows[i];
-    html += `<div class="grow ${t.isSummary ? "summary" : ""} ${t.id === UI.selId ? "sel" : ""}" data-id="${t.id}" style="top:${i * ROW}px;width:${gridWidth()}px">`;
+    const expanded = t.isSummary ? ` aria-expanded="${!(UI.collapsed.has(t.id) && !filterActive())}"` : "";
+    html += `<div class="grow ${t.isSummary ? "summary" : ""} ${t.id === UI.selId ? "sel" : ""}" id="gr-${t.id}" role="row" aria-rowindex="${i + 1}" aria-level="${t.depth + 1}" aria-selected="${t.id === UI.selId}"${expanded} data-id="${t.id}" style="top:${i * ROW}px;width:${gridWidth()}px">`;
     for (const c of COLS) {
       const ro = (t.isSummary && ROLLED.has(c.key)) ? " ro" : "";
       const cur = t.id === UI.selId && c.key === UI.col ? " cur" : "";
-      html += `<div class="gc c-${c.key}${ro}${cur}" data-col="${c.key}" style="width:${c.w}px"${c.key === "wbs" ? ' title="Drag to move"' : ""}>${cellHtml(t, c)}</div>`;
+      html += `<div class="gc c-${c.key}${ro}${cur}" role="gridcell" aria-label="${esc(c.label)}" data-col="${c.key}" style="width:${c.w}px"${c.key === "wbs" ? ' title="Drag to move"' : ""}>${cellHtml(t, c)}</div>`;
     }
     html += `</div>`;
   }
   canvas.innerHTML = html;
+  body.setAttribute("aria-rowcount", UI.rows.length);
+  if (UI.selId != null && $("gr-" + UI.selId)) body.setAttribute("aria-activedescendant", "gr-" + UI.selId); else body.removeAttribute("aria-activedescendant");
 }
 
 // ---------- Selection ----------
@@ -286,6 +289,8 @@ function gridKey(e) {
   const t = selTask();
   if (e.key === "ArrowDown" && e.altKey && e.shiftKey) { e.preventDefault(); return cmdStructure("down"); }
   if (e.key === "ArrowUp" && e.altKey && e.shiftKey) { e.preventDefault(); return cmdStructure("up"); }
+  if (e.key === "ArrowRight" && e.altKey && e.shiftKey) { e.preventDefault(); return cmdStructure("indent"); }
+  if (e.key === "ArrowLeft" && e.altKey && e.shiftKey) { e.preventDefault(); return cmdStructure("outdent"); }
   if (e.key === "ArrowLeft" && e.altKey) { e.preventDefault(); if (t?.isSummary) toggleCollapse(t.id, true); return; }
   if (e.key === "ArrowRight" && e.altKey) { e.preventDefault(); if (t?.isSummary) toggleCollapse(t.id, false); return; }
   switch (e.key) {
@@ -297,11 +302,11 @@ function gridKey(e) {
     case "PageUp": e.preventDefault(); return moveSel(-Math.floor($("gridBody").clientHeight / ROW));
     case "Home": if (ctrl) { e.preventDefault(); return UI.rows[0] && selectTask(UI.rows[0].id); } return;
     case "End": if (ctrl) { e.preventDefault(); return UI.rows.length && selectTask(UI.rows.at(-1).id); } return;
-    case "Tab": e.preventDefault(); return cmdStructure(e.shiftKey ? "outdent" : "indent");
+    case "Tab": if (!t) return; e.preventDefault(); return cmdStructure(e.shiftKey ? "outdent" : "indent"); // no selection: Tab leaves the grid
     case "Enter": case "F2": e.preventDefault(); return startEdit();
     case "Insert": e.preventDefault(); return cmdAdd("task", ctrl);
     case "Delete": e.preventDefault(); return cmdDelete();
-    case "Escape": return;
+    case "Escape": if (!UI.form && t) selectTask(null); return;
   }
   if (!ctrl && !e.altKey && e.key.length === 1 && t) {
     const c = colByKey(UI.col);

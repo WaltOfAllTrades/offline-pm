@@ -83,6 +83,7 @@ hr{border:0;border-top:1px solid var(--line);margin:4px 0}
 /* Both panes always show both scrollbars with the same style, so their heights (and scroll ranges) match row for row. */
 .grid-body,.gantt-body{flex:1;overflow:scroll;position:relative;scrollbar-width:thin}
 .grid-body{outline:none}
+.grid-body:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .grid-canvas{position:relative}
 .gantt-body svg,.gantt-head svg{display:block}
 

@@ -1051,6 +1051,29 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     window.dispatchEvent(new PointerEvent("pointerup", { clientX: r.left + 5, clientY: target.bottom - 2 }));
     eq(P.M.order.map(t => t.name), ["A", "B"], "order unchanged"); ok(document.getElementById("dragTip").hidden, "tip hidden");
   });
+
+  // ---------- Medium tier, batch C: keyboard and accessibility ----------
+  await test("a11y", "outline is a treegrid; Esc clears the selection so Tab can leave; Alt+Shift+→ indents", () => {
+    fresh(); P.switchView("plan"); const a = T("A"), b = T("B"); P.selectTask(b); P.renderAll();
+    const gb = document.getElementById("gridBody"), row = document.getElementById("gr-" + b);
+    eq([gb.getAttribute("role"), row?.getAttribute("role"), row?.getAttribute("aria-level"), row?.getAttribute("aria-selected"), gb.getAttribute("aria-activedescendant")], ["treegrid", "row", "1", "true", "gr-" + b]);
+    const key = (k, o = {}) => { const ev = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...o }); gb.dispatchEvent(ev); return ev.defaultPrevented; };
+    key("ArrowRight", { altKey: true, shiftKey: true }); eq(task(b).parent_id, a, "Alt+Shift+→ indents");
+    key("Escape"); eq(P.UI.selId, null, "Esc cleared the selection");
+    ok(!key("Tab"), "Tab not captured without a selection");
+  });
+  await test("a11y", "dialogs take focus, keep Tab inside, and give focus back when closed", () => {
+    P.switchView("plan"); const gb = document.getElementById("gridBody"); gb.focus();
+    document.querySelector('#fileMenu [data-act="help"]').click();
+    const modal = document.getElementById("modal");
+    ok(modal.contains(document.activeElement), "focus moved into the dialog"); eq(modal.getAttribute("aria-labelledby"), "modalTitle");
+    const btns = [...modal.querySelectorAll("button")]; btns.at(-1).focus();
+    const ev = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }); document.activeElement.dispatchEvent(ev);
+    ok(ev.defaultPrevented && document.activeElement === btns[0], "Tab wraps to the first control");
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    eq(document.activeElement, gb, "focus back on the outline");
+    eq(document.getElementById("toast").getAttribute("aria-live"), "polite", "messages are announced");
+  });
   P.reset();
   const failed = results.filter(r => !r.pass);
   return { total: results.length, passed: results.length - failed.length, failed };
