@@ -4,13 +4,24 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+// The one way markup is built (DECISIONS #74). html`<b>${name}</b>` escapes every ${value} unless the value is itself
+// an html`` result, or an array of them; null, undefined and false add nothing (use String(x) for "false" in an
+// attribute). setHtml() and h(..., { html }) accept only html`` results, so a plain string can never become markup.
+// Joining results with + or a plain `${}` would turn them back into a string, so that throws: nest them in html`` instead.
+class SafeHtml { constructor(s) { this.s = s; } toString() { throw new TypeError("Nest html`…` results inside html`…`; don't join them with + or a plain template"); } }
+const htmlPart = v => v instanceof SafeHtml ? v.s : Array.isArray(v) ? v.map(htmlPart).join("") : v == null || v === false ? "" : esc(v);
+function html(strings, ...vals) { let s = strings[0]; for (let i = 0; i < vals.length; i++) s += htmlPart(vals[i]) + strings[i + 1]; return new SafeHtml(s); }
+function setHtml(el, v) {
+  if (!(v instanceof SafeHtml)) throw new TypeError("setHtml takes an html`…` result, not a string");
+  el.innerHTML = v.s;
+}
 
 function h(tag, attrs = {}, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false) continue;
     if (k === "class") el.className = v;
-    else if (k === "html") el.innerHTML = v;
+    else if (k === "html") setHtml(el, v);
     else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
     else if (k === "style" && typeof v === "object") Object.assign(el.style, v);
     else el.setAttribute(k, v === true ? "" : v);

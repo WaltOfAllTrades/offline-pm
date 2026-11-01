@@ -56,7 +56,7 @@ function computeRows() {
 }
 
 function renderGridHead() {
-  $("gridHead").innerHTML = `<div class="ghead-row" style="width:${gridWidth() + 40}px">${COLS.map(c => `<div class="gh" style="width:${c.w}px">${c.label}</div>`).join("")}</div>`;
+  setHtml($("gridHead"), html`<div class="ghead-row" style="width:${gridWidth() + 40}px">${COLS.map(c => html`<div class="gh" style="width:${c.w}px">${c.label}</div>`)}</div>`);
 }
 function renderGrid() {
   const canvas = $("gridCanvas");
@@ -70,24 +70,29 @@ let _warnSet = new Set();
 
 function chipFor(r, inherited, note = inherited ? " (inherited)" : "") {
   const p = M.parties.get(r.party_id); if (!p) return "";
-  return `<span class="chip ${p.kind === "team" ? "team" : ""} ${inherited ? "inh" : ""} ${p.active ? "" : "inactive"}" title="${esc(p.name)}${p.kind === "team" ? " (team)" : ""}${esc(note)}">${p.kind === "team" ? "👥 " : ""}${esc(p.name)}</span>`;
+  const team = p.kind === "team";
+  return html`<span class="chip ${team ? "team" : ""} ${inherited ? "inh" : ""} ${p.active ? "" : "inactive"}" title="${p.name}${team ? " (team)" : ""}${note}">${team ? "👥 " : ""}${p.name}</span>`;
 }
-const rChips = t => { const r = responsible(t); return r.list.map(x => chipFor(x, r.same, r.same ? " (same as Accountable)" : "")).join(""); };
+const rChips = t => { const r = responsible(t); return r.list.map(x => chipFor(x, r.same, r.same ? " (same as Accountable)" : "")); };
 function cellHtml(t, c) {
   switch (c.key) {
-    case "wbs": return esc(t.wbs);
+    case "wbs": return t.wbs;
     case "name": {
-      const caret = t.isSummary ? `<span class="caret" data-caret>${UI.collapsed.has(t.id) && !filterActive() ? "▶" : "▼"}</span>` : `<span class="caret"></span>`;
-      return `<span style="width:${t.depth * 16}px;flex:none"></span>${caret}${t.isMilestone ? '<span class="ms-ico">◆</span>' : ""}<span class="nm">${esc(t.name)}</span>${_warnSet.has(t.id) ? '<span class="warn-dot" title="Has warnings, see Issues">⚠</span>' : ""}${M.noteCount.get(t.id) ? `<span class="nc" title="${M.noteCount.get(t.id)} work note(s)">💬${M.noteCount.get(t.id)}</span>` : ""}${M.mitByTask.get(t.id) ? `<span class="nc" title="Implements ${M.mitByTask.get(t.id).length} risk mitigant(s)">🛡${M.mitByTask.get(t.id).length}</span>` : ""}<span class="open-rec" data-open title="Open record form">↗</span>`;
+      const caret = t.isSummary ? html`<span class="caret" data-caret>${UI.collapsed.has(t.id) && !filterActive() ? "▶" : "▼"}</span>` : html`<span class="caret"></span>`;
+      const notes = M.noteCount.get(t.id) || 0, mits = M.mitByTask.get(t.id)?.length || 0;
+      const warn = _warnSet.has(t.id) ? html`<span class="warn-dot" title="Has warnings, see Issues">⚠</span>` : "";
+      const nc = notes ? html`<span class="nc" title="${notes} work note(s)">💬${notes}</span>` : "";
+      const mc = mits ? html`<span class="nc" title="Implements ${mits} risk mitigant(s)">🛡${mits}</span>` : "";
+      return html`<span style="width:${t.depth * 16}px;flex:none"></span>${caret}${t.isMilestone ? html`<span class="ms-ico">◆</span>` : ""}<span class="nm">${t.name}</span>${warn}${nc}${mc}<span class="open-rec" data-open title="Open record form">↗</span>`;
     }
     case "start": return fmtShort(t.S);
     case "finish": return fmtShort(t.F);
-    case "duration": return t.dur == null ? "" : esc(t.dur) + "d";
-    case "percent": return esc(t.P) + "%";
-    case "status": return `<span class="st ${stClass(t.ST)}">${esc(t.ST)}</span>`;
-    case "pred": return esc(predText(t));
-    case "R": return `<span class="chips">${rChips(t)}</span>`;
-    case "A": { const a = accountable(t); return `<span class="chips">${a.list.map(r => chipFor(r, a.inherited)).join("")}</span>`; }
+    case "duration": return t.dur == null ? "" : t.dur + "d";
+    case "percent": return t.P + "%";
+    case "status": return html`<span class="st ${stClass(t.ST)}">${t.ST}</span>`;
+    case "pred": return predText(t);
+    case "R": return html`<span class="chips">${rChips(t)}</span>`;
+    case "A": { const a = accountable(t); return html`<span class="chips">${a.list.map(r => chipFor(r, a.inherited))}</span>`; }
   }
   return "";
 }
@@ -97,24 +102,22 @@ function renderGridRows() {
   const body = $("gridBody"), canvas = $("gridRows");
   _warnSet = warnTasks();
   if (!UI.rows.length) {
-    canvas.innerHTML = `<div class="empty" style="width:${Math.min(gridWidth(), body.clientWidth || 600)}px">${filterActive() ? "No tasks match the filter." : "No tasks yet. Click <b>＋ Task</b> or press <kbd>Insert</kbd> to add one, or import a spreadsheet from the File menu."}</div>`;
+    setHtml(canvas, html`<div class="empty" style="width:${Math.min(gridWidth(), body.clientWidth || 600)}px">${filterActive() ? "No tasks match the filter." : html`No tasks yet. Click <b>＋ Task</b> or press <kbd>Insert</kbd> to add one, or import a spreadsheet from the File menu.`}</div>`);
     return;
   }
   const first = Math.max(0, Math.floor(body.scrollTop / ROW) - 8);
   const last = Math.min(UI.rows.length, Math.ceil((body.scrollTop + body.clientHeight) / ROW) + 8);
-  let html = "";
+  const rows = [];
   for (let i = first; i < last; i++) {
-    const t = UI.rows[i];
-    const expanded = t.isSummary ? ` aria-expanded="${!(UI.collapsed.has(t.id) && !filterActive())}"` : "";
-    html += `<div class="grow ${t.isSummary ? "summary" : ""} ${t.id === UI.selId ? "sel" : ""}" id="gr-${t.id}" role="row" aria-rowindex="${i + 1}" aria-level="${t.depth + 1}" aria-selected="${t.id === UI.selId}"${expanded} data-id="${t.id}" style="top:${i * ROW}px;width:${gridWidth()}px">`;
-    for (const c of COLS) {
-      const ro = (t.isSummary && ROLLED.has(c.key)) ? " ro" : "";
-      const cur = t.id === UI.selId && c.key === UI.col ? " cur" : "";
-      html += `<div class="gc c-${c.key}${ro}${cur}" role="gridcell" aria-label="${esc(c.label)}" data-col="${c.key}" style="width:${c.w}px"${c.key === "wbs" ? ' title="Drag to move"' : ""}>${cellHtml(t, c)}</div>`;
-    }
-    html += `</div>`;
+    const t = UI.rows[i], sel = t.id === UI.selId;
+    const expanded = t.isSummary ? html` aria-expanded="${String(!(UI.collapsed.has(t.id) && !filterActive()))}"` : "";
+    const cells = COLS.map(c => {
+      const ro = (t.isSummary && ROLLED.has(c.key)) ? " ro" : "", cur = sel && c.key === UI.col ? " cur" : "";
+      return html`<div class="gc c-${c.key}${ro}${cur}" role="gridcell" aria-label="${c.label}" data-col="${c.key}" style="width:${c.w}px"${c.key === "wbs" ? html` title="Drag to move"` : ""}>${cellHtml(t, c)}</div>`;
+    });
+    rows.push(html`<div class="grow ${t.isSummary ? "summary" : ""} ${sel ? "sel" : ""}" id="gr-${t.id}" role="row" aria-rowindex="${i + 1}" aria-level="${t.depth + 1}" aria-selected="${String(sel)}"${expanded} data-id="${t.id}" style="top:${i * ROW}px;width:${gridWidth()}px">${cells}</div>`);
   }
-  canvas.innerHTML = html;
+  setHtml(canvas, html`${rows}`);
   body.setAttribute("aria-rowcount", UI.rows.length);
   if (UI.selId != null && $("gr-" + UI.selId)) body.setAttribute("aria-activedescendant", "gr-" + UI.selId); else body.removeAttribute("aria-activedescendant");
 }

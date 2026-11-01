@@ -55,7 +55,7 @@ function partyCell(rec, role) {
   const eff = role === "A" ? recAccountable(rec) : recResponsible(rec);
   const dim = !!eff.inherited || !!eff.same;
   const btn = h("button", { class: "rk-party", disabled: role === "R" && !!rec.r_is_a, title: role === "R" && rec.r_is_a ? "Same as Accountable" : `Choose ${ROLE_NAMES[role]}`,
-    html: eff.list.length ? eff.list.map(p => chipFor(p, dim, eff.same ? " (same as Accountable)" : eff.inherited ? " (from the risk)" : "")).join("") : `<span class="hint">—</span>` });
+    html: eff.list.length ? html`${eff.list.map(p => chipFor(p, dim, eff.same ? " (same as Accountable)" : eff.inherited ? " (from the risk)" : ""))}` : html`<span class="hint">—</span>` });
   btn.addEventListener("click", e => { e.stopPropagation(); pickRecParties(btn, rec, role); });
   return btn;
 }
@@ -68,7 +68,7 @@ function pickRecParties(anchor, rec, role) {
     onDone: () => { },
   });
 }
-const riskBadge = r => `<span class="rs rs-${r.status.toLowerCase()}">${r.status}${r.response === "mitigate" && r.mitigants.length ? ` · ${r.achievedCount}/${r.mitigants.length}` : ""}</span>`;
+const riskBadge = r => html`<span class="rs rs-${r.status.toLowerCase()}">${r.status}${r.response === "mitigate" && r.mitigants.length ? ` · ${r.achievedCount}/${r.mitigants.length}` : ""}</span>`;
 const gapIcon = gaps => gaps.length ? h("span", { class: "warn-dot", title: gaps.join("\n") }, "⚠") : null;
 
 function renderRiskGrid() {
@@ -202,10 +202,10 @@ function renderPlanList() {
   const list = $("riskPlanList"); const s = UI.planSearch.trim().toLowerCase();
   let rows = M.order;
   if (s) { const keep = new Set(); for (const t of M.order) if (t.name.toLowerCase().includes(s) || t.wbs.startsWith(s)) for (let x = t; x; x = x.parent) keep.add(x.id); rows = M.order.filter(t => keep.has(t.id)); }
-  list.innerHTML = rows.length ? rows.map(t => {
+  setHtml(list, rows.length ? html`${rows.map(t => {
     const n = (M.mitByTask.get(t.id) || []).length;
-    return `<div class="rp-row${t.isSummary ? " summary" : ""}" data-id="${t.id}" title="${esc(t.wbs + " " + t.name)} · ${esc(t.ST)} · ${fmtShort(t.S)} → ${fmtShort(t.F)}"><span style="width:${t.depth * 14}px;flex:none"></span><span class="w">${esc(t.wbs)}</span><span class="dot ${stClass(t.ST)}"></span><span class="n">${t.isMilestone ? "◆ " : ""}${esc(t.name)}</span>${n ? `<span class="sh" title="Implements ${n} mitigant(s)">🛡${n}</span>` : ""}</div>`;
-  }).join("") : `<div class="empty">${M.order.length ? "No tasks match." : "No tasks in this project yet."}</div>`;
+    return html`<div class="rp-row${t.isSummary ? " summary" : ""}" data-id="${t.id}" title="${t.wbs} ${t.name} · ${t.ST} · ${fmtShort(t.S)} → ${fmtShort(t.F)}"><span style="width:${t.depth * 14}px;flex:none"></span><span class="w">${t.wbs}</span><span class="dot ${stClass(t.ST)}"></span><span class="n">${t.isMilestone ? "◆ " : ""}${t.name}</span>${n ? html`<span class="sh" title="Implements ${n} mitigant(s)">🛡${n}</span>` : ""}</div>`;
+  })}` : html`<div class="empty">${M.order.length ? "No tasks match." : "No tasks in this project yet."}</div>`);
 }
 function flashPlanRow(id) { const el = $("riskPlanList").querySelector(`.rp-row[data-id="${id}"]`); if (el) { el.scrollIntoView({ block: "nearest" }); el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1400); } }
 
@@ -327,7 +327,7 @@ function recText(rec, field, multi, attrs = {}) {
 function recParty(rec, role) {
   const eff = role === "A" ? recAccountable(rec) : recResponsible(rec);
   const same = role === "R" && !!rec.r_is_a;
-  const btn = h("button", { class: "f-party", disabled: same, html: (eff.list.length ? eff.list.map(p => chipFor(p, !!eff.inherited || same)).join("") : `<span class="hint">None</span>`) + (eff.inherited ? `<span class="hint"> from the risk</span>` : "") });
+  const btn = h("button", { class: "f-party", disabled: same, html: html`${eff.list.length ? eff.list.map(p => chipFor(p, !!eff.inherited || same)) : html`<span class="hint">None</span>`}${eff.inherited ? html`<span class="hint"> from the risk</span>` : ""}` });
   btn.addEventListener("click", () => pickRecParties(btn, rec, role));
   if (role !== "R") return btn;
   const sw = h("input", { type: "checkbox", role: "switch", class: "sw", checked: same });
@@ -378,7 +378,7 @@ function mitTaskList(m) {
   addSel.addEventListener("change", () => { const id = +addSel.value; if (id) linkMit(m.id, id); });
   const rows = m.tasks.map(t => h("tr", {},
     h("td", {}, h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(t.id); } }, t.wbs)), h("td", {}, t.name),
-    h("td", {}, fmtShort(t.S)), h("td", {}, fmtShort(t.F)), h("td", { html: `<span class="st ${stClass(t.ST)}">${esc(t.ST)}</span>` }),
+    h("td", {}, fmtShort(t.S)), h("td", {}, fmtShort(t.F)), h("td", { html: html`<span class="st ${stClass(t.ST)}">${t.ST}</span>` }),
     h("td", {}, h("button", { class: "x", title: "Unlink", onclick: () => mutate(`Unlinked ${t.wbs}`, () => opUnlinkTask(m.id, t.id)) }, "✕"))));
   return h("section", { class: "f-sec" }, h("div", { class: "f-sec-h" }, h("h3", {}, "Implemented by"), h("span", { class: "spacer" }), addSel, h("button", { onclick: () => quickTask(m) }, "＋ Task")),
     relTable(["WBS", "Task", "Start", "Finish", "Status", ""], rows, "No tasks yet. Drag this mitigant onto a task, or click ＋ Task."));

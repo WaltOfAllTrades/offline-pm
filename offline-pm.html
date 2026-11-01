@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-umgf5Jn1OGM2ubkwFT/dUFF7W+i4qIqnwNWB2soRoQQ='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-sxyJeTz0/33MhJTHt9o5PbZqBb5KyYi9ANzk/XJKejk='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
 <title>Offline PM</title>
 <style>:root{
   --bg:#f5f6f8; --panel:#fff; --panel2:#fafbfc; --ink:#1b1f24; --muted:#667085; --line:#e4e7ec; --line2:#eef0f3;
@@ -830,13 +830,24 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+// The one way markup is built (DECISIONS #74). html`<b>${name}</b>` escapes every ${value} unless the value is itself
+// an html`` result, or an array of them; null, undefined and false add nothing (use String(x) for "false" in an
+// attribute). setHtml() and h(..., { html }) accept only html`` results, so a plain string can never become markup.
+// Joining results with + or a plain `${}` would turn them back into a string, so that throws: nest them in html`` instead.
+class SafeHtml { constructor(s) { this.s = s; } toString() { throw new TypeError("Nest html`…` results inside html`…`; don't join them with + or a plain template"); } }
+const htmlPart = v => v instanceof SafeHtml ? v.s : Array.isArray(v) ? v.map(htmlPart).join("") : v == null || v === false ? "" : esc(v);
+function html(strings, ...vals) { let s = strings[0]; for (let i = 0; i < vals.length; i++) s += htmlPart(vals[i]) + strings[i + 1]; return new SafeHtml(s); }
+function setHtml(el, v) {
+  if (!(v instanceof SafeHtml)) throw new TypeError("setHtml takes an html`…` result, not a string");
+  el.innerHTML = v.s;
+}
 
 function h(tag, attrs = {}, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false) continue;
     if (k === "class") el.className = v;
-    else if (k === "html") el.innerHTML = v;
+    else if (k === "html") setHtml(el, v);
     else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
     else if (k === "style" && typeof v === "object") Object.assign(el.style, v);
     else el.setAttribute(k, v === true ? "" : v);
@@ -2388,7 +2399,7 @@ function computeRows() {
 }
 
 function renderGridHead() {
-  $("gridHead").innerHTML = `<div class="ghead-row" style="width:${gridWidth() + 40}px">${COLS.map(c => `<div class="gh" style="width:${c.w}px">${c.label}</div>`).join("")}</div>`;
+  setHtml($("gridHead"), html`<div class="ghead-row" style="width:${gridWidth() + 40}px">${COLS.map(c => html`<div class="gh" style="width:${c.w}px">${c.label}</div>`)}</div>`);
 }
 function renderGrid() {
   const canvas = $("gridCanvas");
@@ -2402,24 +2413,29 @@ let _warnSet = new Set();
 
 function chipFor(r, inherited, note = inherited ? " (inherited)" : "") {
   const p = M.parties.get(r.party_id); if (!p) return "";
-  return `<span class="chip ${p.kind === "team" ? "team" : ""} ${inherited ? "inh" : ""} ${p.active ? "" : "inactive"}" title="${esc(p.name)}${p.kind === "team" ? " (team)" : ""}${esc(note)}">${p.kind === "team" ? "👥 " : ""}${esc(p.name)}</span>`;
+  const team = p.kind === "team";
+  return html`<span class="chip ${team ? "team" : ""} ${inherited ? "inh" : ""} ${p.active ? "" : "inactive"}" title="${p.name}${team ? " (team)" : ""}${note}">${team ? "👥 " : ""}${p.name}</span>`;
 }
-const rChips = t => { const r = responsible(t); return r.list.map(x => chipFor(x, r.same, r.same ? " (same as Accountable)" : "")).join(""); };
+const rChips = t => { const r = responsible(t); return r.list.map(x => chipFor(x, r.same, r.same ? " (same as Accountable)" : "")); };
 function cellHtml(t, c) {
   switch (c.key) {
-    case "wbs": return esc(t.wbs);
+    case "wbs": return t.wbs;
     case "name": {
-      const caret = t.isSummary ? `<span class="caret" data-caret>${UI.collapsed.has(t.id) && !filterActive() ? "▶" : "▼"}</span>` : `<span class="caret"></span>`;
-      return `<span style="width:${t.depth * 16}px;flex:none"></span>${caret}${t.isMilestone ? '<span class="ms-ico">◆</span>' : ""}<span class="nm">${esc(t.name)}</span>${_warnSet.has(t.id) ? '<span class="warn-dot" title="Has warnings, see Issues">⚠</span>' : ""}${M.noteCount.get(t.id) ? `<span class="nc" title="${M.noteCount.get(t.id)} work note(s)">💬${M.noteCount.get(t.id)}</span>` : ""}${M.mitByTask.get(t.id) ? `<span class="nc" title="Implements ${M.mitByTask.get(t.id).length} risk mitigant(s)">🛡${M.mitByTask.get(t.id).length}</span>` : ""}<span class="open-rec" data-open title="Open record form">↗</span>`;
+      const caret = t.isSummary ? html`<span class="caret" data-caret>${UI.collapsed.has(t.id) && !filterActive() ? "▶" : "▼"}</span>` : html`<span class="caret"></span>`;
+      const notes = M.noteCount.get(t.id) || 0, mits = M.mitByTask.get(t.id)?.length || 0;
+      const warn = _warnSet.has(t.id) ? html`<span class="warn-dot" title="Has warnings, see Issues">⚠</span>` : "";
+      const nc = notes ? html`<span class="nc" title="${notes} work note(s)">💬${notes}</span>` : "";
+      const mc = mits ? html`<span class="nc" title="Implements ${mits} risk mitigant(s)">🛡${mits}</span>` : "";
+      return html`<span style="width:${t.depth * 16}px;flex:none"></span>${caret}${t.isMilestone ? html`<span class="ms-ico">◆</span>` : ""}<span class="nm">${t.name}</span>${warn}${nc}${mc}<span class="open-rec" data-open title="Open record form">↗</span>`;
     }
     case "start": return fmtShort(t.S);
     case "finish": return fmtShort(t.F);
-    case "duration": return t.dur == null ? "" : esc(t.dur) + "d";
-    case "percent": return esc(t.P) + "%";
-    case "status": return `<span class="st ${stClass(t.ST)}">${esc(t.ST)}</span>`;
-    case "pred": return esc(predText(t));
-    case "R": return `<span class="chips">${rChips(t)}</span>`;
-    case "A": { const a = accountable(t); return `<span class="chips">${a.list.map(r => chipFor(r, a.inherited)).join("")}</span>`; }
+    case "duration": return t.dur == null ? "" : t.dur + "d";
+    case "percent": return t.P + "%";
+    case "status": return html`<span class="st ${stClass(t.ST)}">${t.ST}</span>`;
+    case "pred": return predText(t);
+    case "R": return html`<span class="chips">${rChips(t)}</span>`;
+    case "A": { const a = accountable(t); return html`<span class="chips">${a.list.map(r => chipFor(r, a.inherited))}</span>`; }
   }
   return "";
 }
@@ -2429,24 +2445,22 @@ function renderGridRows() {
   const body = $("gridBody"), canvas = $("gridRows");
   _warnSet = warnTasks();
   if (!UI.rows.length) {
-    canvas.innerHTML = `<div class="empty" style="width:${Math.min(gridWidth(), body.clientWidth || 600)}px">${filterActive() ? "No tasks match the filter." : "No tasks yet. Click <b>＋ Task</b> or press <kbd>Insert</kbd> to add one, or import a spreadsheet from the File menu."}</div>`;
+    setHtml(canvas, html`<div class="empty" style="width:${Math.min(gridWidth(), body.clientWidth || 600)}px">${filterActive() ? "No tasks match the filter." : html`No tasks yet. Click <b>＋ Task</b> or press <kbd>Insert</kbd> to add one, or import a spreadsheet from the File menu.`}</div>`);
     return;
   }
   const first = Math.max(0, Math.floor(body.scrollTop / ROW) - 8);
   const last = Math.min(UI.rows.length, Math.ceil((body.scrollTop + body.clientHeight) / ROW) + 8);
-  let html = "";
+  const rows = [];
   for (let i = first; i < last; i++) {
-    const t = UI.rows[i];
-    const expanded = t.isSummary ? ` aria-expanded="${!(UI.collapsed.has(t.id) && !filterActive())}"` : "";
-    html += `<div class="grow ${t.isSummary ? "summary" : ""} ${t.id === UI.selId ? "sel" : ""}" id="gr-${t.id}" role="row" aria-rowindex="${i + 1}" aria-level="${t.depth + 1}" aria-selected="${t.id === UI.selId}"${expanded} data-id="${t.id}" style="top:${i * ROW}px;width:${gridWidth()}px">`;
-    for (const c of COLS) {
-      const ro = (t.isSummary && ROLLED.has(c.key)) ? " ro" : "";
-      const cur = t.id === UI.selId && c.key === UI.col ? " cur" : "";
-      html += `<div class="gc c-${c.key}${ro}${cur}" role="gridcell" aria-label="${esc(c.label)}" data-col="${c.key}" style="width:${c.w}px"${c.key === "wbs" ? ' title="Drag to move"' : ""}>${cellHtml(t, c)}</div>`;
-    }
-    html += `</div>`;
+    const t = UI.rows[i], sel = t.id === UI.selId;
+    const expanded = t.isSummary ? html` aria-expanded="${String(!(UI.collapsed.has(t.id) && !filterActive()))}"` : "";
+    const cells = COLS.map(c => {
+      const ro = (t.isSummary && ROLLED.has(c.key)) ? " ro" : "", cur = sel && c.key === UI.col ? " cur" : "";
+      return html`<div class="gc c-${c.key}${ro}${cur}" role="gridcell" aria-label="${c.label}" data-col="${c.key}" style="width:${c.w}px"${c.key === "wbs" ? html` title="Drag to move"` : ""}>${cellHtml(t, c)}</div>`;
+    });
+    rows.push(html`<div class="grow ${t.isSummary ? "summary" : ""} ${sel ? "sel" : ""}" id="gr-${t.id}" role="row" aria-rowindex="${i + 1}" aria-level="${t.depth + 1}" aria-selected="${String(sel)}"${expanded} data-id="${t.id}" style="top:${i * ROW}px;width:${gridWidth()}px">${cells}</div>`);
   }
-  canvas.innerHTML = html;
+  setHtml(canvas, html`${rows}`);
   body.setAttribute("aria-rowcount", UI.rows.length);
   if (UI.selId != null && $("gr-" + UI.selId)) body.setAttribute("aria-activedescendant", "gr-" + UI.selId); else body.removeAttribute("aria-activedescendant");
 }
@@ -2761,38 +2775,35 @@ const xOf = (sc, day) => (day - sc.origin) * sc.px;
 
 function headerSvg(sc) {
   const [[topU, topF], [botU, botF]] = TIERS[sc.hg];
-  let s = "";
+  const s = [];
   for (let n = unitStart(sc.origin, topU); n < sc.end; n = unitNext(n, topU)) {
     const x = Math.max(0, xOf(sc, n)), x2 = xOf(sc, unitNext(n, topU));
-    s += `<line class="g-hdr-line" x1="${x2}" y1="0" x2="${x2}" y2="22"/>`;
-    if (x2 - x > 30) s += `<text class="g-hdr-top" x="${x + 6}" y="15">${topF(n)}</text>`;
+    s.push(html`<line class="g-hdr-line" x1="${x2}" y1="0" x2="${x2}" y2="22"/>`);
+    if (x2 - x > 30) s.push(html`<text class="g-hdr-top" x="${x + 6}" y="15">${topF(n)}</text>`);
   }
   for (let n = unitStart(sc.origin, botU); n < sc.end; n = unitNext(n, botU)) {
     const x = xOf(sc, n), w = xOf(sc, unitNext(n, botU)) - x;
-    s += `<line class="g-hdr-line" x1="${x}" y1="22" x2="${x}" y2="44"/>`;
+    s.push(html`<line class="g-hdr-line" x1="${x}" y1="22" x2="${x}" y2="44"/>`);
     const label = botF(n);
-    if (w > label.length * 6.2 + 4) s += `<text class="g-hdr-bot" x="${x + w / 2}" y="37" text-anchor="middle">${label}</text>`;
-    else if (w > 12 && botU === "day") s += `<text class="g-hdr-bot" x="${x + w / 2}" y="37" text-anchor="middle">${ymdParts(n).d}</text>`;
+    if (w > label.length * 6.2 + 4) s.push(html`<text class="g-hdr-bot" x="${x + w / 2}" y="37" text-anchor="middle">${label}</text>`);
+    else if (w > 12 && botU === "day") s.push(html`<text class="g-hdr-bot" x="${x + w / 2}" y="37" text-anchor="middle">${ymdParts(n).d}</text>`);
   }
-  s += `<line class="g-hdr-line" x1="0" y1="22" x2="${sc.width}" y2="22"/>`;
-  return s;
+  s.push(html`<line class="g-hdr-line" x1="0" y1="22" x2="${sc.width}" y2="22"/>`);
+  return html`${s}`;
 }
 function backgroundSvg(sc, height, x0 = 0, x1 = sc.width) {
   const botU = TIERS[sc.hg][1][0];
-  let s = "";
+  const weekends = [], lines = [];
   if (sc.px >= 5) { // weekend shading when days are visible
     const d0 = Math.max(sc.origin, Math.floor(sc.origin + x0 / sc.px) - 1), d1 = Math.min(sc.end, Math.ceil(sc.origin + x1 / sc.px) + 1);
-    for (let n = d0; n < d1; n++) if (dow(n) === 6) s += `<rect class="g-weekend" x="${xOf(sc, n)}" y="0" width="${sc.px * 2}" height="${height}"/>`;
+    for (let n = d0; n < d1; n++) if (dow(n) === 6) weekends.push(html`<rect class="g-weekend" x="${xOf(sc, n)}" y="0" width="${sc.px * 2}" height="${height}"/>`);
   }
-  s += `<g class="g-grid">`;
   for (let n = unitStart(sc.origin, botU); n < sc.end; n = unitNext(n, botU)) {
     const x = xOf(sc, n); if (x < x0 - 200 || x > x1 + 200) continue;
-    s += `<line x1="${x}" y1="0" x2="${x}" y2="${height}"/>`;
+    lines.push(html`<line x1="${x}" y1="0" x2="${x}" y2="${height}"/>`);
   }
-  s += `</g>`;
-  const t = todayNum();
-  if (t >= sc.origin && t < sc.end) { const x = xOf(sc, t) + sc.px / 2; s += `<line class="g-today" x1="${x}" y1="0" x2="${x}" y2="${height}"/>`; }
-  return s;
+  const t = todayNum(), tx = xOf(sc, t) + sc.px / 2;
+  return html`${weekends}<g class="g-grid">${lines}</g>${t >= sc.origin && t < sc.end ? html`<line class="g-today" x1="${tx}" y1="0" x2="${tx}" y2="${height}"/>` : ""}`;
 }
 
 // Milestones are drawn at the end of their day, where the link checks place them (DECISIONS #65).
@@ -2807,27 +2818,22 @@ function barSvg(sc, t, y, opts = {}) {
   const S = opts.S ?? t.S, F = opts.F ?? t.F;
   const sel = t.id === UI.selId ? " sel" : "";
   const cy = y + ROW / 2;
-  const label = opts.noLabel ? "" : esc(t.name) + (opts.labelExtra || "");
+  const label = opts.noLabel ? "" : t.name;
+  const handles = (a, b) => opts.print ? "" : html`<circle class="hnd" data-side="S" cx="${a}" cy="${cy}" r="4.5"/><circle class="hnd" data-side="F" cx="${b}" cy="${cy}" r="4.5"/>`;
   if (t.isMilestone) {
     const cx = msX(sc, S);
-    return `<g class="bar ms${sel}" data-id="${t.id}"><path d="M${cx} ${cy - 8}L${cx + 8} ${cy}L${cx} ${cy + 8}L${cx - 8} ${cy}Z"/>`
-      + (opts.print ? "" : `<circle class="hnd" data-side="S" cx="${cx - 13}" cy="${cy}" r="4.5"/><circle class="hnd" data-side="F" cx="${cx + 13}" cy="${cy}" r="4.5"/>`)
-      + `<text class="lbl" x="${cx + 21}" y="${cy + 4}">${label}</text></g>`;
+    return html`<g class="bar ms${sel}" data-id="${t.id}"><path d="M${cx} ${cy - 8}L${cx + 8} ${cy}L${cx} ${cy + 8}L${cx - 8} ${cy}Z"/>${handles(cx - 13, cx + 13)}<text class="lbl" x="${cx + 21}" y="${cy + 4}">${label}</text></g>`;
   }
   const x1 = xOf(sc, S), x2 = Math.max(xOf(sc, F + 1), x1 + 2), w = x2 - x1;
   if (t.isSummary) {
-    return `<g class="bar summary${sel}" data-id="${t.id}"><path d="M${x1} ${cy - 6}H${x2}V${cy + 5}L${x2 - 5} ${cy}H${x1 + 5}L${x1} ${cy + 5}Z"/>`
-      + (opts.print ? "" : `<circle class="hnd" data-side="S" cx="${x1 - 8}" cy="${cy}" r="4.5"/><circle class="hnd" data-side="F" cx="${x2 + 8}" cy="${cy}" r="4.5"/>`)
-      + `<text class="lbl" x="${x2 + (opts.print ? 6 : 17)}" y="${cy + 4}">${label}</text></g>`;
+    return html`<g class="bar summary${sel}" data-id="${t.id}"><path d="M${x1} ${cy - 6}H${x2}V${cy + 5}L${x2 - 5} ${cy}H${x1 + 5}L${x1} ${cy + 5}Z"/>${handles(x1 - 8, x2 + 8)}<text class="lbl" x="${x2 + (opts.print ? 6 : 17)}" y="${cy + 4}">${label}</text></g>`;
   }
   const pw = w * (t.P || 0) / 100;
   // Short bars get resize edges just outside the bar and link handles pushed further out, so all stay grabbable.
   const small = w < 14, eo = small ? 5 : 2, ho = small ? 13 : 8;
-  return `<g class="bar ${stClass(t.ST)}${sel}" data-id="${t.id}"><rect class="b" x="${x1}" y="${cy - 8}" width="${w}" height="16"/>`
-    + (pw > 0 ? `<rect class="p" x="${x1}" y="${cy - 8}" width="${pw}" height="16" rx="4"/>` : "")
-    + (opts.print ? "" : `<rect class="edge" data-edge="S" x="${x1 - eo}" y="${cy - 8}" width="6" height="16"/><rect class="edge" data-edge="F" x="${x2 - 6 + eo}" y="${cy - 8}" width="6" height="16"/>`
-      + `<circle class="hnd" data-side="S" cx="${x1 - ho}" cy="${cy}" r="4.5"/><circle class="hnd" data-side="F" cx="${x2 + ho}" cy="${cy}" r="4.5"/>`)
-    + `<text class="lbl" x="${x2 + (opts.print ? 6 : ho + 9)}" y="${cy + 4}">${label}</text></g>`;
+  const edges = opts.print ? "" : html`<rect class="edge" data-edge="S" x="${x1 - eo}" y="${cy - 8}" width="6" height="16"/><rect class="edge" data-edge="F" x="${x2 - 6 + eo}" y="${cy - 8}" width="6" height="16"/>`;
+  const prog = pw > 0 ? html`<rect class="p" x="${x1}" y="${cy - 8}" width="${pw}" height="16" rx="4"/>` : "";
+  return html`<g class="bar ${stClass(t.ST)}${sel}" data-id="${t.id}"><rect class="b" x="${x1}" y="${cy - 8}" width="${w}" height="16"/>${prog}${edges}${handles(x1 - ho, x2 + ho)}<text class="lbl" x="${x2 + (opts.print ? 6 : ho + 9)}" y="${cy + 4}">${label}</text></g>`;
 }
 function depPath(sc, d, rowOf, pfx = "") {
   const p = M.tasks.get(d.pred_id), s = M.tasks.get(d.succ_id);
@@ -2846,9 +2852,9 @@ function depPath(sc, d, rowOf, pfx = "") {
     path = `M${a.x} ${a.y}H${p1x}V${ym}H${p2x}V${b.y}H${b.x}`;
   }
   const cls = `dep${d.violated ? " bad" : ""}${UI.selDep === d.id ? " sel" : ""}`;
-  return `<g class="${cls}" data-dep="${d.id}"><path class="ln" d="${path}" marker-end="url(#${pfx}${d.violated ? "arrBad" : "arr"})"/><path class="hit" d="${path}"/><title>${esc(p.wbs)} → ${esc(s.wbs)}: ${esc(DEP_NAMES[d.type] ?? d.type)}${d.lag ? `, lag ${esc(d.lag)}d` : ""}${d.violated ? " (dates conflict)" : ""}</title></g>`;
+  return html`<g class="${cls}" data-dep="${d.id}"><path class="ln" d="${path}" marker-end="url(#${pfx}${d.violated ? "arrBad" : "arr"})"/><path class="hit" d="${path}"/><title>${p.wbs} → ${s.wbs}: ${DEP_NAMES[d.type] ?? d.type}${d.lag ? `, lag ${d.lag}d` : ""}${d.violated ? " (dates conflict)" : ""}</title></g>`;
 }
-const defs = (p = "") => `<defs><marker id="${p}arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L8 4L0 8Z" style="fill:var(--link)"/></marker><marker id="${p}arrBad" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L8 4L0 8Z" style="fill:var(--link-bad)"/></marker></defs>`;
+const defs = (p = "") => html`<defs><marker id="${p}arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L8 4L0 8Z" style="fill:var(--link)"/></marker><marker id="${p}arrBad" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L8 4L0 8Z" style="fill:var(--link-bad)"/></marker></defs>`;
 const DEFS = defs();
 
 // ---------- Live rendering ----------
@@ -2860,8 +2866,8 @@ function renderGantt() {
   const H = Math.max(UI.rows.length * ROW, body.clientHeight - 2);
   const svg = $("ganttSvg");
   svg.setAttribute("width", SC.width); svg.setAttribute("height", H);
-  svg.innerHTML = DEFS + `<g id="gBg"></g><g id="gSel"></g><g id="gDeps"></g><g id="gBars"></g><path id="ghost" class="ghost-link" d=""/>`;
-  const hs = $("ganttHeadSvg"); hs.setAttribute("width", SC.width + 40); hs.setAttribute("height", 44); hs.innerHTML = headerSvg(SC);
+  setHtml(svg, html`${DEFS}<g id="gBg"></g><g id="gSel"></g><g id="gDeps"></g><g id="gBars"></g><path id="ghost" class="ghost-link" d=""/>`);
+  const hs = $("ganttHeadSvg"); hs.setAttribute("width", SC.width + 40); hs.setAttribute("height", 44); setHtml(hs, headerSvg(SC));
   $("ganttHead").scrollLeft = body.scrollLeft;
   if (prev && centerDay != null && (prev.px !== SC.px || prev.origin !== SC.origin)) body.scrollLeft = xOf(SC, centerDay) - body.clientWidth / 2;
   renderGanttRows();
@@ -2872,21 +2878,21 @@ function renderGanttRows() {
   const H = Math.max(UI.rows.length * ROW, body.clientHeight - 2);
   const first = Math.max(0, Math.floor(body.scrollTop / ROW) - 6);
   const last = Math.min(UI.rows.length, Math.ceil((body.scrollTop + body.clientHeight) / ROW) + 6);
-  $("gBg").innerHTML = backgroundSvg(SC, H, body.scrollLeft, body.scrollLeft + body.clientWidth);
+  setHtml($("gBg"), backgroundSvg(SC, H, body.scrollLeft, body.scrollLeft + body.clientWidth));
   const sel = selTask();
-  $("gSel").innerHTML = sel && UI.rows[sel.row] === sel ? `<rect class="g-rowsel" x="0" y="${sel.row * ROW}" width="${SC.width}" height="${ROW}"/>` : "";
-  let bars = "";
-  for (let i = first; i < last; i++) bars += barSvg(SC, UI.rows[i], i * ROW);
-  $("gBars").innerHTML = bars;
+  setHtml($("gSel"), sel && UI.rows[sel.row] === sel ? html`<rect class="g-rowsel" x="0" y="${sel.row * ROW}" width="${SC.width}" height="${ROW}"/>` : html``);
+  const bars = [];
+  for (let i = first; i < last; i++) bars.push(barSvg(SC, UI.rows[i], i * ROW));
+  setHtml($("gBars"), html`${bars}`);
   const rowOf = t => UI.rows[t.row] === t ? t.row : null;
-  let deps = "";
+  const deps = [];
   for (const d of M.deps) {
     const p = M.tasks.get(d.pred_id), s = M.tasks.get(d.succ_id);
     const rp = p && rowOf(p), rs = s && rowOf(s);
     if (rp == null || rs == null || Math.max(rp, rs) < first || Math.min(rp, rs) > last) continue;
-    deps += depPath(SC, d, rowOf);
+    deps.push(depPath(SC, d, rowOf));
   }
-  $("gDeps").innerHTML = deps;
+  setHtml($("gDeps"), html`${deps}`);
 }
 function scrollGanttTo(day, frac = 0.3) { const b = $("ganttBody"); b.scrollLeft = Math.max(0, xOf(SC, day) - b.clientWidth * frac); }
 function setGrain(g) {
@@ -2939,7 +2945,9 @@ function beginBarDrag(e, t, mode, barEl) {
   const y = t.row * ROW;
   const preview = () => {
     const el = $("gBars").querySelector(`.bar[data-id="${t.id}"]`);
-    if (el) el.outerHTML = barSvg(SC, t, y, { S, F });
+    if (!el) return;
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g"); setHtml(g, html`${barSvg(SC, t, y, { S, F })}`);
+    el.replaceWith(...g.childNodes);
   };
   const move = ev => {
     const p = svgPoint(ev); const dx = p.x - start.x;
@@ -3166,9 +3174,8 @@ function formFields(t) {
   const party = role => {
     const eff = role === "A" ? accountable(t) : responsible(t);
     const inh = !!eff.inherited, same = role === "R" && eff.same;
-    const html = (eff.list.length ? eff.list.map(r => chipFor(r, inh || same)).join("") : `<span class="hint">None</span>`)
-      + (inh && eff.list.length ? `<span class="hint"> from ${esc(eff.from.wbs)}</span>` : "");
-    const btn = h("button", { class: "f-party", disabled: same, title: same ? "Same as Accountable. Turn the switch off to choose someone else" : `Choose ${ROLE_NAMES[role]}`, html });
+    const chips = html`${eff.list.length ? eff.list.map(r => chipFor(r, inh || same)) : html`<span class="hint">None</span>`}${inh && eff.list.length ? html`<span class="hint"> from ${eff.from.wbs}</span>` : ""}`;
+    const btn = h("button", { class: "f-party", disabled: same, title: same ? "Same as Accountable. Turn the switch off to choose someone else" : `Choose ${ROLE_NAMES[role]}`, html: chips });
     btn.addEventListener("click", () => openPartyPicker(btn.getBoundingClientRect(), t.id, role));
     if (role !== "R") return btn;
     const sw = h("input", { type: "checkbox", role: "switch", class: "sw", checked: !!t.r_is_a, "data-f": "r_is_a" });
@@ -3222,16 +3229,22 @@ function miniGanttSvg(t, rows, width) {
   const H = Math.max(rows.length, 1) * ROW, HD = 44;
   const idx = new Map(rows.map((r, i) => [r.id, i]));
   const rowOf = x => idx.get(x.id) ?? null;
-  let body = backgroundSvg(sc, H);
-  if (t.S != null) body += `<rect class="mg-span" x="${xOf(sc, t.S)}" y="0" width="${Math.max(2, xOf(sc, t.F + 1) - xOf(sc, t.S))}" height="${H}"/>`;
-  body += rows.map((r, i) => `<line class="mg-row" x1="0" x2="${sc.width}" y1="${(i + 1) * ROW}" y2="${(i + 1) * ROW}"/>`).join("");
-  body += M.deps.filter(d => idx.has(d.pred_id) && idx.has(d.succ_id)).map(d => depPath(sc, d, rowOf, "mg")).join("");
-  body += rows.map((r, i) => barSvg(sc, r, i * ROW, { print: true, noLabel: true })).join("");
-  return `<svg width="${sc.width}" height="${H + HD}" class="mg-svg">${defs("mg")}<g class="mg-hdr">${headerSvg(sc)}</g><g transform="translate(0,${HD})">${body}</g></svg>`;
+  const body = [backgroundSvg(sc, H)];
+  if (t.S != null) body.push(html`<rect class="mg-span" x="${xOf(sc, t.S)}" y="0" width="${Math.max(2, xOf(sc, t.F + 1) - xOf(sc, t.S))}" height="${H}"/>`);
+  body.push(rows.map((r, i) => html`<line class="mg-row" x1="0" x2="${sc.width}" y1="${(i + 1) * ROW}" y2="${(i + 1) * ROW}"/>`));
+  body.push(M.deps.filter(d => idx.has(d.pred_id) && idx.has(d.succ_id)).map(d => depPath(sc, d, rowOf, "mg")));
+  body.push(rows.map((r, i) => barSvg(sc, r, i * ROW, { print: true, noLabel: true })));
+  return html`<svg width="${sc.width}" height="${H + HD}" class="mg-svg">${defs("mg")}<g class="mg-hdr">${headerSvg(sc)}</g><g transform="translate(0,${HD})">${body}</g></svg>`;
 }
 
 // ---------- Work notes (activity stream) ----------
-const linkify = s => s.replace(/https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"]/g, u => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
+// Plain text with its web addresses turned into links; everything else stays text.
+const linkify = s => {
+  const out = []; let i = 0;
+  for (const m of s.matchAll(/https?:\/\/[^\s<>]+[^\s<>.,;:!?)\]'"]/g)) { out.push(s.slice(i, m.index), html`<a href="${m[0]}" target="_blank" rel="noopener noreferrer">${m[0]}</a>`); i = m.index + m[0].length; }
+  out.push(s.slice(i));
+  return html`${out}`;
+};
 function fmtWhen(iso) {
   const d = new Date(iso); if (isNaN(d)) return { abs: iso || "", rel: "" };
   const abs = d.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
@@ -3239,7 +3252,7 @@ function fmtWhen(iso) {
   const rel = s < 60 ? "just now" : s < 3600 ? Math.floor(s / 60) + " min ago" : s < 86400 ? Math.floor(s / 3600) + " h ago" : s < 172800 ? "yesterday" : s < 14 * 86400 ? Math.floor(s / 86400) + " days ago" : "";
   return { abs, rel };
 }
-const PERSON_SVG = `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.6"/><path d="M3.2 17.5c.6-3.6 3.4-5.6 6.8-5.6s6.2 2 6.8 5.6z"/></svg>`;
+const PERSON_SVG = html`<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.6"/><path d="M3.2 17.5c.6-3.6 3.4-5.6 6.8-5.6s6.2 2 6.8 5.6z"/></svg>`;
 function notesSection(t) {
   const withSub = t.isSummary && UI.notesWithSub;
   const subCb = t.isSummary ? h("input", { type: "checkbox", checked: UI.notesWithSub }) : null;
@@ -3300,7 +3313,7 @@ function noteEntry(o, n) {
     const cancel = () => { UI.editNote = null; o.rerender(); };
     ta.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); } e.stopPropagation(); });
     body = h("div", {}, ta, h("div", { class: "n-cbar" }, h("span", { class: "spacer" }), h("button", { onclick: cancel }, "Cancel"), h("button", { class: "primary", onclick: save }, "Save")));
-  } else body = h("div", { class: "n-body", html: linkify(esc(n.body)) });
+  } else body = h("div", { class: "n-body", html: linkify(n.body) });
   return h("div", { class: "n-entry", "data-note": n.id },
     h("div", { class: "n-av", title: n.author || "", html: PERSON_SVG }),
     h("div", { class: "n-main" }, head, body));
@@ -3341,8 +3354,8 @@ function relChildren(t) {
   }, "＋ New subtask");
   const rows = t.children.map(c => h("tr", { class: "click" + (c.isSummary ? " summary" : ""), onclick: () => openRecord(c.id) },
     h("td", {}, c.wbs), h("td", {}, (c.isMilestone ? "◆ " : "") + c.name), h("td", {}, fmtShort(c.S)), h("td", {}, fmtShort(c.F)),
-    h("td", {}, c.P + "%"), h("td", { html: `<span class="st ${stClass(c.ST)}">${esc(c.ST)}</span>` }),
-    h("td", { html: `<span class="chips">${rChips(c)}</span>` }),
+    h("td", {}, c.P + "%"), h("td", { html: html`<span class="st ${stClass(c.ST)}">${c.ST}</span>` }),
+    h("td", { html: html`<span class="chips">${rChips(c)}</span>` }),
     h("td", { class: "num" }, M.noteCount.get(c.id) ? "💬 " + M.noteCount.get(c.id) : "")));
   return h("div", {}, h("div", { class: "rel-bar" }, add),
     relTable(["WBS", "Name", "Start", "Finish", "%", "Status", "Responsible", "Notes"], rows, t.isMilestone ? "Milestones normally have no subtasks." : "No subtasks. Adding one turns this into a summary task whose dates roll up."));
@@ -3467,7 +3480,7 @@ function partyCell(rec, role) {
   const eff = role === "A" ? recAccountable(rec) : recResponsible(rec);
   const dim = !!eff.inherited || !!eff.same;
   const btn = h("button", { class: "rk-party", disabled: role === "R" && !!rec.r_is_a, title: role === "R" && rec.r_is_a ? "Same as Accountable" : `Choose ${ROLE_NAMES[role]}`,
-    html: eff.list.length ? eff.list.map(p => chipFor(p, dim, eff.same ? " (same as Accountable)" : eff.inherited ? " (from the risk)" : "")).join("") : `<span class="hint">—</span>` });
+    html: eff.list.length ? html`${eff.list.map(p => chipFor(p, dim, eff.same ? " (same as Accountable)" : eff.inherited ? " (from the risk)" : ""))}` : html`<span class="hint">—</span>` });
   btn.addEventListener("click", e => { e.stopPropagation(); pickRecParties(btn, rec, role); });
   return btn;
 }
@@ -3480,7 +3493,7 @@ function pickRecParties(anchor, rec, role) {
     onDone: () => { },
   });
 }
-const riskBadge = r => `<span class="rs rs-${r.status.toLowerCase()}">${r.status}${r.response === "mitigate" && r.mitigants.length ? ` · ${r.achievedCount}/${r.mitigants.length}` : ""}</span>`;
+const riskBadge = r => html`<span class="rs rs-${r.status.toLowerCase()}">${r.status}${r.response === "mitigate" && r.mitigants.length ? ` · ${r.achievedCount}/${r.mitigants.length}` : ""}</span>`;
 const gapIcon = gaps => gaps.length ? h("span", { class: "warn-dot", title: gaps.join("\n") }, "⚠") : null;
 
 function renderRiskGrid() {
@@ -3614,10 +3627,10 @@ function renderPlanList() {
   const list = $("riskPlanList"); const s = UI.planSearch.trim().toLowerCase();
   let rows = M.order;
   if (s) { const keep = new Set(); for (const t of M.order) if (t.name.toLowerCase().includes(s) || t.wbs.startsWith(s)) for (let x = t; x; x = x.parent) keep.add(x.id); rows = M.order.filter(t => keep.has(t.id)); }
-  list.innerHTML = rows.length ? rows.map(t => {
+  setHtml(list, rows.length ? html`${rows.map(t => {
     const n = (M.mitByTask.get(t.id) || []).length;
-    return `<div class="rp-row${t.isSummary ? " summary" : ""}" data-id="${t.id}" title="${esc(t.wbs + " " + t.name)} · ${esc(t.ST)} · ${fmtShort(t.S)} → ${fmtShort(t.F)}"><span style="width:${t.depth * 14}px;flex:none"></span><span class="w">${esc(t.wbs)}</span><span class="dot ${stClass(t.ST)}"></span><span class="n">${t.isMilestone ? "◆ " : ""}${esc(t.name)}</span>${n ? `<span class="sh" title="Implements ${n} mitigant(s)">🛡${n}</span>` : ""}</div>`;
-  }).join("") : `<div class="empty">${M.order.length ? "No tasks match." : "No tasks in this project yet."}</div>`;
+    return html`<div class="rp-row${t.isSummary ? " summary" : ""}" data-id="${t.id}" title="${t.wbs} ${t.name} · ${t.ST} · ${fmtShort(t.S)} → ${fmtShort(t.F)}"><span style="width:${t.depth * 14}px;flex:none"></span><span class="w">${t.wbs}</span><span class="dot ${stClass(t.ST)}"></span><span class="n">${t.isMilestone ? "◆ " : ""}${t.name}</span>${n ? html`<span class="sh" title="Implements ${n} mitigant(s)">🛡${n}</span>` : ""}</div>`;
+  })}` : html`<div class="empty">${M.order.length ? "No tasks match." : "No tasks in this project yet."}</div>`);
 }
 function flashPlanRow(id) { const el = $("riskPlanList").querySelector(`.rp-row[data-id="${id}"]`); if (el) { el.scrollIntoView({ block: "nearest" }); el.classList.add("flash"); setTimeout(() => el.classList.remove("flash"), 1400); } }
 
@@ -3739,7 +3752,7 @@ function recText(rec, field, multi, attrs = {}) {
 function recParty(rec, role) {
   const eff = role === "A" ? recAccountable(rec) : recResponsible(rec);
   const same = role === "R" && !!rec.r_is_a;
-  const btn = h("button", { class: "f-party", disabled: same, html: (eff.list.length ? eff.list.map(p => chipFor(p, !!eff.inherited || same)).join("") : `<span class="hint">None</span>`) + (eff.inherited ? `<span class="hint"> from the risk</span>` : "") });
+  const btn = h("button", { class: "f-party", disabled: same, html: html`${eff.list.length ? eff.list.map(p => chipFor(p, !!eff.inherited || same)) : html`<span class="hint">None</span>`}${eff.inherited ? html`<span class="hint"> from the risk</span>` : ""}` });
   btn.addEventListener("click", () => pickRecParties(btn, rec, role));
   if (role !== "R") return btn;
   const sw = h("input", { type: "checkbox", role: "switch", class: "sw", checked: same });
@@ -3790,7 +3803,7 @@ function mitTaskList(m) {
   addSel.addEventListener("change", () => { const id = +addSel.value; if (id) linkMit(m.id, id); });
   const rows = m.tasks.map(t => h("tr", {},
     h("td", {}, h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(t.id); } }, t.wbs)), h("td", {}, t.name),
-    h("td", {}, fmtShort(t.S)), h("td", {}, fmtShort(t.F)), h("td", { html: `<span class="st ${stClass(t.ST)}">${esc(t.ST)}</span>` }),
+    h("td", {}, fmtShort(t.S)), h("td", {}, fmtShort(t.F)), h("td", { html: html`<span class="st ${stClass(t.ST)}">${t.ST}</span>` }),
     h("td", {}, h("button", { class: "x", title: "Unlink", onclick: () => mutate(`Unlinked ${t.wbs}`, () => opUnlinkTask(m.id, t.id)) }, "✕"))));
   return h("section", { class: "f-sec" }, h("div", { class: "f-sec-h" }, h("h3", {}, "Implemented by"), h("span", { class: "spacer" }), addSel, h("button", { onclick: () => quickTask(m) }, "＋ Task")),
     relTable(["WBS", "Task", "Start", "Finish", "Status", ""], rows, "No tasks yet. Drag this mitigant onto a task, or click ＋ Task."));
@@ -4134,54 +4147,48 @@ function renderRaci() {
   const used = new Set(); for (const list of M.raci.values()) for (const r of list) used.add(r.party_id);
   const cols = [...M.people, ...M.teams].filter(p => onlyUsed ? used.has(p.id) : (p.active || used.has(p.id)));
   const rows = M.order.filter(t => !leaves || !t.isSummary);
-  if (!M.order.length) { wrap.innerHTML = `<div class="empty">No tasks in this project yet.</div>`; return; }
-  if (!cols.length) { wrap.innerHTML = `<div class="empty">No ${onlyUsed ? "assignments" : "people or teams"} yet. Untick “Only people/teams with assignments” or add people on the People &amp; teams tab.</div>`; return; }
+  if (!M.order.length) { setHtml(wrap, html`<div class="empty">No tasks in this project yet.</div>`); return; }
+  if (!cols.length) { setHtml(wrap, html`<div class="empty">No ${onlyUsed ? "assignments" : "people or teams"} yet. Untick “Only people/teams with assignments” or add people on the People &amp; teams tab.</div>`); return; }
   const issuesBy = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!issuesBy.has(i.task.id)) issuesBy.set(i.task.id, []); issuesBy.get(i.task.id).push(i.text); }
-  let html = `<table class="raci"><thead><tr><th class="tn">Task</th>${cols.map(p => `<th class="pc" title="${esc(p.name)}">${esc(p.name)}<span class="k">${p.kind === "team" ? "team" : esc(p.title || "")}</span></th>`).join("")}<th>Warnings</th></tr></thead><tbody>`;
-  for (const t of rows) {
+  const body = rows.map(t => {
     const map = new Map(rolesOf(t.id).map(r => [r.party_id, r.role]));
     const inh = accountable(t);
-    html += `<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${esc(t.name)}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${esc(t.wbs)}&nbsp; ${esc(t.name)}</a></td>`;
-    for (const p of cols) {
+    const cells = cols.map(p => {
       const r = map.get(p.id) || "";
       const ghost = !r && inh.inherited && inh.list.some(a => a.party_id === p.id);
       const ar = t.r_is_a && (r === "A" || ghost); // Responsible = Accountable
-      html += `<td class="cell ${esc(r)}" data-t="${t.id}" data-p="${p.id}" title="${esc(p.name)}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? esc(r) + (ar ? "/R" : "") : ghost ? `<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
-    }
-    html += `<td class="flag">${(issuesBy.get(t.id) || []).map(esc).join("; ")}</td></tr>`;
-  }
-  wrap.innerHTML = html + "</tbody></table>";
+      return html`<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" title="${p.name}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? r + (ar ? "/R" : "") : ghost ? html`<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
+    });
+    return html`<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
+  });
+  setHtml(wrap, html`<table class="raci"><thead><tr><th class="tn">Task</th>${cols.map(p => html`<th class="pc" title="${p.name}">${p.name}<span class="k">${p.kind === "team" ? "team" : p.title || ""}</span></th>`)}<th>Warnings</th></tr></thead><tbody>${body}</tbody></table>`);
 }
 function renderRaciTeams() {
   const wrap = $("raciWrap");
   const onlyUsed = $("raciOnlyUsed").checked, leaves = $("raciLeaves").checked;
   const rows = M.order.filter(t => !leaves || !t.isSummary);
-  if (!M.order.length) { wrap.innerHTML = `<div class="empty">No tasks in this project yet.</div>`; return; }
+  if (!M.order.length) { setHtml(wrap, html`<div class="empty">No tasks in this project yet.</div>`); return; }
   const teamOf = pid => { const p = M.parties.get(pid); return !p ? null : p.kind === "team" ? pid : homeTeam(pid) ?? 0; }; // 0 = no team
   const used = new Set(); for (const list of M.raci.values()) for (const r of list) used.add(teamOf(r.party_id));
   const cols = M.teams.filter(tm => onlyUsed ? used.has(tm.id) : (tm.active || used.has(tm.id))).map(tm => ({ id: tm.id, name: tm.name, team: tm }));
   if (used.has(0)) cols.push({ id: 0, name: "No team", team: null });
-  if (!cols.length) { wrap.innerHTML = `<div class="empty">${M.teams.length ? "No team has assignments yet. Untick “Only teams with assignments”." : "No teams yet. Add teams on the People &amp; teams tab."}</div>`; return; }
+  if (!cols.length) { setHtml(wrap, html`<div class="empty">${M.teams.length ? "No team has assignments yet. Untick “Only teams with assignments”." : "No teams yet. Add teams on the People & teams tab."}</div>`); return; }
   const issuesBy = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!issuesBy.has(i.task.id)) issuesBy.set(i.task.id, []); issuesBy.get(i.task.id).push(i.text); }
-  let html = `<table class="raci team"><thead><tr><th class="tn">Task</th>${cols.map(c => `<th class="pc" title="${esc(c.name)}">${esc(c.name)}<span class="k">${c.team ? `${(M.members.get(c.id) || []).length} people` : "people without a team"}</span></th>`).join("")}<th>Warnings</th></tr></thead><tbody>`;
-  for (const t of rows) {
-    html += `<tr class="${t.isSummary ? "summary" : ""}${t.id === UI.selId && UI.form ? " sel" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${esc(t.name)}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${esc(t.wbs)}&nbsp; ${esc(t.name)}</a></td>`;
+  const body = rows.map(t => {
     const roles = rolesOf(t.id);
-    for (const c of cols) {
+    const cells = cols.map(c => {
       const own = c.team ? roles.find(r => r.party_id === c.id) : null;
       const mem = roles.filter(r => M.parties.get(r.party_id)?.kind === "person" && teamOf(r.party_id) === c.id);
       const ownL = own ? roleLabel(t, own.role) : "";
       const top = ownL || (mem[0] ? roleLabel(t, mem[0].role) : "");
       const tip = [own ? `${c.name} (team): ${ownL}` : "", ...mem.map(r => `${partyName(r.party_id)}: ${roleLabel(t, r.role)}`)].filter(Boolean).join("\n") || `${c.name}: none`;
-      html += `<td class="cell tcell ${esc(top[0] || "")}" data-t="${t.id}" data-team="${c.id}" title="${esc(tip)}">`
-        + (ownL ? `<b>${esc(ownL)}</b>` : "")
-        + mem.map(r => `<span class="mr r-${esc(r.role)}" data-p="${r.party_id}">${esc(roleLabel(t, r.role))}·${esc(initials(partyName(r.party_id)))}</span>`).join("")
-        + (c.team && (M.members.get(c.id) || []).length ? `<button class="plus" data-plus="${c.id}" title="Give this to a member of ${esc(c.name)}">+</button>` : "")
-        + `</td>`;
-    }
-    html += `<td class="flag">${(issuesBy.get(t.id) || []).map(esc).join("; ")}</td></tr>`;
-  }
-  wrap.innerHTML = html + "</tbody></table>";
+      const chips = mem.map(r => html`<span class="mr r-${r.role}" data-p="${r.party_id}">${roleLabel(t, r.role)}·${initials(partyName(r.party_id))}</span>`);
+      const plus = c.team && (M.members.get(c.id) || []).length ? html`<button class="plus" data-plus="${c.id}" title="Give this to a member of ${c.name}">+</button>` : "";
+      return html`<td class="cell tcell ${top[0] || ""}" data-t="${t.id}" data-team="${c.id}" title="${tip}">${ownL ? html`<b>${ownL}</b>` : ""}${chips}${plus}</td>`;
+    });
+    return html`<tr class="${t.isSummary ? "summary" : ""}${t.id === UI.selId && UI.form ? " sel" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
+  });
+  setHtml(wrap, html`<table class="raci team"><thead><tr><th class="tn">Task</th>${cols.map(c => html`<th class="pc" title="${c.name}">${c.name}<span class="k">${c.team ? `${(M.members.get(c.id) || []).length} people` : "people without a team"}</span></th>`)}<th>Warnings</th></tr></thead><tbody>${body}</tbody></table>`);
 }
 // Hand the team's role on a task to one of its members (or set a member's role when the team has none).
 function teamMemberPicker(anchor, tid, teamId) {
@@ -5233,25 +5240,24 @@ function printPlan() {
     const chunk = rows.slice(p * PER_PAGE, (p + 1) * PER_PAGE);
     const H = 44 + chunk.length * ROW + 4;
     const local = new Map(chunk.map((t, i) => [t.id, i]));
-    let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W0} ${H}" font-family="system-ui,Segoe UI,sans-serif" font-size="12">${defs("p" + p)}`;
-    let x = 0; heads.forEach((hd, i) => { s += `<text x="${x + 4}" y="37" font-weight="600" fill="#555">${hd}</text>`; x += COLW[i]; });
-    s += `<g transform="translate(${TX},0)">${headerSvg(sc)}<g transform="translate(0,44)">${backgroundSvg(sc, chunk.length * ROW)}`;
-    for (const d of M.deps) if (local.has(d.pred_id) && local.has(d.succ_id)) s += depPath(sc, d, t => local.get(t.id), "p" + p);
-    chunk.forEach((t, i) => s += barSvg(sc, t, i * ROW, { print: true, noLabel: true }));
-    s += `</g></g><g transform="translate(0,44)">`;
-    chunk.forEach((t, i) => {
+    let x = 0; const headTexts = heads.map((hd, i) => { const tx = html`<text x="${x + 4}" y="37" font-weight="600" fill="#555">${hd}</text>`; x += COLW[i]; return tx; });
+    const links = M.deps.filter(d => local.has(d.pred_id) && local.has(d.succ_id)).map(d => depPath(sc, d, t => local.get(t.id), "p" + p));
+    const bars = chunk.map((t, i) => barSvg(sc, t, i * ROW, { print: true, noLabel: true }));
+    const table = chunk.map((t, i) => {
       const y = i * ROW + 19, a = accountable(t);
       const cells = [t.wbs, t.name, fmtShort(t.S), fmtShort(t.F), t.P + "%", rolesOf(t.id, "R").map(r => partyName(r.party_id)).join(", "), a.list.map(r => partyName(r.party_id)).join(", ")];
-      s += `<line x1="0" x2="${W0}" y1="${i * ROW + ROW}" y2="${i * ROW + ROW}" stroke="#e5e5e5"/>`;
-      let cx = 0; cells.forEach((c, j) => {
+      let cx = 0;
+      const texts = cells.map((c, j) => {
         const max = Math.floor((COLW[j] - 8 - (j === 1 ? t.depth * 14 : 0)) / 6.4); const txt = String(c).length > max ? String(c).slice(0, max - 1) + "…" : c;
-        s += `<text x="${cx + 4 + (j === 1 ? t.depth * 14 : 0)}" y="${y}"${j === 1 && t.isSummary ? ' font-weight="700"' : ""}>${esc(txt)}</text>`; cx += COLW[j];
+        const tx = html`<text x="${cx + 4 + (j === 1 ? t.depth * 14 : 0)}" y="${y}"${j === 1 && t.isSummary ? html` font-weight="700"` : ""}>${txt}</text>`; cx += COLW[j]; return tx;
       });
+      return html`<line x1="0" x2="${W0}" y1="${i * ROW + ROW}" y2="${i * ROW + ROW}" stroke="#e5e5e5"/>${texts}`;
     });
-    s += `</g></svg>`;
+    const chart = html`<g transform="translate(${TX},0)">${headerSvg(sc)}<g transform="translate(0,44)">${backgroundSvg(sc, chunk.length * ROW)}${links}${bars}</g></g>`;
+    const s = html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W0} ${H}" font-family="system-ui,Segoe UI,sans-serif" font-size="12">${defs("p" + p)}${headTexts}${chart}<g transform="translate(0,44)">${table}</g></svg>`;
     const page = h("div", { class: "pg" });
     if (p === 0) page.append(h("h1", {}, proj?.name || "Plan"), h("div", { class: "sub" }, `Printed ${new Date().toLocaleString()} · ${rows.length} tasks${filterActive() ? " (filtered)" : ""}`));
-    page.insertAdjacentHTML("beforeend", s);
+    const holder = h("div", { html: s }); page.append(...holder.childNodes);
     root.append(page);
   }
   setTimeout(() => window.print(), 50);
@@ -5401,7 +5407,7 @@ setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
     op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote, opSetRIsA,
       opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote },
     risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport, riskImportItems, doRiskImport, openRiskRecord, closeRiskForm, renderRisks, get RI() { return RI; }, recNotes, toLMH },
-    util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum },
+    util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml },
     io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, csvText, autoMap, riskPreviewText, get W() { return W; } },
     db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; },
       get diskRev() { return diskRev; }, get readOnly() { return readOnly; }, get fileId() { return readFileId(db); },

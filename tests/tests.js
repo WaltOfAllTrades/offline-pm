@@ -1112,6 +1112,28 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     key("Escape"); eq(P.UI.selId, null, "Esc cleared the selection");
     ok(!key("Tab"), "Tab not captured without a selection");
   });
+  await test("trust", "html`` escapes values, nests results, and setHtml refuses plain strings", () => {
+    const { html, setHtml } = U, div = document.createElement("div");
+    setHtml(div, html`<b title="${'"x"'}">${"<i>a</i>"}</b>${[html`<u>1</u>`, "<2>"]}${null}${false}${0}`);
+    eq(div.innerHTML, '<b title="&quot;x&quot;">&lt;i&gt;a&lt;/i&gt;</b><u>1</u>&lt;2&gt;0');
+    throws(() => setHtml(div, "<b>raw</b>"), /html/, "plain string refused");
+    throws(() => html`<a>` + html`</a>`, /Nest/, "joining with + refused");
+  });
+  await test("trust", "names made of markup show as text in every view", async () => {
+    fresh(); const evil = '<img src=x onerror="window.__xss=1">'; window.__xss = 0;
+    const a = T(evil + " task"), p = T(evil + " phase"), c = T("child", p); let ana, eng;
+    m(() => { ana = O.opAddParty("person", evil); eng = O.opAddParty("team", evil + " team"); O.opSetMembers(eng, [ana]); O.opSetRole(a, ana, "R"); O.opSetRole(a, eng, "A"); O.opAddDep(a, c);
+      const r = O.opAddRisk({ name: evil }); O.opLinkTask(O.opAddMitigant(r, evil), a); O.opAddNote(a, evil + " see https://example.com/x?a=1&b=2"); });
+    const noImg = where => ok(!document.querySelector(where + " img"), "no <img> in " + where);
+    P.switchView("plan"); P.openRecord(a); noImg("#gridRows"); noImg("#ganttSvg"); noImg("#formPane");
+    ok(document.querySelector("#gridRows .nm").textContent.startsWith("<img"), "name shown as text");
+    ok(document.querySelector('#formPane .n-body a[href="https://example.com/x?a=1&b=2"]'), "note link kept, & intact");
+    P.openRecord(p); noImg("#formPane");
+    P.switchView("raci"); noImg("#raciWrap"); const by = P.UI.raciBy; P.UI.raciBy = by === "team" ? "person" : "team"; P.renderAll(); noImg("#raciWrap"); P.UI.raciBy = by;
+    P.switchView("risks"); noImg("#view-risks");
+    await new Promise(r => setTimeout(r, 50)); eq(window.__xss, 0, "no handler ran");
+    P.toggleForm(false); P.switchView("plan");
+  });
   await test("a11y", "dialogs take focus, keep Tab inside, and give focus back when closed", () => {
     P.switchView("plan"); const gb = document.getElementById("gridBody"); gb.focus();
     document.querySelector('#fileMenu [data-act="help"]').click();

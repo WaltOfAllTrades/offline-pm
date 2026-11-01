@@ -801,25 +801,24 @@ function printPlan() {
     const chunk = rows.slice(p * PER_PAGE, (p + 1) * PER_PAGE);
     const H = 44 + chunk.length * ROW + 4;
     const local = new Map(chunk.map((t, i) => [t.id, i]));
-    let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W0} ${H}" font-family="system-ui,Segoe UI,sans-serif" font-size="12">${defs("p" + p)}`;
-    let x = 0; heads.forEach((hd, i) => { s += `<text x="${x + 4}" y="37" font-weight="600" fill="#555">${hd}</text>`; x += COLW[i]; });
-    s += `<g transform="translate(${TX},0)">${headerSvg(sc)}<g transform="translate(0,44)">${backgroundSvg(sc, chunk.length * ROW)}`;
-    for (const d of M.deps) if (local.has(d.pred_id) && local.has(d.succ_id)) s += depPath(sc, d, t => local.get(t.id), "p" + p);
-    chunk.forEach((t, i) => s += barSvg(sc, t, i * ROW, { print: true, noLabel: true }));
-    s += `</g></g><g transform="translate(0,44)">`;
-    chunk.forEach((t, i) => {
+    let x = 0; const headTexts = heads.map((hd, i) => { const tx = html`<text x="${x + 4}" y="37" font-weight="600" fill="#555">${hd}</text>`; x += COLW[i]; return tx; });
+    const links = M.deps.filter(d => local.has(d.pred_id) && local.has(d.succ_id)).map(d => depPath(sc, d, t => local.get(t.id), "p" + p));
+    const bars = chunk.map((t, i) => barSvg(sc, t, i * ROW, { print: true, noLabel: true }));
+    const table = chunk.map((t, i) => {
       const y = i * ROW + 19, a = accountable(t);
       const cells = [t.wbs, t.name, fmtShort(t.S), fmtShort(t.F), t.P + "%", rolesOf(t.id, "R").map(r => partyName(r.party_id)).join(", "), a.list.map(r => partyName(r.party_id)).join(", ")];
-      s += `<line x1="0" x2="${W0}" y1="${i * ROW + ROW}" y2="${i * ROW + ROW}" stroke="#e5e5e5"/>`;
-      let cx = 0; cells.forEach((c, j) => {
+      let cx = 0;
+      const texts = cells.map((c, j) => {
         const max = Math.floor((COLW[j] - 8 - (j === 1 ? t.depth * 14 : 0)) / 6.4); const txt = String(c).length > max ? String(c).slice(0, max - 1) + "…" : c;
-        s += `<text x="${cx + 4 + (j === 1 ? t.depth * 14 : 0)}" y="${y}"${j === 1 && t.isSummary ? ' font-weight="700"' : ""}>${esc(txt)}</text>`; cx += COLW[j];
+        const tx = html`<text x="${cx + 4 + (j === 1 ? t.depth * 14 : 0)}" y="${y}"${j === 1 && t.isSummary ? html` font-weight="700"` : ""}>${txt}</text>`; cx += COLW[j]; return tx;
       });
+      return html`<line x1="0" x2="${W0}" y1="${i * ROW + ROW}" y2="${i * ROW + ROW}" stroke="#e5e5e5"/>${texts}`;
     });
-    s += `</g></svg>`;
+    const chart = html`<g transform="translate(${TX},0)">${headerSvg(sc)}<g transform="translate(0,44)">${backgroundSvg(sc, chunk.length * ROW)}${links}${bars}</g></g>`;
+    const s = html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W0} ${H}" font-family="system-ui,Segoe UI,sans-serif" font-size="12">${defs("p" + p)}${headTexts}${chart}<g transform="translate(0,44)">${table}</g></svg>`;
     const page = h("div", { class: "pg" });
     if (p === 0) page.append(h("h1", {}, proj?.name || "Plan"), h("div", { class: "sub" }, `Printed ${new Date().toLocaleString()} · ${rows.length} tasks${filterActive() ? " (filtered)" : ""}`));
-    page.insertAdjacentHTML("beforeend", s);
+    const holder = h("div", { html: s }); page.append(...holder.childNodes);
     root.append(page);
   }
   setTimeout(() => window.print(), 50);

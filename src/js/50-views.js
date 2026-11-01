@@ -137,54 +137,48 @@ function renderRaci() {
   const used = new Set(); for (const list of M.raci.values()) for (const r of list) used.add(r.party_id);
   const cols = [...M.people, ...M.teams].filter(p => onlyUsed ? used.has(p.id) : (p.active || used.has(p.id)));
   const rows = M.order.filter(t => !leaves || !t.isSummary);
-  if (!M.order.length) { wrap.innerHTML = `<div class="empty">No tasks in this project yet.</div>`; return; }
-  if (!cols.length) { wrap.innerHTML = `<div class="empty">No ${onlyUsed ? "assignments" : "people or teams"} yet. Untick “Only people/teams with assignments” or add people on the People &amp; teams tab.</div>`; return; }
+  if (!M.order.length) { setHtml(wrap, html`<div class="empty">No tasks in this project yet.</div>`); return; }
+  if (!cols.length) { setHtml(wrap, html`<div class="empty">No ${onlyUsed ? "assignments" : "people or teams"} yet. Untick “Only people/teams with assignments” or add people on the People &amp; teams tab.</div>`); return; }
   const issuesBy = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!issuesBy.has(i.task.id)) issuesBy.set(i.task.id, []); issuesBy.get(i.task.id).push(i.text); }
-  let html = `<table class="raci"><thead><tr><th class="tn">Task</th>${cols.map(p => `<th class="pc" title="${esc(p.name)}">${esc(p.name)}<span class="k">${p.kind === "team" ? "team" : esc(p.title || "")}</span></th>`).join("")}<th>Warnings</th></tr></thead><tbody>`;
-  for (const t of rows) {
+  const body = rows.map(t => {
     const map = new Map(rolesOf(t.id).map(r => [r.party_id, r.role]));
     const inh = accountable(t);
-    html += `<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${esc(t.name)}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${esc(t.wbs)}&nbsp; ${esc(t.name)}</a></td>`;
-    for (const p of cols) {
+    const cells = cols.map(p => {
       const r = map.get(p.id) || "";
       const ghost = !r && inh.inherited && inh.list.some(a => a.party_id === p.id);
       const ar = t.r_is_a && (r === "A" || ghost); // Responsible = Accountable
-      html += `<td class="cell ${esc(r)}" data-t="${t.id}" data-p="${p.id}" title="${esc(p.name)}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? esc(r) + (ar ? "/R" : "") : ghost ? `<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
-    }
-    html += `<td class="flag">${(issuesBy.get(t.id) || []).map(esc).join("; ")}</td></tr>`;
-  }
-  wrap.innerHTML = html + "</tbody></table>";
+      return html`<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" title="${p.name}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? r + (ar ? "/R" : "") : ghost ? html`<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
+    });
+    return html`<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
+  });
+  setHtml(wrap, html`<table class="raci"><thead><tr><th class="tn">Task</th>${cols.map(p => html`<th class="pc" title="${p.name}">${p.name}<span class="k">${p.kind === "team" ? "team" : p.title || ""}</span></th>`)}<th>Warnings</th></tr></thead><tbody>${body}</tbody></table>`);
 }
 function renderRaciTeams() {
   const wrap = $("raciWrap");
   const onlyUsed = $("raciOnlyUsed").checked, leaves = $("raciLeaves").checked;
   const rows = M.order.filter(t => !leaves || !t.isSummary);
-  if (!M.order.length) { wrap.innerHTML = `<div class="empty">No tasks in this project yet.</div>`; return; }
+  if (!M.order.length) { setHtml(wrap, html`<div class="empty">No tasks in this project yet.</div>`); return; }
   const teamOf = pid => { const p = M.parties.get(pid); return !p ? null : p.kind === "team" ? pid : homeTeam(pid) ?? 0; }; // 0 = no team
   const used = new Set(); for (const list of M.raci.values()) for (const r of list) used.add(teamOf(r.party_id));
   const cols = M.teams.filter(tm => onlyUsed ? used.has(tm.id) : (tm.active || used.has(tm.id))).map(tm => ({ id: tm.id, name: tm.name, team: tm }));
   if (used.has(0)) cols.push({ id: 0, name: "No team", team: null });
-  if (!cols.length) { wrap.innerHTML = `<div class="empty">${M.teams.length ? "No team has assignments yet. Untick “Only teams with assignments”." : "No teams yet. Add teams on the People &amp; teams tab."}</div>`; return; }
+  if (!cols.length) { setHtml(wrap, html`<div class="empty">${M.teams.length ? "No team has assignments yet. Untick “Only teams with assignments”." : "No teams yet. Add teams on the People & teams tab."}</div>`); return; }
   const issuesBy = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!issuesBy.has(i.task.id)) issuesBy.set(i.task.id, []); issuesBy.get(i.task.id).push(i.text); }
-  let html = `<table class="raci team"><thead><tr><th class="tn">Task</th>${cols.map(c => `<th class="pc" title="${esc(c.name)}">${esc(c.name)}<span class="k">${c.team ? `${(M.members.get(c.id) || []).length} people` : "people without a team"}</span></th>`).join("")}<th>Warnings</th></tr></thead><tbody>`;
-  for (const t of rows) {
-    html += `<tr class="${t.isSummary ? "summary" : ""}${t.id === UI.selId && UI.form ? " sel" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${esc(t.name)}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${esc(t.wbs)}&nbsp; ${esc(t.name)}</a></td>`;
+  const body = rows.map(t => {
     const roles = rolesOf(t.id);
-    for (const c of cols) {
+    const cells = cols.map(c => {
       const own = c.team ? roles.find(r => r.party_id === c.id) : null;
       const mem = roles.filter(r => M.parties.get(r.party_id)?.kind === "person" && teamOf(r.party_id) === c.id);
       const ownL = own ? roleLabel(t, own.role) : "";
       const top = ownL || (mem[0] ? roleLabel(t, mem[0].role) : "");
       const tip = [own ? `${c.name} (team): ${ownL}` : "", ...mem.map(r => `${partyName(r.party_id)}: ${roleLabel(t, r.role)}`)].filter(Boolean).join("\n") || `${c.name}: none`;
-      html += `<td class="cell tcell ${esc(top[0] || "")}" data-t="${t.id}" data-team="${c.id}" title="${esc(tip)}">`
-        + (ownL ? `<b>${esc(ownL)}</b>` : "")
-        + mem.map(r => `<span class="mr r-${esc(r.role)}" data-p="${r.party_id}">${esc(roleLabel(t, r.role))}·${esc(initials(partyName(r.party_id)))}</span>`).join("")
-        + (c.team && (M.members.get(c.id) || []).length ? `<button class="plus" data-plus="${c.id}" title="Give this to a member of ${esc(c.name)}">+</button>` : "")
-        + `</td>`;
-    }
-    html += `<td class="flag">${(issuesBy.get(t.id) || []).map(esc).join("; ")}</td></tr>`;
-  }
-  wrap.innerHTML = html + "</tbody></table>";
+      const chips = mem.map(r => html`<span class="mr r-${r.role}" data-p="${r.party_id}">${roleLabel(t, r.role)}·${initials(partyName(r.party_id))}</span>`);
+      const plus = c.team && (M.members.get(c.id) || []).length ? html`<button class="plus" data-plus="${c.id}" title="Give this to a member of ${c.name}">+</button>` : "";
+      return html`<td class="cell tcell ${top[0] || ""}" data-t="${t.id}" data-team="${c.id}" title="${tip}">${ownL ? html`<b>${ownL}</b>` : ""}${chips}${plus}</td>`;
+    });
+    return html`<tr class="${t.isSummary ? "summary" : ""}${t.id === UI.selId && UI.form ? " sel" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
+  });
+  setHtml(wrap, html`<table class="raci team"><thead><tr><th class="tn">Task</th>${cols.map(c => html`<th class="pc" title="${c.name}">${c.name}<span class="k">${c.team ? `${(M.members.get(c.id) || []).length} people` : "people without a team"}</span></th>`)}<th>Warnings</th></tr></thead><tbody>${body}</tbody></table>`);
 }
 // Hand the team's role on a task to one of its members (or set a member's role when the team has none).
 function teamMemberPicker(anchor, tid, teamId) {

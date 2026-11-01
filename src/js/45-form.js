@@ -153,9 +153,8 @@ function formFields(t) {
   const party = role => {
     const eff = role === "A" ? accountable(t) : responsible(t);
     const inh = !!eff.inherited, same = role === "R" && eff.same;
-    const html = (eff.list.length ? eff.list.map(r => chipFor(r, inh || same)).join("") : `<span class="hint">None</span>`)
-      + (inh && eff.list.length ? `<span class="hint"> from ${esc(eff.from.wbs)}</span>` : "");
-    const btn = h("button", { class: "f-party", disabled: same, title: same ? "Same as Accountable. Turn the switch off to choose someone else" : `Choose ${ROLE_NAMES[role]}`, html });
+    const chips = html`${eff.list.length ? eff.list.map(r => chipFor(r, inh || same)) : html`<span class="hint">None</span>`}${inh && eff.list.length ? html`<span class="hint"> from ${eff.from.wbs}</span>` : ""}`;
+    const btn = h("button", { class: "f-party", disabled: same, title: same ? "Same as Accountable. Turn the switch off to choose someone else" : `Choose ${ROLE_NAMES[role]}`, html: chips });
     btn.addEventListener("click", () => openPartyPicker(btn.getBoundingClientRect(), t.id, role));
     if (role !== "R") return btn;
     const sw = h("input", { type: "checkbox", role: "switch", class: "sw", checked: !!t.r_is_a, "data-f": "r_is_a" });
@@ -209,16 +208,22 @@ function miniGanttSvg(t, rows, width) {
   const H = Math.max(rows.length, 1) * ROW, HD = 44;
   const idx = new Map(rows.map((r, i) => [r.id, i]));
   const rowOf = x => idx.get(x.id) ?? null;
-  let body = backgroundSvg(sc, H);
-  if (t.S != null) body += `<rect class="mg-span" x="${xOf(sc, t.S)}" y="0" width="${Math.max(2, xOf(sc, t.F + 1) - xOf(sc, t.S))}" height="${H}"/>`;
-  body += rows.map((r, i) => `<line class="mg-row" x1="0" x2="${sc.width}" y1="${(i + 1) * ROW}" y2="${(i + 1) * ROW}"/>`).join("");
-  body += M.deps.filter(d => idx.has(d.pred_id) && idx.has(d.succ_id)).map(d => depPath(sc, d, rowOf, "mg")).join("");
-  body += rows.map((r, i) => barSvg(sc, r, i * ROW, { print: true, noLabel: true })).join("");
-  return `<svg width="${sc.width}" height="${H + HD}" class="mg-svg">${defs("mg")}<g class="mg-hdr">${headerSvg(sc)}</g><g transform="translate(0,${HD})">${body}</g></svg>`;
+  const body = [backgroundSvg(sc, H)];
+  if (t.S != null) body.push(html`<rect class="mg-span" x="${xOf(sc, t.S)}" y="0" width="${Math.max(2, xOf(sc, t.F + 1) - xOf(sc, t.S))}" height="${H}"/>`);
+  body.push(rows.map((r, i) => html`<line class="mg-row" x1="0" x2="${sc.width}" y1="${(i + 1) * ROW}" y2="${(i + 1) * ROW}"/>`));
+  body.push(M.deps.filter(d => idx.has(d.pred_id) && idx.has(d.succ_id)).map(d => depPath(sc, d, rowOf, "mg")));
+  body.push(rows.map((r, i) => barSvg(sc, r, i * ROW, { print: true, noLabel: true })));
+  return html`<svg width="${sc.width}" height="${H + HD}" class="mg-svg">${defs("mg")}<g class="mg-hdr">${headerSvg(sc)}</g><g transform="translate(0,${HD})">${body}</g></svg>`;
 }
 
 // ---------- Work notes (activity stream) ----------
-const linkify = s => s.replace(/https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"]/g, u => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
+// Plain text with its web addresses turned into links; everything else stays text.
+const linkify = s => {
+  const out = []; let i = 0;
+  for (const m of s.matchAll(/https?:\/\/[^\s<>]+[^\s<>.,;:!?)\]'"]/g)) { out.push(s.slice(i, m.index), html`<a href="${m[0]}" target="_blank" rel="noopener noreferrer">${m[0]}</a>`); i = m.index + m[0].length; }
+  out.push(s.slice(i));
+  return html`${out}`;
+};
 function fmtWhen(iso) {
   const d = new Date(iso); if (isNaN(d)) return { abs: iso || "", rel: "" };
   const abs = d.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
@@ -226,7 +231,7 @@ function fmtWhen(iso) {
   const rel = s < 60 ? "just now" : s < 3600 ? Math.floor(s / 60) + " min ago" : s < 86400 ? Math.floor(s / 3600) + " h ago" : s < 172800 ? "yesterday" : s < 14 * 86400 ? Math.floor(s / 86400) + " days ago" : "";
   return { abs, rel };
 }
-const PERSON_SVG = `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.6"/><path d="M3.2 17.5c.6-3.6 3.4-5.6 6.8-5.6s6.2 2 6.8 5.6z"/></svg>`;
+const PERSON_SVG = html`<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.6"/><path d="M3.2 17.5c.6-3.6 3.4-5.6 6.8-5.6s6.2 2 6.8 5.6z"/></svg>`;
 function notesSection(t) {
   const withSub = t.isSummary && UI.notesWithSub;
   const subCb = t.isSummary ? h("input", { type: "checkbox", checked: UI.notesWithSub }) : null;
@@ -287,7 +292,7 @@ function noteEntry(o, n) {
     const cancel = () => { UI.editNote = null; o.rerender(); };
     ta.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); } e.stopPropagation(); });
     body = h("div", {}, ta, h("div", { class: "n-cbar" }, h("span", { class: "spacer" }), h("button", { onclick: cancel }, "Cancel"), h("button", { class: "primary", onclick: save }, "Save")));
-  } else body = h("div", { class: "n-body", html: linkify(esc(n.body)) });
+  } else body = h("div", { class: "n-body", html: linkify(n.body) });
   return h("div", { class: "n-entry", "data-note": n.id },
     h("div", { class: "n-av", title: n.author || "", html: PERSON_SVG }),
     h("div", { class: "n-main" }, head, body));
@@ -328,8 +333,8 @@ function relChildren(t) {
   }, "＋ New subtask");
   const rows = t.children.map(c => h("tr", { class: "click" + (c.isSummary ? " summary" : ""), onclick: () => openRecord(c.id) },
     h("td", {}, c.wbs), h("td", {}, (c.isMilestone ? "◆ " : "") + c.name), h("td", {}, fmtShort(c.S)), h("td", {}, fmtShort(c.F)),
-    h("td", {}, c.P + "%"), h("td", { html: `<span class="st ${stClass(c.ST)}">${esc(c.ST)}</span>` }),
-    h("td", { html: `<span class="chips">${rChips(c)}</span>` }),
+    h("td", {}, c.P + "%"), h("td", { html: html`<span class="st ${stClass(c.ST)}">${c.ST}</span>` }),
+    h("td", { html: html`<span class="chips">${rChips(c)}</span>` }),
     h("td", { class: "num" }, M.noteCount.get(c.id) ? "💬 " + M.noteCount.get(c.id) : "")));
   return h("div", {}, h("div", { class: "rel-bar" }, add),
     relTable(["WBS", "Name", "Start", "Finish", "%", "Status", "Responsible", "Notes"], rows, t.isMilestone ? "Milestones normally have no subtasks." : "No subtasks. Adding one turns this into a summary task whose dates roll up."));
