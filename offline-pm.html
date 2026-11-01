@@ -252,7 +252,7 @@ kbd{font:11.5px ui-monospace,Consolas,monospace;background:var(--line2);border:1
 
 /* print */
 /* record form */
-.form-pane{position:absolute;left:0;top:0;bottom:0;z-index:40;width:760px;scrollbar-gutter:stable;container-type:inline-size;overflow:auto;background:var(--bg);border-right:1px solid var(--line);box-shadow:8px 0 24px rgba(0,0,0,.18);padding:0 16px 24px;box-sizing:border-box;transform:translateX(-102%);visibility:hidden;transition:transform .22s ease,visibility 0s linear .22s}
+.form-pane{position:absolute;left:0;top:0;bottom:0;z-index:40;width:33.333%;scrollbar-gutter:stable;container-type:inline-size;overflow:auto;background:var(--bg);border-right:1px solid var(--line);box-shadow:8px 0 24px rgba(0,0,0,.18);padding:0 16px 24px;box-sizing:border-box;transform:translateX(-102%);visibility:hidden;transition:transform .22s ease,visibility 0s linear .22s}
 .form-pane.open{transform:none;visibility:visible;transition:transform .22s ease}
 @media (prefers-reduced-motion:reduce){.form-pane,.form-pane.open{transition:none}}
 .f-head{position:sticky;top:0;z-index:5;display:flex;align-items:flex-start;gap:10px;margin:0 -16px 12px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
@@ -2312,10 +2312,10 @@ function openRecord(id) {
   if (UI.selId !== id) { UI.editNote = null; selectTask(id); } // selectTask re-renders the form
   else renderForm(true);
 }
-// The panel covers the outline exactly (at least 460px, always leaving some Gantt visible).
+// The panel takes a third of the width (at least 420px on small screens), leaving the rest of the outline and the Gantt visible.
 function sizeForm() {
   const split = $("split").clientWidth || innerWidth;
-  $("formPane").style.width = clamp($("gridPane").offsetWidth, Math.min(460, split - 160), split - 160) + "px";
+  $("formPane").style.width = Math.round(clamp(split / 3, Math.min(420, split - 160), split - 160)) + "px";
 }
 // Window resize / splitter: only the mini Gantt depends on the pane width, so leave fields (and focus) alone.
 function relayoutForm() {

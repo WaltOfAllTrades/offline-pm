@@ -28,10 +28,10 @@ function openRecord(id) {
   if (UI.selId !== id) { UI.editNote = null; selectTask(id); } // selectTask re-renders the form
   else renderForm(true);
 }
-// The panel covers the outline exactly (at least 460px, always leaving some Gantt visible).
+// The panel takes a third of the width (at least 420px on small screens), leaving the rest of the outline and the Gantt visible.
 function sizeForm() {
   const split = $("split").clientWidth || innerWidth;
-  $("formPane").style.width = clamp($("gridPane").offsetWidth, Math.min(460, split - 160), split - 160) + "px";
+  $("formPane").style.width = Math.round(clamp(split / 3, Math.min(420, split - 160), split - 160)) + "px";
 }
 // Window resize / splitter: only the mini Gantt depends on the pane width, so leave fields (and focus) alone.
 function relayoutForm() {
