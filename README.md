@@ -22,7 +22,7 @@ A project-planning tool that is **one HTML file** and needs no network. Open `of
 | `offline-pm.html` | **The app**, built from `src/` |
 | `src/index.html`, `src/styles.css`, `src/js/*.js` | Source. The JS files are concatenated in name order into one scope |
 | `src/build.ps1` | Build script. It inlines the CSS, the JS, SQLite WASM and SheetJS from `libs/`, and writes the Content-Security-Policy with a hash of each inline script |
-| `libs/` | sql.js 1.10.3 (SQLite 3.45.2) and SheetJS 0.18.5 |
+| `libs/` | sql.js 1.10.3 (SQLite 3.45.2) and SheetJS 0.20.3 |
 | `tests/tests.js` | Automated test suite, run inside the app page |
 | `STORIES.md` | User stories and acceptance criteria |
 | `DECISIONS.md` | Questions that came up and the decision taken for each |
