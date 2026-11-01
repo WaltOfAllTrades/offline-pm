@@ -98,14 +98,13 @@ function riskRowEl(r) {
   const sel = (field, title) => { const s = h("select", { class: "rk-lmh", title }, ...Object.entries(LMH).map(([k, v]) => h("option", { value: k, selected: r[field] === k }, k || "–"))); s.addEventListener("change", () => mutate(`Risk ${title} → ${LMH[s.value]}`, () => opUpdateRisk(r.id, { [field]: s.value }))); return s; };
   const tr = h("tr", { class: "rk-risk" + (isSel(r) ? " sel" : ""), "data-risk": r.id },
     h("td", { class: "rk-drag", title: "Drag onto a task in the plan" }, "⠿"),
-    h("td", { class: "rk-tc" }, h("div", { class: "rk-cell" }, h("span", { class: "rk-kind" }, "Risk"), name, gapIcon(r.gaps))),
+    h("td", { class: "rk-tc" }, h("div", { class: "rk-cell" }, h("span", { class: "rk-kind" }, "Risk"), name, gapIcon(r.gaps), openBtn("risk", r.id))),
     h("td", { html: riskBadge(r) }),
     h("td", { class: "num" }, r.response === "accept" ? "—" : `${r.achievedCount} of ${r.mitigants.length}`),
     h("td", {}, r.response === "accept" ? h("span", { class: "hint", title: r.accept_reason }, "Accepted") : null),
     h("td", {}, partyCell(r, "A")), h("td", {}, partyCell(r, "R")),
     h("td", {}, h("span", { class: "hint" }, "P "), sel("probability", "probability"), h("span", { class: "hint" }, " I "), sel("impact", "impact")),
     h("td", { class: "rk-acts" },
-      h("button", { class: "icon", title: "Open record", onclick: () => openRiskRecord("risk", r.id) }, "↗"),
       h("button", { class: "icon", title: "Add mitigant", onclick: () => { let id; if (mutate("Added mitigant", () => { id = opAddMitigant(r.id); })) focusRisk(`m${id}:text`, true); } }, "＋"),
       h("button", { class: "icon", title: "Delete risk", onclick: () => deleteRiskRec(r) }, "✕")));
   return tr;
@@ -132,14 +131,13 @@ function mitRowEl(m) {
     h("button", { class: "rk-add", title: "Create a task that implements this mitigant", onclick: () => quickTask(m) }, "＋ Task"));
   return h("tr", { class: "rk-mit" + (isSel(m) ? " sel" : ""), "data-mit": m.id },
     h("td", { class: "rk-drag", title: "Drag onto a task to link it, or between tasks to create one there" }, "⠿"),
-    h("td", { class: "rk-tc" }, h("div", { class: "rk-cell rk-indent" }, ta, gapIcon(m.gaps))),
+    h("td", { class: "rk-tc" }, h("div", { class: "rk-cell rk-indent" }, h("span", { class: "rk-kind mit" }, "Mit."), ta, gapIcon(m.gaps), openBtn("mitigant", m.id))),
     h("td", {}, st),
     h("td", { class: "num", title: m.is_control ? "Control: achieved when Tested" : "Achieved when Implemented" }, m.achieved ? "✓" : "✗"),
     h("td", {}, tasks),
     h("td", {}, partyCell(m, "A")), h("td", {}, partyCell(m, "R")),
     h("td", {}, h("label", { class: "hint rk-ctl" }, ctl, " Control")),
     h("td", { class: "rk-acts" },
-      h("button", { class: "icon", title: "Open record", onclick: () => openRiskRecord("mitigant", m.id) }, "↗"),
       h("button", { class: "icon", title: "Delete mitigant", onclick: () => deleteMitRec(m) }, "✕")));
 }
 // With linked tasks only the derived status and Tested can be chosen (DECISIONS #53).
@@ -155,6 +153,8 @@ function statusSelect(m, cls = "") {
   });
   return st;
 }
+// Same place as the Plan outline: right after the name, shown on hover or when the row is selected.
+const openBtn = (kind, id) => h("button", { class: "open-rec rk-open", title: "Open record", onclick: e => { e.stopPropagation(); openRiskRecord(kind, id); } }, "↗");
 const isSel = rec => UI.riskSel && UI.riskSel.kind === rec.kind && UI.riskSel.id === rec.id;
 function focusRisk(key, select) { UI.riskFocus = { key, select }; renderRisks(); }
 function deleteRiskRec(r) {
