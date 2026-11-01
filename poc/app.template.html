@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Offline PM</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --ink:#1b1f24; --muted:#667085; --line:#e4e7ec;
+  --accent:#3b5bdb; --accent-ink:#fff; --ok:#12805c; --ok-bg:#e6f6ef; --warn:#b54708; --warn-bg:#fef4e6;
+  --busy:#3b5bdb; --busy-bg:#eaefff; --err:#c01048; --err-bg:#fdecf1; --chip:#f2f4f7;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#111418; --panel:#1a1e24; --ink:#e7eaee; --muted:#98a2b3; --line:#2b313a;
+    --accent:#748ffc; --accent-ink:#0c0f14; --ok:#4ade9b; --ok-bg:#12301f; --warn:#f8b26a; --warn-bg:#3a2510;
+    --busy:#91a7ff; --busy-bg:#1d2747; --err:#ff7aa2; --err-bg:#3d1424; --chip:#242a33;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button,input,select{font:inherit;color:inherit}
+button{background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:6px 11px;cursor:pointer}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+input,select{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 7px}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:12px 18px;background:var(--panel);border-bottom:1px solid var(--line)}
+.brand{font-weight:700;font-size:16px}.brand span{font-weight:400;color:var(--muted);font-size:13px;margin-left:6px}
+.filebar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.pill{padding:4px 10px;border-radius:999px;background:var(--chip);color:var(--muted);font-size:12.5px}
+.pill.on{background:var(--ok-bg);color:var(--ok)}.pill.warn{background:var(--warn-bg);color:var(--warn)}
+main{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px;padding:16px 18px;align-items:start}
+@media (max-width:900px){main{grid-template-columns:1fr}}
+section,aside{background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;padding:12px;border-bottom:1px solid var(--line)}
+.toolbar form,.io{display:flex;gap:6px;flex-wrap:wrap}
+#newTitle{width:220px}
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.03em;padding:8px 10px;border-bottom:1px solid var(--line)}
+td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr.flash td{animation:flash 1.2s ease-out}
+@keyframes flash{from{background:var(--busy-bg)}to{background:transparent}}
+td.id{color:var(--muted);width:36px}
+td input.title{width:100%;min-width:160px;border-color:transparent;background:transparent}
+td input.title:hover{border-color:var(--line)}
+td input.notes{width:100%;min-width:120px}
+.blocked{display:inline-block;margin-left:6px;font-size:11px;padding:1px 6px;border-radius:4px;background:var(--warn-bg);color:var(--warn)}
+.deps{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:5px;background:var(--chip);font-size:12px}
+.chip.done{text-decoration:line-through;color:var(--muted)}
+.chip button{border:0;background:none;padding:0 2px;color:var(--muted);cursor:pointer}
+.deps select{padding:2px 4px;font-size:12px}
+.del{border:0;background:none;color:var(--muted);font-size:16px}.del:hover{color:var(--err)}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+aside{padding:14px;position:sticky;top:12px}
+aside h2{margin:0 0 10px;font-size:15px} aside h3{margin:16px 0 6px;font-size:13px;color:var(--muted)}
+.state{display:flex;gap:12px;align-items:center;padding:12px;border-radius:9px}
+.state .dot{width:14px;height:14px;border-radius:50%;flex:none;background:currentColor}
+.state.ok{background:var(--ok-bg);color:var(--ok)}.state.warn{background:var(--warn-bg);color:var(--warn)}
+.state.busy{background:var(--busy-bg);color:var(--busy)}.state.busy .dot{animation:pulse .7s infinite alternate}
+.state.err{background:var(--err-bg);color:var(--err)}
+@keyframes pulse{from{opacity:1;transform:scale(1)}to{opacity:.3;transform:scale(.7)}}
+#stateTitle{font-weight:650}.sub{font-size:12.5px;opacity:.85}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
+.stats div{background:var(--chip);border-radius:7px;padding:7px 9px}
+dt{font-size:11px;color:var(--muted)}dd{margin:0;font-weight:650;font-variant-numeric:tabular-nums}
+.lanes{display:grid;gap:6px}
+.lane{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px;transition:background .3s}
+.lane b{font-variant-numeric:tabular-nums}
+.lane.hit{background:var(--ok-bg)}
+.lane.behind b{color:var(--warn)}
+.testbox{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);font-size:13px}
+#log{list-style:none;margin:0;padding:0;max-height:46vh;overflow:auto;display:grid;gap:6px}
+#log li{border:1px solid var(--line);border-radius:7px;padding:7px 9px;font-size:12.5px}
+#log li.info{border-style:dashed;color:var(--muted)}
+#log li.bad{border-color:var(--err)}
+.lt{display:flex;justify-content:space-between}.lt time{color:var(--muted)}
+.lr{margin:2px 0 4px;word-break:break-word}
+.lb{display:flex;flex-wrap:wrap;gap:5px;align-items:center;color:var(--muted)}
+.tag{padding:1px 6px;border-radius:4px;font-size:11.5px}
+.tag.ok{background:var(--ok-bg);color:var(--ok)}.tag.no{background:var(--warn-bg);color:var(--warn)}.tag.bad{background:var(--err-bg);color:var(--err)}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);padding:9px 14px;border-radius:8px;background:var(--ink);color:var(--bg);opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw}
+#toast.show{opacity:1}#toast.err{background:var(--err);color:#fff}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Offline PM <span>live-save proof of concept</span></div>
+  <div class="filebar">
+    <span id="filePill" class="pill">No file</span>
+    <button id="btnNew">Save to new .db file…</button>
+    <button id="btnOpen">Open .db file…</button>
+    <button id="btnReconnect" class="primary" hidden>Reconnect to file</button>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="toolbar">
+      <form id="addForm">
+        <input id="newTitle" placeholder="New task title…" required>
+        <input id="newDue" type="date">
+        <button class="primary">Add task</button>
+      </form>
+      <div class="io">
+        <button id="btnImport">Import .xlsx / .csv</button>
+        <button id="btnExportX">Export .xlsx</button>
+        <button id="btnExportC">Export .csv</button>
+        <input type="file" id="importFile" accept=".xlsx,.xls,.csv" hidden>
+      </div>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>#</th><th>Task</th><th>Status</th><th>Due</th><th>Blocked by</th><th>Notes</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <aside>
+    <h2>Live save monitor</h2>
+    <div id="bigState" class="state warn"><div class="dot"></div><div><div id="stateTitle">Starting…</div><div id="stateSub" class="sub"></div></div></div>
+    <dl class="stats">
+      <div><dt>Revision</dt><dd id="sRev">0</dd></div>
+      <div><dt>DB size</dt><dd id="sSize">–</dd></div>
+      <div><dt>Last disk write</dt><dd id="sLast">–</dd></div>
+    </dl>
+    <div class="lanes">
+      <div class="lane" id="laneMirrorBox"><span>① Browser crash buffer</span><b id="laneMirror">rev –</b></div>
+      <div class="lane" id="laneDiskBox"><span>② <span id="diskName">.db file</span> on disk</span><b id="laneDisk">not connected</b></div>
+    </div>
+    <div class="testbox">
+      <button id="btnReload">Refresh page (test)</button>
+      <label><input type="checkbox" id="slowMo"> Slow-motion saves</label>
+    </div>
+    <h3>Save log</h3>
+    <ol id="log"></ol>
+  </aside>
+</main>
+<div id="toast"></div>
+
+<script>/*__SQLJS__*/</script>
+<script>/*__XLSX__*/</script>
+<script>const WASM_B64 = "__WASM_B64__";</script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const STATUSES = ["todo", "doing", "done"];
+
+let SQL, db;
+let rev = 0, mirrorRev = null, diskRev = null, lastDiskAt = null, lastSize = 0;
+let fileHandle = null, filePerm = false;
+let saving = false, pending = false, pendingReasons = [], lastErr = null;
+
+// ---------- IndexedDB: holds the crash buffer and the remembered file handle ----------
+const idb = (() => {
+  let p;
+  const open = () => p ||= new Promise((res, rej) => {
+    const r = indexedDB.open("offline-pm-poc", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("kv");
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+  const tx = async (mode, fn) => { const d = await open(); return new Promise((res, rej) => {
+    const t = d.transaction("kv", mode); const req = fn(t.objectStore("kv"));
+    t.oncomplete = () => res(req && req.result); t.onerror = () => rej(t.error);
+  }); };
+  return {
+    get: k => tx("readonly", s => s.get(k)),
+    set: (k, v) => tx("readwrite", s => s.put(v, k)),
+  };
+})();
+
+// ---------- SQLite helpers ----------
+function q(sql, params = []) {
+  const st = db.prepare(sql); st.bind(params); const out = [];
+  while (st.step()) out.push(st.getAsObject());
+  st.free(); return out;
+}
+const run = (sql, params = []) => db.run(sql, params);
+
+function ensureSchema() {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE IF NOT EXISTS tasks(id INTEGER PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'todo',
+      due TEXT, notes TEXT DEFAULT '', updated_at TEXT);
+    CREATE TABLE IF NOT EXISTS deps(task_id INTEGER NOT NULL, depends_on INTEGER NOT NULL, PRIMARY KEY(task_id, depends_on));
+    INSERT OR IGNORE INTO meta VALUES('rev','0');`);
+}
+const readRev = d => +(d.exec("SELECT value FROM meta WHERE key='rev'")[0]?.values[0][0] ?? 0);
+
+function loadBytes(bytes) {
+  if (db) db.close();
+  db = new SQL.Database(bytes);
+  ensureSchema();
+  rev = readRev(db);
+}
+
+function seed() {
+  const today = new Date();
+  const d = n => new Date(today.getTime() + n * 864e5).toISOString().slice(0, 10);
+  run("INSERT INTO tasks(id,title,status,due,notes) VALUES (1,'Gather requirements','done',?,'Interviewed 4 stakeholders'),(2,'Design database schema','doing',?,''),(3,'Build import/export','todo',?,'xlsx + csv'),(4,'User testing','todo',?,'')",
+    [d(-3), d(2), d(6), d(10)]);
+  run("INSERT INTO deps VALUES (2,1),(3,2),(4,2),(4,3)");
+}
+
+// ---------- Every change goes through mutate(): one transaction, one revision, one save ----------
+let flashId = null;
+function mutate(desc, fn, touchedId = null) {
+  try {
+    run("BEGIN");
+    fn();
+    rev++;
+    run("UPDATE meta SET value=? WHERE key='rev'", [String(rev)]);
+    run("COMMIT");
+  } catch (e) {
+    try { run("ROLLBACK"); } catch {}
+    toast(e.message, true); render(); return false;
+  }
+  flashId = touchedId;
+  render();
+  queueSave(desc);
+  return true;
+}
+
+function queueSave(desc) {
+  pendingReasons.push(desc); pending = true; updateState();
+  if (!saving) drain();
+}
+
+// Saves are serialized; edits made while a save is running are coalesced into the next one.
+async function drain() {
+  saving = true; updateState();
+  while (pending) {
+    pending = false;
+    const reasons = pendingReasons.splice(0), r = rev;
+    const bytes = db.export();
+    lastSize = bytes.length;
+    if ($("slowMo").checked) await sleep(1500);
+    const entry = { r, reasons, size: bytes.length, mirrorOk: false, disk: "none", diskMs: 0, err: null };
+
+    try { await idb.set("mirror", { rev: r, bytes, ts: Date.now(), file: fileHandle?.name ?? null }); entry.mirrorOk = true; mirrorRev = r; pulse("laneMirrorBox"); }
+    catch (e) { entry.err = "Buffer: " + e.message; }
+
+    if (fileHandle && filePerm) {
+      try {
+        const t0 = performance.now();
+        const w = await fileHandle.createWritable();   // writes to a temp file, swapped in on close() => atomic
+        await w.write(bytes); await w.close();
+        entry.disk = "ok"; entry.diskMs = Math.round(performance.now() - t0);
+        diskRev = r; lastDiskAt = Date.now(); pulse("laneDiskBox");
+      } catch (e) {
+        entry.disk = "fail"; entry.err = "Disk: " + e.message;
+        if (e.name === "NotAllowedError") filePerm = false;
+      }
+    }
+    lastErr = entry.err;
+    logSave(entry);
+    updateState();
+  }
+  saving = false; updateState();
+}
+
+window.addEventListener("beforeunload", e => { if (saving || pending) { e.preventDefault(); e.returnValue = ""; } });
+
+// ---------- File handling ----------
+const pickerOpts = { types: [{ description: "Project database", accept: { "application/x-sqlite3": [".db"] } }] };
+const fsSupported = "showSaveFilePicker" in window;
+
+function readFileRev(buf) {
+  if (!buf.length) return 0;
+  try { const t = new SQL.Database(buf); const r = readRev(t); t.close(); return r; }
+  catch { return null; }
+}
+
+async function syncWithFile() {
+  const buf = new Uint8Array(await (await fileHandle.getFile()).arrayBuffer());
+  const fileRev = readFileRev(buf);
+  if (fileRev === null) { toast("That file isn't a valid database", true); fileHandle = null; filePerm = false; return; }
+  if (fileRev > rev) {
+    loadBytes(buf); diskRev = fileRev; render();
+    logInfo(`File is newer (rev ${fileRev}) than the buffer — loaded it from disk.`);
+    queueSave("Refresh crash buffer from file");
+  } else if (fileRev < rev) {
+    diskRev = fileRev;
+    logInfo(`File on disk was behind (rev ${fileRev}) — buffer has rev ${rev}. Writing the missing changes to disk…`);
+    queueSave(`Catch up file: rev ${fileRev} → ${rev}`);
+  } else {
+    diskRev = fileRev; lastDiskAt = (await fileHandle.getFile()).lastModified;
+    logInfo(`File and crash buffer agree (rev ${rev}). Nothing lost.`);
+  }
+  updateState();
+}
+
+$("btnNew").onclick = async () => {
+  if (!fsSupported) return toast("This browser can't write files directly — use Chrome or Edge", true);
+  try {
+    fileHandle = await showSaveFilePicker({ ...pickerOpts, suggestedName: "projects.db" });
+    filePerm = true; diskRev = null;
+    await idb.set("handle", fileHandle);
+    logInfo(`Connected to new file “${fileHandle.name}”.`);
+    queueSave("First write to new file");
+  } catch (e) { if (e.name !== "AbortError") toast(e.message, true); }
+};
+
+$("btnOpen").onclick = async () => {
+  if (!fsSupported) return toast("This browser can't write files directly — use Chrome or Edge", true);
+  try {
+    const [h] = await showOpenFilePicker(pickerOpts);
+    if (await h.requestPermission({ mode: "readwrite" }) !== "granted") return toast("Write permission is needed to auto-save", true);
+    const buf = new Uint8Array(await (await h.getFile()).arrayBuffer());
+    const fr = readFileRev(buf);
+    if (fr === null) return toast("That file isn't a valid database", true);
+    fileHandle = h; filePerm = true;
+    await idb.set("handle", h);
+    if (buf.length) { loadBytes(buf); diskRev = rev; lastDiskAt = (await h.getFile()).lastModified; render(); logInfo(`Opened “${h.name}” at rev ${rev}.`); queueSave("Refresh crash buffer from opened file"); }
+    else { diskRev = null; logInfo(`“${h.name}” was empty — writing current data into it.`); queueSave("First write to empty file"); }
+  } catch (e) { if (e.name !== "AbortError") toast(e.message, true); }
+};
+
+$("btnReconnect").onclick = async () => {
+  try {
+    if (await fileHandle.requestPermission({ mode: "readwrite" }) !== "granted") return toast("Permission not granted", true);
+    filePerm = true; await syncWithFile();
+  } catch (e) { toast(e.message, true); }
+};
+
+$("btnReload").onclick = () => location.reload();
+
+// ---------- Rendering ----------
+function render() {
+  const tasks = q("SELECT * FROM tasks ORDER BY id");
+  const deps = q("SELECT * FROM deps");
+  const byId = Object.fromEntries(tasks.map(t => [t.id, t]));
+  const tb = $("rows");
+  if (!tasks.length) { tb.innerHTML = `<tr><td colspan="7" class="empty">No tasks yet — add one above or import a spreadsheet.</td></tr>`; return updateState(); }
+  tb.innerHTML = tasks.map(t => {
+    const blockers = deps.filter(d => d.task_id === t.id).map(d => byId[d.depends_on]).filter(Boolean);
+    const blocked = t.status !== "done" && blockers.some(b => b.status !== "done");
+    const options = tasks.filter(o => o.id !== t.id && !blockers.includes(o)).map(o => `<option value="${o.id}">#${o.id} ${esc(o.title)}</option>`).join("");
+    return `<tr data-id="${t.id}" class="${t.id === flashId ? "flash" : ""}">
+      <td class="id">${t.id}</td>
+      <td><input class="title" data-f="title" value="${esc(t.title)}">${blocked ? '<span class="blocked">blocked</span>' : ""}</td>
+      <td><select data-f="status">${STATUSES.map(s => `<option ${s === t.status ? "selected" : ""}>${s}</option>`).join("")}</select></td>
+      <td><input type="date" data-f="due" value="${esc(t.due)}"></td>
+      <td><div class="deps">${blockers.map(b => `<span class="chip ${b.status === "done" ? "done" : ""}">#${b.id}<button data-undep="${b.id}" title="Remove dependency">×</button></span>`).join("")}
+        ${options ? `<select data-f="adddep"><option value="">+ add</option>${options}</select>` : ""}</div></td>
+      <td><input class="notes" data-f="notes" value="${esc(t.notes)}" placeholder="—"></td>
+      <td><button class="del" data-del title="Delete task">×</button></td></tr>`;
+  }).join("");
+  flashId = null;
+  updateState();
+}
+
+$("rows").addEventListener("change", e => {
+  const el = e.target, f = el.dataset.f, id = +el.closest("tr")?.dataset.id;
+  if (!f || !id) return;
+  const val = el.value.trim();
+  if (f === "adddep") {
+    const dep = +val; if (!dep) return;
+    mutate(`Task #${id} now depends on #${dep}`, () => {
+      const cycle = q(`WITH RECURSIVE up(id) AS (SELECT ? UNION SELECT d.depends_on FROM deps d JOIN up ON d.task_id = up.id)
+                       SELECT 1 FROM up WHERE id = ?`, [dep, id]).length;
+      if (cycle) throw new Error(`That would create a circular dependency (#${dep} already depends on #${id})`);
+      run("INSERT INTO deps VALUES (?,?)", [id, dep]);
+    }, id);
+    return;
+  }
+  if (f === "title" && !val) { toast("Title can't be empty", true); return render(); }
+  if (f === "status" && val === "done") {
+    const open = q("SELECT t.id FROM deps d JOIN tasks t ON t.id = d.depends_on WHERE d.task_id = ? AND t.status != 'done'", [id]);
+    if (open.length) { toast(`Can't finish #${id} — still blocked by ${open.map(o => "#" + o.id).join(", ")}`, true); return render(); }
+  }
+  mutate(`Task #${id}: ${f} → “${val || "(empty)"}”`, () =>
+    run(`UPDATE tasks SET ${f} = ?, updated_at = datetime('now') WHERE id = ?`, [val, id]), id);
+});
+
+$("rows").addEventListener("click", e => {
+  const id = +e.target.closest("tr")?.dataset.id;
+  if (e.target.dataset.undep) {
+    const dep = +e.target.dataset.undep;
+    mutate(`Task #${id} no longer depends on #${dep}`, () => run("DELETE FROM deps WHERE task_id=? AND depends_on=?", [id, dep]), id);
+  } else if ("del" in e.target.dataset) {
+    mutate(`Deleted task #${id}`, () => { run("DELETE FROM deps WHERE task_id=? OR depends_on=?", [id, id]); run("DELETE FROM tasks WHERE id=?", [id]); });
+  }
+});
+
+$("addForm").onsubmit = e => {
+  e.preventDefault();
+  const title = $("newTitle").value.trim(); if (!title) return;
+  let newId;
+  mutate(`Added task “${title}”`, () => {
+    run("INSERT INTO tasks(title,due,updated_at) VALUES (?,?,datetime('now'))", [title, $("newDue").value || null]);
+    newId = db.exec("SELECT last_insert_rowid()")[0].values[0][0];
+  });
+  flashId = newId; render();
+  $("newTitle").value = ""; $("newDue").value = ""; $("newTitle").focus();
+};
+
+// ---------- Save monitor UI ----------
+const fmtKB = n => (n / 1024).toFixed(1) + " KB";
+const fmtAgo = t => { if (!t) return "–"; const s = Math.round((Date.now() - t) / 1000); return s < 5 ? "just now" : s < 60 ? s + "s ago" : Math.round(s / 60) + "m ago"; };
+const now = () => new Date().toLocaleTimeString();
+
+function updateState() {
+  const box = $("bigState"), title = $("stateTitle"), sub = $("stateSub");
+  let cls, t, s;
+  if (saving || pending) { cls = "busy"; t = "Saving…"; s = `Writing rev ${rev}` + (fileHandle && filePerm ? " to buffer + disk" : " to buffer"); }
+  else if (lastErr) { cls = "err"; t = "Last save had a problem"; s = lastErr; }
+  else if (!fileHandle) { cls = "warn"; t = "Not on disk yet"; s = "Changes are safe in the browser buffer only. Save to a .db file to make them portable."; }
+  else if (!filePerm) { cls = "warn"; t = "Reconnect needed"; s = "One click on “Reconnect to file” and any unsaved changes are written to disk."; }
+  else { cls = "ok"; t = `All changes saved to ${fileHandle.name}`; s = `rev ${diskRev} · ${fmtAgo(lastDiskAt)}`; }
+  box.className = "state " + cls; title.textContent = t; sub.textContent = s;
+
+  $("sRev").textContent = rev;
+  $("sSize").textContent = lastSize ? fmtKB(lastSize) : "–";
+  $("sLast").textContent = fmtAgo(lastDiskAt);
+  $("laneMirror").textContent = mirrorRev == null ? "empty" : `rev ${mirrorRev}`;
+  $("laneMirrorBox").classList.toggle("behind", mirrorRev != null && mirrorRev < rev);
+  $("diskName").textContent = fileHandle ? fileHandle.name : ".db file";
+  $("laneDisk").textContent = !fileHandle ? "not connected" : !filePerm ? `rev ${diskRev ?? "?"} · locked` : `rev ${diskRev ?? "…"}`;
+  $("laneDiskBox").classList.toggle("behind", !!fileHandle && diskRev !== rev);
+
+  const pill = $("filePill");
+  pill.textContent = !fileHandle ? "No file" : filePerm ? `● ${fileHandle.name}` : `${fileHandle.name} (locked)`;
+  pill.className = "pill " + (!fileHandle ? "" : filePerm ? "on" : "warn");
+  $("btnReconnect").hidden = !(fileHandle && !filePerm);
+}
+setInterval(updateState, 1000);
+
+function pulse(id) { const el = $(id); el.classList.add("hit"); setTimeout(() => el.classList.remove("hit"), 700); }
+
+function logSave(e) {
+  const li = document.createElement("li");
+  if (e.err) li.className = "bad";
+  const disk = e.disk === "ok" ? `<span class="tag ok">disk ✓ ${e.diskMs} ms</span>`
+    : e.disk === "fail" ? `<span class="tag bad">disk ✗</span>` : `<span class="tag no">disk – no file</span>`;
+  li.innerHTML = `<div class="lt"><b>rev ${e.r}</b><time>${now()}</time></div>
+    <div class="lr">${e.reasons.map(esc).join("<br>")}${e.reasons.length > 1 ? ` <i>(${e.reasons.length} edits batched)</i>` : ""}</div>
+    <div class="lb"><span class="tag ${e.mirrorOk ? "ok" : "bad"}">buffer ${e.mirrorOk ? "✓" : "✗"}</span>${disk}<span>${fmtKB(e.size)}</span></div>
+    ${e.err ? `<div class="lr" style="color:var(--err)">${esc(e.err)}</div>` : ""}`;
+  $("log").prepend(li); trimLog();
+}
+function logInfo(text) {
+  const li = document.createElement("li"); li.className = "info";
+  li.innerHTML = `<div class="lt"><span>${esc(text)}</span><time>${now()}</time></div>`;
+  $("log").prepend(li); trimLog();
+}
+function trimLog() { const l = $("log"); while (l.children.length > 60) l.lastChild.remove(); }
+
+let toastTimer;
+function toast(msg, err = false) {
+  const t = $("toast"); t.textContent = msg; t.className = "show" + (err ? " err" : "");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = "", 3200);
+}
+
+// ---------- Excel / CSV ----------
+function exportBook() {
+  const tasks = q("SELECT * FROM tasks ORDER BY id"), deps = q("SELECT * FROM deps ORDER BY task_id, depends_on");
+  const rows = tasks.map(t => ({ ID: t.id, Title: t.title, Status: t.status, Due: t.due || "", Notes: t.notes || "",
+    DependsOn: deps.filter(d => d.task_id === t.id).map(d => d.depends_on).join(", ") }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows, { header: ["ID", "Title", "Status", "Due", "Notes", "DependsOn"] }), "Tasks");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(deps.map(d => ({ Task: d.task_id, DependsOn: d.depends_on })), { header: ["Task", "DependsOn"] }), "Dependencies");
+  return wb;
+}
+$("btnExportX").onclick = () => { XLSX.writeFile(exportBook(), "projects-export.xlsx"); logInfo("Exported projects-export.xlsx (Tasks + Dependencies sheets)."); };
+$("btnExportC").onclick = () => { XLSX.writeFile(exportBook(), "tasks-export.csv", { bookType: "csv" }); logInfo("Exported tasks-export.csv."); };
+
+$("btnImport").onclick = () => $("importFile").click();
+$("importFile").onchange = async e => {
+  const file = e.target.files[0]; e.target.value = ""; if (!file) return;
+  try {
+    const wb = XLSX.read(await file.arrayBuffer(), { cellDates: true });
+    const ws = wb.Sheets.Tasks || wb.Sheets[wb.SheetNames[0]];
+    const raw = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false, dateNF: "yyyy-mm-dd" });
+    const rows = raw.map(r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toLowerCase().replace(/[^a-z]/g, ""), String(v).trim()])));
+    let added = 0, updated = 0, skipped = 0;
+    const normDate = v => { if (!v) return null; if (/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10); const d = new Date(v); return isNaN(d) ? null : d.toISOString().slice(0, 10); };
+    const normStatus = v => { v = v.toLowerCase(); return v.includes("done") || v.includes("complete") ? "done" : v.includes("progress") || v === "doing" ? "doing" : "todo"; };
+    mutate(`Imported ${file.name}`, () => {
+      const idMap = new Map();
+      for (const r of rows) {
+        const title = r.title || r.task || r.name; if (!title) { skipped++; continue; }
+        const id = parseInt(r.id), vals = [title, normStatus(r.status || ""), normDate(r.due || r.duedate || r.end), r.notes || ""];
+        if (id && q("SELECT 1 FROM tasks WHERE id=?", [id]).length) { run("UPDATE tasks SET title=?,status=?,due=?,notes=?,updated_at=datetime('now') WHERE id=?", [...vals, id]); updated++; idMap.set(r, id); }
+        else { run("INSERT INTO tasks(id,title,status,due,notes,updated_at) VALUES (?,?,?,?,?,datetime('now'))", [id || null, ...vals]); added++; idMap.set(r, db.exec("SELECT last_insert_rowid()")[0].values[0][0]); }
+      }
+      for (const [r, id] of idMap) {
+        if (!("dependson" in r)) continue;
+        run("DELETE FROM deps WHERE task_id=?", [id]);
+        for (const dep of r.dependson.split(/[,;\s]+/).map(Number).filter(Boolean))
+          if (dep !== id && q("SELECT 1 FROM tasks WHERE id=?", [dep]).length) run("INSERT OR IGNORE INTO deps VALUES (?,?)", [id, dep]);
+      }
+    });
+    toast(`Imported: ${added} added, ${updated} updated${skipped ? `, ${skipped} skipped` : ""}`);
+  } catch (err) { toast("Import failed: " + err.message, true); }
+};
+
+// ---------- Startup: restore from crash buffer, then re-attach to the file ----------
+(async () => {
+  const b = atob(WASM_B64), wasm = new Uint8Array(b.length);
+  for (let i = 0; i < b.length; i++) wasm[i] = b.charCodeAt(i);
+  SQL = await initSqlJs({ wasmBinary: wasm });
+
+  const [mirror, handle] = await Promise.all([idb.get("mirror").catch(() => null), idb.get("handle").catch(() => null)]);
+  if (mirror) {
+    loadBytes(mirror.bytes); mirrorRev = mirror.rev; lastSize = mirror.bytes.length;
+    logInfo(`Page loaded — restored rev ${mirror.rev} from the browser crash buffer (saved ${fmtAgo(mirror.ts)}).`);
+  } else {
+    db = new SQL.Database(); ensureSchema(); seed();
+    logInfo("First run — created a sample project in memory.");
+    queueSave("Initial sample data");
+  }
+  if (handle) {
+    fileHandle = handle;
+    if (await handle.queryPermission({ mode: "readwrite" }) === "granted") { filePerm = true; await syncWithFile(); }
+    else logInfo(`Remembered “${handle.name}”. Chrome needs one click to re-allow access after a reload.`);
+  }
+  if (!fsSupported) logInfo("This browser can't write files directly. Use Chrome or Edge for auto-save to disk.");
+  render();
+})().catch(e => { toast("Startup failed: " + e.message, true); console.error(e); });
+</script>
+</body>
+</html>

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Offline PM</title>
+<style>/*__CSS__*/</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">Offline PM</div>
+  <div class="menuwrap">
+    <button id="projBtn" class="projbtn" aria-haspopup="menu"><span id="projName">…</span> ▾</button>
+    <div id="projMenu" class="menu" hidden></div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-view="plan">Plan</button>
+    <button class="tab" data-view="raci">RACI matrix</button>
+    <button class="tab" data-view="people">People &amp; teams</button>
+    <button class="tab" data-view="issues">Issues <span id="issueBadge" class="badge" hidden></span></button>
+  </nav>
+  <div class="spacer"></div>
+  <button id="undoBtn" class="icon" title="Undo (Ctrl+Z)">↶</button>
+  <button id="redoBtn" class="icon" title="Redo (Ctrl+Y)">↷</button>
+  <button id="savePill" class="pill" title="Save status. Click for the save log">…</button>
+  <div class="menuwrap">
+    <button id="fileBtn" aria-haspopup="menu">File ▾</button>
+    <div id="fileMenu" class="menu right" hidden>
+      <button data-act="new">New plan file…</button>
+      <button data-act="open">Open plan file…</button>
+      <button data-act="copy">Save a copy as…</button>
+      <button data-act="reconnect" id="mReconnect" hidden>Reconnect to file</button>
+      <hr>
+      <button data-act="import">Import from Excel / CSV…</button>
+      <button data-act="xlsx">Export to Excel (.xlsx)</button>
+      <button data-act="csv">Export tasks (.csv)</button>
+      <hr>
+      <button data-act="print">Print / save as PDF…</button>
+      <button data-act="help">Help &amp; shortcuts</button>
+    </div>
+  </div>
+</header>
+
+<main id="views">
+  <section id="view-plan" class="view">
+    <div class="toolbar">
+      <div class="grp">
+        <button id="addTaskBtn" class="primary" title="New task below (Insert)">＋ Task</button>
+        <button id="addSubBtn" title="New subtask (Ctrl+Insert)">＋ Subtask</button>
+        <button id="addMsBtn" title="New milestone">◆ Milestone</button>
+      </div>
+      <div class="grp">
+        <button id="outdentBtn" class="icon" title="Outdent (Shift+Tab)">⇤</button>
+        <button id="indentBtn" class="icon" title="Indent (Tab)">⇥</button>
+        <button id="upBtn" class="icon" title="Move up (Alt+Shift+↑)">↑</button>
+        <button id="downBtn" class="icon" title="Move down (Alt+Shift+↓)">↓</button>
+        <button id="delBtn" class="icon" title="Delete task (Delete)">🗑</button>
+      </div>
+      <div class="grp">
+        <select id="levelSel" title="Show outline levels">
+          <option value="">Expand…</option><option value="all">Expand all</option>
+          <option value="1">Level 1</option><option value="2">Level 2</option><option value="3">Level 3</option><option value="4">Level 4</option>
+        </select>
+        <input id="searchBox" type="search" placeholder="Filter tasks…" size="14">
+        <select id="personFilter" title="Show tasks for a person or team"><option value="">Everyone</option></select>
+      </div>
+      <div class="spacer"></div>
+      <div class="grp">
+        <button id="detailsBtn" title="Show task details (Ctrl+I)">Details</button>
+      </div>
+      <div class="grp seg" id="grainSeg">
+        <button data-grain="day">Day</button><button data-grain="week" class="on">Week</button>
+        <button data-grain="month">Month</button><button data-grain="quarter">Quarter</button>
+        <button data-grain="fit" title="Fit whole project">Fit</button>
+      </div>
+      <button id="todayBtn" title="Scroll to today">Today</button>
+    </div>
+    <div class="split" id="split">
+      <div class="grid-pane" id="gridPane">
+        <div class="grid-head" id="gridHead"></div>
+        <div class="grid-body" id="gridBody" tabindex="0"><div class="grid-canvas" id="gridCanvas"><div id="gridRows"></div></div></div>
+      </div>
+      <div class="splitter" id="splitter" title="Drag to resize"></div>
+      <div class="gantt-pane" id="ganttPane">
+        <div class="gantt-head" id="ganttHead"><svg id="ganttHeadSvg"></svg></div>
+        <div class="gantt-body" id="ganttBody"><svg id="ganttSvg"></svg></div>
+      </div>
+      <aside id="drawer" class="drawer" hidden></aside>
+    </div>
+  </section>
+
+  <section id="view-raci" class="view" hidden>
+    <div class="toolbar">
+      <div class="grp"><label><input type="checkbox" id="raciOnlyUsed" checked> Only people/teams with assignments</label></div>
+      <div class="grp"><label><input type="checkbox" id="raciLeaves"> Hide summary tasks</label></div>
+      <div class="spacer"></div>
+      <span class="hint">Click a cell to cycle: — → R → A → C → I → —</span>
+    </div>
+    <div class="raci-wrap" id="raciWrap"></div>
+  </section>
+
+  <section id="view-people" class="view" hidden>
+    <div class="people-cols">
+      <div class="card">
+        <div class="card-h"><h2>People</h2><button id="addPersonBtn" class="primary">＋ Person</button></div>
+        <div id="peopleList"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>Teams</h2><button id="addTeamBtn" class="primary">＋ Team</button></div>
+        <div id="teamList"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="view-issues" class="view" hidden>
+    <div class="toolbar">
+      <div class="grp seg" id="issueSeg"><button data-f="all" class="on">All</button><button data-f="warn">Warnings</button><button data-f="raci">RACI</button><button data-f="dep">Dependencies</button><button data-f="dates">Dates</button></div>
+    </div>
+    <div id="issueList" class="issue-list"></div>
+  </section>
+</main>
+
+<div id="logPanel" class="logpanel" hidden>
+  <div class="card-h"><h3>Save log</h3><label class="hint"><input type="checkbox" id="slowMo"> Slow-motion saves</label><button id="logClose" class="icon">✕</button></div>
+  <div class="lanes">
+    <div class="lane"><span>Browser crash buffer</span><b id="laneMirror">–</b></div>
+    <div class="lane"><span id="laneDiskName">Plan file</span><b id="laneDisk">–</b></div>
+  </div>
+  <ol id="logList"></ol>
+</div>
+<div id="modalBack" class="modal-back" hidden><div id="modal" class="modal" role="dialog" aria-modal="true"></div></div>
+<div id="pop" class="pop" hidden></div>
+<div id="dragTip" class="dragtip" hidden></div>
+<div id="printRoot" class="print-root"></div>
+<div id="toast"></div>
+
+<script>/*__SQLJS__*/</script>
+<script>/*__XLSX__*/</script>
+<script>const WASM_B64 = "__WASM_B64__";</script>
+<script>
+(() => {
+"use strict";
+/*__APP__*/
+})();
+</script>
+</body>
+</html>
