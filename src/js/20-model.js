@@ -376,10 +376,21 @@ function opUpdateParty(id, fields) {
   }
 }
 function opDeleteParty(id) { run("DELETE FROM party WHERE id=?", [id]); }
+// One team per person (DECISIONS #60): adding someone to a team moves them out of any other team.
 function opSetMembers(teamId, personIds) {
   run("DELETE FROM team_member WHERE team_id=?", [teamId]);
-  for (const p of personIds) run("INSERT INTO team_member VALUES (?,?)", [teamId, p]);
+  for (const p of personIds) {
+    const was = one("SELECT team_id FROM team_member WHERE person_id=? AND team_id<>?", [p, teamId]);
+    if (was) opNotes.push(`${partyName(p)} moved from ${partyName(was.team_id)}.`);
+    run("DELETE FROM team_member WHERE person_id=?", [p]);
+    run("INSERT INTO team_member VALUES (?,?)", [teamId, p]);
+  }
 }
+function opSetPersonTeam(personId, teamId) {
+  run("DELETE FROM team_member WHERE person_id=?", [personId]);
+  if (teamId) run("INSERT INTO team_member VALUES (?,?)", [teamId, personId]);
+}
+const homeTeam = personId => (M.teamsOf.get(personId) || [])[0] ?? null;
 
 // Work notes: a dated journal per task. Unlike ServiceNow's journal, notes can be edited and deleted (DECISIONS #39).
 const noteStamp = () => new Date().toISOString();
@@ -421,7 +432,8 @@ function seedSample() {
   const ana = P(["Ana Ruiz", "ana@example.com", "Project manager"]), ben = P(["Ben Okafor", "ben@example.com", "Lead developer"]);
   const chloe = P(["Chloe Park", "chloe@example.com", "Designer"]), dev = P(["Dev Patel", "dev@example.com", "Marketing"]);
   const eng = opAddParty("team", "Engineering"), mkt = opAddParty("team", "Marketing team");
-  opSetMembers(eng, [ben]); opSetMembers(mkt, [dev, chloe]);
+  const pmo = opAddParty("team", "PMO");
+  opSetMembers(eng, [ben]); opSetMembers(mkt, [dev, chloe]); opSetMembers(pmo, [ana]);
   const base = nextWorkday(todayNum() - 10);
   const T = (name, parentId, startOff, dur, extra = {}) => {
     const s = wdDay(wdIndex(base) + startOff);

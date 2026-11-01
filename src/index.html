@@ -112,12 +112,13 @@
 
   <section id="view-raci" class="view" hidden>
     <div class="toolbar">
+      <div class="grp seg" id="raciBySeg"><button data-by="team">By team</button><button data-by="person">By person</button></div>
       <div class="grp"><label><input type="checkbox" id="raciOnlyUsed" checked> Only people/teams with assignments</label></div>
       <div class="grp"><label><input type="checkbox" id="raciLeaves"> Hide summary tasks</label></div>
       <div class="spacer"></div>
-      <span class="hint">Click a cell to cycle: — → R → A → A/R → C → I → —. Click a task to open its record</span>
+      <span class="hint" id="raciHint"></span>
     </div>
-    <div class="raci-wrap" id="raciWrap"></div>
+    <div class="split" id="raciSplit"><div class="raci-wrap" id="raciWrap"></div></div>
   </section>
 
   <section id="view-people" class="view" hidden>

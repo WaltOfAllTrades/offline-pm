@@ -402,6 +402,14 @@ table.rk{width:100%;border-collapse:collapse;font-size:12.5px}
 .pick-btn:hover{background:var(--sel)}
 table.closeout td{vertical-align:top;white-space:normal}
 table.closeout tr.bad td:nth-child(6){color:var(--err);font-weight:700}
+#raciSplit .raci-wrap{flex:1;min-width:0}
+table.raci.team td.tcell{position:relative;text-align:center;white-space:nowrap}
+table.raci.team td.tcell b{font-weight:700;margin-right:3px}
+table.raci.team .mr{display:inline-block;font-size:10.5px;font-weight:600;border-radius:7px;padding:0 4px;margin:0 1px;background:var(--line2);color:var(--ink)}
+table.raci.team .plus{position:absolute;top:1px;right:1px;width:15px;height:15px;line-height:12px;padding:0;border-radius:4px;font-size:12px;opacity:0;color:var(--accent)}
+table.raci.team td.tcell:hover .plus{opacity:1}
+table.raci.team .mr.r-R{color:var(--R)} table.raci.team .mr.r-A{color:var(--A)} table.raci.team .mr.r-C{color:var(--C)} table.raci.team .mr.r-I{color:var(--I)}
+table.raci tr.sel td{outline:1px solid var(--accent);outline-offset:-1px}
 .tn-link{color:inherit;text-decoration:none}
 .tn-link:hover{color:var(--accent);text-decoration:underline}
 .print-root{display:none}
@@ -538,12 +546,13 @@ table.closeout tr.bad td:nth-child(6){color:var(--err);font-weight:700}
 
   <section id="view-raci" class="view" hidden>
     <div class="toolbar">
+      <div class="grp seg" id="raciBySeg"><button data-by="team">By team</button><button data-by="person">By person</button></div>
       <div class="grp"><label><input type="checkbox" id="raciOnlyUsed" checked> Only people/teams with assignments</label></div>
       <div class="grp"><label><input type="checkbox" id="raciLeaves"> Hide summary tasks</label></div>
       <div class="spacer"></div>
-      <span class="hint">Click a cell to cycle: — → R → A → A/R → C → I → —. Click a task to open its record</span>
+      <span class="hint" id="raciHint"></span>
     </div>
-    <div class="raci-wrap" id="raciWrap"></div>
+    <div class="split" id="raciSplit"><div class="raci-wrap" id="raciWrap"></div></div>
   </section>
 
   <section id="view-people" class="view" hidden>
@@ -1711,10 +1720,21 @@ function opUpdateParty(id, fields) {
   }
 }
 function opDeleteParty(id) { run("DELETE FROM party WHERE id=?", [id]); }
+// One team per person (DECISIONS #60): adding someone to a team moves them out of any other team.
 function opSetMembers(teamId, personIds) {
   run("DELETE FROM team_member WHERE team_id=?", [teamId]);
-  for (const p of personIds) run("INSERT INTO team_member VALUES (?,?)", [teamId, p]);
+  for (const p of personIds) {
+    const was = one("SELECT team_id FROM team_member WHERE person_id=? AND team_id<>?", [p, teamId]);
+    if (was) opNotes.push(`${partyName(p)} moved from ${partyName(was.team_id)}.`);
+    run("DELETE FROM team_member WHERE person_id=?", [p]);
+    run("INSERT INTO team_member VALUES (?,?)", [teamId, p]);
+  }
 }
+function opSetPersonTeam(personId, teamId) {
+  run("DELETE FROM team_member WHERE person_id=?", [personId]);
+  if (teamId) run("INSERT INTO team_member VALUES (?,?)", [teamId, personId]);
+}
+const homeTeam = personId => (M.teamsOf.get(personId) || [])[0] ?? null;
 
 // Work notes: a dated journal per task. Unlike ServiceNow's journal, notes can be edited and deleted (DECISIONS #39).
 const noteStamp = () => new Date().toISOString();
@@ -1756,7 +1776,8 @@ function seedSample() {
   const ana = P(["Ana Ruiz", "ana@example.com", "Project manager"]), ben = P(["Ben Okafor", "ben@example.com", "Lead developer"]);
   const chloe = P(["Chloe Park", "chloe@example.com", "Designer"]), dev = P(["Dev Patel", "dev@example.com", "Marketing"]);
   const eng = opAddParty("team", "Engineering"), mkt = opAddParty("team", "Marketing team");
-  opSetMembers(eng, [ben]); opSetMembers(mkt, [dev, chloe]);
+  const pmo = opAddParty("team", "PMO");
+  opSetMembers(eng, [ben]); opSetMembers(mkt, [dev, chloe]); opSetMembers(pmo, [ana]);
   const base = nextWorkday(todayNum() - 10);
   const T = (name, parentId, startOff, dur, extra = {}) => {
     const s = wdDay(wdIndex(base) + startOff);
@@ -2680,9 +2701,12 @@ function toggleForm(force) {
   UI.editNote = null; renderForm();
   $("gridBody").focus();
 }
+// The panel lives in the Plan split, or in the RACI page's split when opened from the matrix.
+const formHost = () => UI.view === "raci" ? $("raciSplit") : $("split");
+const formViews = new Set(["plan", "raci"]);
 function openRecord(id) {
   if (!M.tasks.has(id)) return;
-  if (UI.view !== "plan") switchView("plan");
+  if (!formViews.has(UI.view)) switchView("plan");
   UI.form = true;
   if (UI.selId !== id) { UI.editNote = null; selectTask(id); } // selectTask re-renders the form
   else renderForm(true);
@@ -2691,9 +2715,9 @@ function openRecord(id) {
 // so the outline's right-hand columns slide under it (DECISIONS #38).
 const formWidth = () => { const split = $("split").clientWidth || innerWidth; return Math.round(clamp(split / 3, Math.min(420, split - 160), split - 160)); };
 function sizeForm() {
-  const w = UI.form ? formWidth() : 0, full = gridFullWidth();
+  const inPlan = UI.view === "plan", w = UI.form ? (inPlan ? formWidth() : Math.round(clamp(($("raciSplit").clientWidth || innerWidth) / 3, 420, innerWidth - 200))) : 0, full = gridFullWidth();
   $("formPane").style.width = w + "px";
-  $("gridPane").style.width = Math.max(UI.form ? 0 : 240, full - w) + "px";
+  $("gridPane").style.width = (inPlan && UI.form ? Math.max(0, full - w) : full) + "px"; // only the Plan outline is pushed over
 }
 // Window resize / splitter: only the mini Gantt depends on the pane width, so leave fields (and focus) alone.
 function relayoutForm() {
@@ -2721,7 +2745,8 @@ let formBusy = false;
 function renderForm(force = false) {
   if (formBusy) return;
   if (formHold) { formHeldRender = true; return; }
-  const pane = $("formPane"), show = UI.form && UI.view === "plan";
+  const pane = $("formPane"), show = UI.form && formViews.has(UI.view);
+  if (show && pane.parentElement !== formHost()) { formHost().prepend(pane); pane.classList.remove("open"); }
   if (show !== pane.classList.contains("open")) sizeForm();
   pane.classList.toggle("open", show); pane.setAttribute("aria-hidden", String(!show));
   $("detailsBtn").classList.toggle("primary", show);
@@ -3735,7 +3760,18 @@ function openDepEditor(depId, x, y) {
 }
 
 // ---------- RACI matrix ----------
+// By team (default): columns are teams; each cell shows the team's own role plus its members' roles (home team).
+// Click cycles the team's own role; the small + hands that role to one of the team's members (DECISIONS #61).
+UI.raciBy = lsGet("pm.raciBy", "team");
+const RACI_SEQ = ["", "R", "A", "A/R", "C", "I", ""];
+const roleLabel = (t, role) => role === "A" && t.r_is_a ? "A/R" : role;
 function renderRaci() {
+  $$("#raciBySeg button").forEach(b => b.classList.toggle("on", b.dataset.by === UI.raciBy));
+  $("raciHint").textContent = UI.raciBy === "team"
+    ? "Click a cell to cycle the team's role: — R A A/R C I. Use + to hand it to a team member. Click a task to open its record"
+    : "Click a cell to cycle: — R A A/R C I. Click a task to open its record";
+  $("raciOnlyUsed").parentElement.lastChild.textContent = UI.raciBy === "team" ? " Only teams with assignments" : " Only people/teams with assignments";
+  if (UI.raciBy === "team") return renderRaciTeams();
   const wrap = $("raciWrap");
   const onlyUsed = $("raciOnlyUsed").checked, leaves = $("raciLeaves").checked;
   const used = new Set(); for (const list of M.raci.values()) for (const r of list) used.add(r.party_id);
@@ -3759,15 +3795,69 @@ function renderRaci() {
   }
   wrap.innerHTML = html + "</tbody></table>";
 }
+function renderRaciTeams() {
+  const wrap = $("raciWrap");
+  const onlyUsed = $("raciOnlyUsed").checked, leaves = $("raciLeaves").checked;
+  const rows = M.order.filter(t => !leaves || !t.isSummary);
+  if (!M.order.length) { wrap.innerHTML = `<div class="empty">No tasks in this project yet.</div>`; return; }
+  const teamOf = pid => { const p = M.parties.get(pid); return !p ? null : p.kind === "team" ? pid : homeTeam(pid) ?? 0; }; // 0 = no team
+  const used = new Set(); for (const list of M.raci.values()) for (const r of list) used.add(teamOf(r.party_id));
+  const cols = M.teams.filter(tm => onlyUsed ? used.has(tm.id) : (tm.active || used.has(tm.id))).map(tm => ({ id: tm.id, name: tm.name, team: tm }));
+  if (used.has(0)) cols.push({ id: 0, name: "No team", team: null });
+  if (!cols.length) { wrap.innerHTML = `<div class="empty">${M.teams.length ? "No team has assignments yet. Untick “Only teams with assignments”." : "No teams yet. Add teams on the People &amp; teams tab."}</div>`; return; }
+  const issuesBy = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!issuesBy.has(i.task.id)) issuesBy.set(i.task.id, []); issuesBy.get(i.task.id).push(i.text); }
+  let html = `<table class="raci team"><thead><tr><th class="tn">Task</th>${cols.map(c => `<th class="pc" title="${esc(c.name)}">${esc(c.name)}<span class="k">${c.team ? `${(M.members.get(c.id) || []).length} people` : "people without a team"}</span></th>`).join("")}<th>Warnings</th></tr></thead><tbody>`;
+  for (const t of rows) {
+    html += `<tr class="${t.isSummary ? "summary" : ""}${t.id === UI.selId && UI.form ? " sel" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${esc(t.name)}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${esc(t.wbs)}&nbsp; ${esc(t.name)}</a></td>`;
+    const roles = rolesOf(t.id);
+    for (const c of cols) {
+      const own = c.team ? roles.find(r => r.party_id === c.id) : null;
+      const mem = roles.filter(r => M.parties.get(r.party_id)?.kind === "person" && teamOf(r.party_id) === c.id);
+      const ownL = own ? roleLabel(t, own.role) : "";
+      const top = ownL || (mem[0] ? roleLabel(t, mem[0].role) : "");
+      const tip = [own ? `${c.name} (team): ${ownL}` : "", ...mem.map(r => `${partyName(r.party_id)}: ${roleLabel(t, r.role)}`)].filter(Boolean).join("\n") || `${c.name}: none`;
+      html += `<td class="cell tcell ${top[0] || ""}" data-t="${t.id}" data-team="${c.id}" title="${esc(tip)}">`
+        + (ownL ? `<b>${ownL}</b>` : "")
+        + mem.map(r => `<span class="mr r-${r.role}" data-p="${r.party_id}">${roleLabel(t, r.role)}·${esc(initials(partyName(r.party_id)))}</span>`).join("")
+        + (c.team && (M.members.get(c.id) || []).length ? `<button class="plus" data-plus="${c.id}" title="Give this to a member of ${esc(c.name)}">+</button>` : "")
+        + `</td>`;
+    }
+    html += `<td class="flag">${(issuesBy.get(t.id) || []).map(esc).join("; ")}</td></tr>`;
+  }
+  wrap.innerHTML = html + "</tbody></table>";
+}
+// Hand the team's role on a task to one of its members (or set a member's role when the team has none).
+function teamMemberPicker(anchor, tid, teamId) {
+  const t = M.tasks.get(tid), team = M.parties.get(teamId);
+  const own = rolesOf(tid).find(r => r.party_id === teamId);
+  const role = own?.role || "R";
+  const box = h("div", {}, h("h4", {}, own ? `Give ${team.name}'s ${roleLabel(t, own.role)} on ${t.wbs} to…` : `Assign a member of ${team.name} to ${t.wbs} as…`));
+  const roleSel = own ? null : h("select", {}, ...["R", "A", "C", "I"].map(x => h("option", { value: x }, `${x}: ${ROLE_NAMES[x]}`)));
+  if (roleSel) box.append(roleSel);
+  const list = h("div", { class: "pick" });
+  for (const pid of M.members.get(teamId) || []) {
+    const cur = rolesOf(tid).find(r => r.party_id === pid);
+    list.append(h("button", { class: "pick-btn", onclick: () => {
+      closePop();
+      const give = own ? own.role : roleSel.value;
+      mutate(`RACI ${t.wbs}: ${partyName(pid)} → ${give}${own ? ` (from ${team.name})` : ""}`, () => { if (own) opSetRole(tid, teamId, null); opSetRole(tid, pid, give); });
+    } }, partyName(pid), cur ? h("span", { class: "sub" }, ` now ${roleLabel(t, cur.role)}`) : null));
+  }
+  box.append(list);
+  openPop(anchor.left, anchor.bottom + 4, box);
+}
 function initRaci() {
   $("raciWrap").addEventListener("click", e => {
-    const link = e.target.closest("[data-open]"); if (link) { e.preventDefault(); openRecord(+link.dataset.open); return; }
+    const link = e.target.closest("[data-open]"); if (link) { e.preventDefault(); openRecord(+link.dataset.open); renderRaci(); return; }
+    const plus = e.target.closest("[data-plus]");
+    if (plus) { const td = plus.closest("td.cell"); teamMemberPicker(plus.getBoundingClientRect(), +td.dataset.t, +plus.dataset.plus); return; }
     const td = e.target.closest("td.cell"); if (!td) return;
-    const tid = +td.dataset.t, pid = +td.dataset.p, t = M.tasks.get(tid);
+    if (td.dataset.team === "0") return; // "No team" column: display only
+    const tid = +td.dataset.t, pid = +(td.dataset.team || td.dataset.p), t = M.tasks.get(tid);
     const role = rolesOf(tid).find(r => r.party_id === pid)?.role || "";
     const cur = role === "A" && t.r_is_a ? "A/R" : role;
     // A/R = Accountable plus the task's "Responsible same as Accountable" switch (DECISIONS #48).
-    const seq = ["", "R", "A", "A/R", "C", "I", ""]; const next = seq[seq.indexOf(cur) + 1];
+    const next = RACI_SEQ[RACI_SEQ.indexOf(cur) + 1];
     const keep = $("raciWrap").scrollTop, keepL = $("raciWrap").scrollLeft;
     mutate(`RACI ${t.wbs}: ${partyName(pid)} → ${next || "none"}`, () => {
       if (next === "A/R") { opSetRole(tid, pid, "A"); opSetRIsA(tid, true); return; }
@@ -3776,6 +3866,7 @@ function initRaci() {
     });
     $("raciWrap").scrollTop = keep; $("raciWrap").scrollLeft = keepL;
   });
+  $$("#raciBySeg button").forEach(b => b.addEventListener("click", () => { UI.raciBy = b.dataset.by; lsSet("pm.raciBy", UI.raciBy); renderRaci(); }));
   $("raciOnlyUsed").addEventListener("change", renderRaci);
   $("raciLeaves").addEventListener("change", renderRaci);
 }
@@ -3814,7 +3905,8 @@ function editParty(id, kind) {
   const memberSet = new Set(id ? M.members.get(id) || [] : []);
   const body = h("div", { class: "modal-b" });
   const frm = h("div", { class: "frm" }, h("label", {}, "Name"), name);
-  if (p.kind === "person") frm.append(h("label", {}, "Email"), email, h("label", {}, "Title"), title);
+  const teamSel = h("select", {}, h("option", { value: "" }, "— no team —"), ...M.teams.map(tm => h("option", { value: tm.id, selected: id && homeTeam(id) === tm.id }, tm.name)));
+  if (p.kind === "person") frm.append(h("label", {}, "Email"), email, h("label", {}, "Title"), title, h("label", {}, "Team"), teamSel);
   frm.append(h("label", {}, "Active"), h("label", { style: { color: "inherit" } }, active, " Can be assigned to tasks"));
   body.append(frm);
   if (p.kind === "team") {
@@ -3823,7 +3915,8 @@ function editParty(id, kind) {
     for (const person of M.people) {
       const cb = h("input", { type: "checkbox", checked: memberSet.has(person.id) });
       cb.addEventListener("change", () => cb.checked ? memberSet.add(person.id) : memberSet.delete(person.id));
-      pick.append(h("label", {}, cb, person.name, h("span", { class: "sub" }, person.title || "")));
+      const other = homeTeam(person.id); const moving = other && other !== id;
+      pick.append(h("label", {}, cb, person.name, h("span", { class: "sub" }, moving ? `in ${partyName(other)} (will move)` : person.title || "")));
     }
     if (!M.people.length) pick.append(h("div", { class: "hint" }, "Add people first."));
     body.append(pick);
@@ -3834,6 +3927,7 @@ function editParty(id, kind) {
       if (!id) newId = opAddParty(p.kind, name.value, { email: email.value, title: title.value });
       opUpdateParty(newId, { name: name.value, email: email.value, title: title.value, active: active.checked });
       if (p.kind === "team") opSetMembers(newId, [...memberSet]);
+      else if ((homeTeam(newId) ?? "") !== (+teamSel.value || "")) opSetPersonTeam(newId, +teamSel.value || null);
     });
     if (ok) closeModal();
   };
@@ -4602,7 +4696,7 @@ function renderAll() {
   renderProjectMenu(); updateIssueBadge(); updateRiskBadge(); renderSaveState(); renderPersonFilter();
   if (UI.view === "plan") { renderGrid(); renderGantt(); renderForm(); }
   else if (UI.view === "risks") renderRisks();
-  else if (UI.view === "raci") renderRaci();
+  else if (UI.view === "raci") { renderRaci(); renderForm(); }
   else if (UI.view === "people") renderPeople();
   else if (UI.view === "issues") renderIssues();
 }
@@ -4610,6 +4704,7 @@ function onDataChanged() { if (!ready) return; refresh(); computeRows(); renderA
 
 function switchView(v) {
   UI.view = v; closePop();
+  if (v !== "plan" && v !== "raci") { const fp = $("formPane"); fp.classList.remove("open"); }
   $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.view === v));
   for (const s of ["plan", "risks", "raci", "people", "issues"]) $("view-" + s).hidden = s !== v;
   renderAll();
@@ -4669,11 +4764,11 @@ function initToolbar() {
   document.addEventListener("keydown", e => {
     const ctrl = e.ctrlKey || e.metaKey;
     const typing = e.target.matches("input,textarea,select") && !e.target.matches("[type=checkbox]");
-    if (e.key === "Escape") { if (!$("pop").hidden) { closePop(); return; } if (modalOpen()) { closeModal(); return; } $("logPanel").hidden = true; if (!typing && !modalOpen()) { if (UI.view === "risks" && UI.riskForm) { closeRiskForm(); return; } if (UI.view === "plan" && UI.form) { toggleForm(false); return; } } }
+    if (e.key === "Escape") { if (!$("pop").hidden) { closePop(); return; } if (modalOpen()) { closeModal(); return; } $("logPanel").hidden = true; if (!typing && !modalOpen()) { if (UI.view === "risks" && UI.riskForm) { closeRiskForm(); return; } if (UI.form && (UI.view === "plan" || UI.view === "raci")) { toggleForm(false); return; } } }
     if (modalOpen() || typing) return;
     if (ctrl && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
     else if (ctrl && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { e.preventDefault(); redo(); }
-    else if (ctrl && e.key.toLowerCase() === "i" && UI.view === "plan") { e.preventDefault(); toggleForm(); }
+    else if (ctrl && e.key.toLowerCase() === "i" && (UI.view === "plan" || UI.view === "raci")) { e.preventDefault(); toggleForm(); }
   });
 }
 
@@ -4704,7 +4799,7 @@ setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
   window.PM = {
     M, UI, q, run, one, scalar, mutate, undo, redo, flushSaves, refresh, renderAll, selectTask, switchView, switchProject, openRecord, toggleForm, renderForm, notesFor,
     op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote, opSetRIsA,
-      opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote },
+      opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote },
     risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport, riskImportItems, doRiskImport, openRiskRecord, closeRiskForm, renderRisks, get RI() { return RI; }, recNotes, toLMH },
     util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum },
     io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, autoMap, get W() { return W; } },

@@ -18,7 +18,7 @@ function renderAll() {
   renderProjectMenu(); updateIssueBadge(); updateRiskBadge(); renderSaveState(); renderPersonFilter();
   if (UI.view === "plan") { renderGrid(); renderGantt(); renderForm(); }
   else if (UI.view === "risks") renderRisks();
-  else if (UI.view === "raci") renderRaci();
+  else if (UI.view === "raci") { renderRaci(); renderForm(); }
   else if (UI.view === "people") renderPeople();
   else if (UI.view === "issues") renderIssues();
 }
@@ -26,6 +26,7 @@ function onDataChanged() { if (!ready) return; refresh(); computeRows(); renderA
 
 function switchView(v) {
   UI.view = v; closePop();
+  if (v !== "plan" && v !== "raci") { const fp = $("formPane"); fp.classList.remove("open"); }
   $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.view === v));
   for (const s of ["plan", "risks", "raci", "people", "issues"]) $("view-" + s).hidden = s !== v;
   renderAll();
@@ -85,11 +86,11 @@ function initToolbar() {
   document.addEventListener("keydown", e => {
     const ctrl = e.ctrlKey || e.metaKey;
     const typing = e.target.matches("input,textarea,select") && !e.target.matches("[type=checkbox]");
-    if (e.key === "Escape") { if (!$("pop").hidden) { closePop(); return; } if (modalOpen()) { closeModal(); return; } $("logPanel").hidden = true; if (!typing && !modalOpen()) { if (UI.view === "risks" && UI.riskForm) { closeRiskForm(); return; } if (UI.view === "plan" && UI.form) { toggleForm(false); return; } } }
+    if (e.key === "Escape") { if (!$("pop").hidden) { closePop(); return; } if (modalOpen()) { closeModal(); return; } $("logPanel").hidden = true; if (!typing && !modalOpen()) { if (UI.view === "risks" && UI.riskForm) { closeRiskForm(); return; } if (UI.form && (UI.view === "plan" || UI.view === "raci")) { toggleForm(false); return; } } }
     if (modalOpen() || typing) return;
     if (ctrl && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
     else if (ctrl && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { e.preventDefault(); redo(); }
-    else if (ctrl && e.key.toLowerCase() === "i" && UI.view === "plan") { e.preventDefault(); toggleForm(); }
+    else if (ctrl && e.key.toLowerCase() === "i" && (UI.view === "plan" || UI.view === "raci")) { e.preventDefault(); toggleForm(); }
   });
 }
 
@@ -120,7 +121,7 @@ setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
   window.PM = {
     M, UI, q, run, one, scalar, mutate, undo, redo, flushSaves, refresh, renderAll, selectTask, switchView, switchProject, openRecord, toggleForm, renderForm, notesFor,
     op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote, opSetRIsA,
-      opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote },
+      opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote },
     risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport, riskImportItems, doRiskImport, openRiskRecord, closeRiskForm, renderRisks, get RI() { return RI; }, recNotes, toLMH },
     util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum },
     io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, autoMap, get W() { return W; } },

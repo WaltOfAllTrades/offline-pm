@@ -566,8 +566,9 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     ok(!P.M.issues.some(i => i.task.id === a && /Responsible/.test(i.text)), "no 'No Responsible' warning (inherited A counts)");
     const wb = P.io.exportWorkbook(), rows = XL.utils.sheet_to_json(wb.Sheets.Tasks);
     eq(rows.find(r => r.Name === "Build" || r["Task Name"] === "Build" || Object.values(r).includes("Build"))?.Responsible, "Ana", "export writes the Accountable as Responsible");
-    P.switchView("raci"); document.getElementById("raciOnlyUsed").checked = true; P.renderAll();
+    P.UI.raciBy = "person"; P.switchView("raci"); document.getElementById("raciOnlyUsed").checked = true; P.renderAll();
     ok([...document.querySelectorAll("#raciWrap td.cell")].some(td => td.textContent === "a/r"), "matrix shows inherited a/r");
+    P.UI.raciBy = "team";
     P.switchView("plan");
     P.openRecord(a);
     const sw = inForm("input.sw"); ok(sw.checked, "switch on"); ok(inForm(".f-party:not([disabled])") && allInForm(".f-party")[1].disabled, "Responsible picker disabled");
@@ -808,15 +809,33 @@ await test("form-review", "Gantt lines up with the outline again after closing t
   await test("raci-ra", "matrix cycle includes A/R; task names open the record", () => {
     fresh(); const a = T("Build"); let ana;
     m(() => { ana = O.opAddParty("person", "Ana"); });
-    P.switchView("raci"); document.getElementById("raciOnlyUsed").checked = false; P.renderAll();
+    P.UI.raciBy = "person"; P.switchView("raci"); document.getElementById("raciOnlyUsed").checked = false; P.renderAll();
     const cell = () => document.querySelector(`#raciWrap td.cell[data-t="${a}"][data-p="${ana}"]`);
     const seen = []; for (let i = 0; i < 6; i++) { cell().click(); seen.push(cell().textContent); }
     eq(seen, ["R", "A", "A/R", "C", "I", ""]);
     cell().click(); cell().click(); cell().click(); eq([cell().textContent, task(a).r_is_a], ["A/R", 1]);
     cell().click(); eq([cell().textContent, task(a).r_is_a], ["C", 0], "leaving A/R turns the switch off");
     document.querySelector(`#raciWrap [data-open="${a}"]`).click();
-    eq([P.UI.view, P.UI.selId, P.UI.form], ["plan", a, true], "task link opens its record");
-    P.toggleForm(false); document.getElementById("raciOnlyUsed").checked = true;
+    eq([P.UI.view, P.UI.selId, P.UI.form], ["raci", a, true], "task link opens its record on the RACI page");
+    const fp3 = document.getElementById("formPane"); ok(fp3.classList.contains("open") && document.getElementById("raciSplit").contains(fp3), "panel slides out beside the matrix");
+    P.toggleForm(false); P.switchView("plan"); ok(document.getElementById("split").contains(fp3) || !fp3.classList.contains("open"), "panel not left open on the RACI page");
+    document.getElementById("raciOnlyUsed").checked = true;
+  });
+  await test("raci-team", "one team per person; team view rolls up members; click cycles the team; + hands the role to a member", () => {
+    fresh(); const a = T("Build"); let ana, ben, eng, ops;
+    m(() => { ana = O.opAddParty("person", "Ana Ruiz"); ben = O.opAddParty("person", "Ben Okafor"); eng = O.opAddParty("team", "Eng"); ops = O.opAddParty("team", "Ops"); O.opSetMembers(eng, [ana, ben]); });
+    m(() => O.opSetMembers(ops, [ben])); eq([P.M.teamsOf.get(ben), P.M.members.get(eng)], [[ops], [ana]], "joining Ops moved Ben out of Eng");
+    m(() => { O.opSetRole(a, ana, "R"); O.opSetRole(a, ben, "C"); });
+    P.UI.raciBy = "team"; P.switchView("raci"); document.getElementById("raciOnlyUsed").checked = true; P.renderAll();
+    const cell = tm => document.querySelector(`#raciWrap td.tcell[data-t="${a}"][data-team="${tm}"]`);
+    eq([cell(eng).querySelector(".mr").textContent, cell(ops).querySelector(".mr").textContent], ["R·AR", "C·BO"], "members roll up under their team");
+    cell(eng).click(); eq(P.M.raci.get(a).find(r => r.party_id === eng)?.role, "R", "click cycles the team's own role");
+    cell(eng).click(); cell(eng).click(); eq([cell(eng).querySelector("b").textContent, task(a).r_is_a], ["A/R", 1]);
+    cell(eng).querySelector(".plus").click();
+    [...document.querySelectorAll("#pop .pick-btn")].find(b => b.textContent.startsWith("Ana Ruiz")).click();
+    eq(P.M.raci.get(a).map(r => [P.M.parties.get(r.party_id).name, r.role]).sort(), [["Ana Ruiz", "A"], ["Ben Okafor", "C"]], "team's A moved to Ana (A/R switch kept)");
+    eq(task(a).r_is_a, 1);
+    P.switchView("plan");
   });
   P.reset();
   const failed = results.filter(r => !r.pass);

@@ -99,7 +99,18 @@ function openDepEditor(depId, x, y) {
 }
 
 // ---------- RACI matrix ----------
+// By team (default): columns are teams; each cell shows the team's own role plus its members' roles (home team).
+// Click cycles the team's own role; the small + hands that role to one of the team's members (DECISIONS #61).
+UI.raciBy = lsGet("pm.raciBy", "team");
+const RACI_SEQ = ["", "R", "A", "A/R", "C", "I", ""];
+const roleLabel = (t, role) => role === "A" && t.r_is_a ? "A/R" : role;
 function renderRaci() {
+  $$("#raciBySeg button").forEach(b => b.classList.toggle("on", b.dataset.by === UI.raciBy));
+  $("raciHint").textContent = UI.raciBy === "team"
+    ? "Click a cell to cycle the team's role: — R A A/R C I. Use + to hand it to a team member. Click a task to open its record"
+    : "Click a cell to cycle: — R A A/R C I. Click a task to open its record";
+  $("raciOnlyUsed").parentElement.lastChild.textContent = UI.raciBy === "team" ? " Only teams with assignments" : " Only people/teams with assignments";
+  if (UI.raciBy === "team") return renderRaciTeams();
   const wrap = $("raciWrap");
   const onlyUsed = $("raciOnlyUsed").checked, leaves = $("raciLeaves").checked;
   const used = new Set(); for (const list of M.raci.values()) for (const r of list) used.add(r.party_id);
@@ -123,15 +134,69 @@ function renderRaci() {
   }
   wrap.innerHTML = html + "</tbody></table>";
 }
+function renderRaciTeams() {
+  const wrap = $("raciWrap");
+  const onlyUsed = $("raciOnlyUsed").checked, leaves = $("raciLeaves").checked;
+  const rows = M.order.filter(t => !leaves || !t.isSummary);
+  if (!M.order.length) { wrap.innerHTML = `<div class="empty">No tasks in this project yet.</div>`; return; }
+  const teamOf = pid => { const p = M.parties.get(pid); return !p ? null : p.kind === "team" ? pid : homeTeam(pid) ?? 0; }; // 0 = no team
+  const used = new Set(); for (const list of M.raci.values()) for (const r of list) used.add(teamOf(r.party_id));
+  const cols = M.teams.filter(tm => onlyUsed ? used.has(tm.id) : (tm.active || used.has(tm.id))).map(tm => ({ id: tm.id, name: tm.name, team: tm }));
+  if (used.has(0)) cols.push({ id: 0, name: "No team", team: null });
+  if (!cols.length) { wrap.innerHTML = `<div class="empty">${M.teams.length ? "No team has assignments yet. Untick “Only teams with assignments”." : "No teams yet. Add teams on the People &amp; teams tab."}</div>`; return; }
+  const issuesBy = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!issuesBy.has(i.task.id)) issuesBy.set(i.task.id, []); issuesBy.get(i.task.id).push(i.text); }
+  let html = `<table class="raci team"><thead><tr><th class="tn">Task</th>${cols.map(c => `<th class="pc" title="${esc(c.name)}">${esc(c.name)}<span class="k">${c.team ? `${(M.members.get(c.id) || []).length} people` : "people without a team"}</span></th>`).join("")}<th>Warnings</th></tr></thead><tbody>`;
+  for (const t of rows) {
+    html += `<tr class="${t.isSummary ? "summary" : ""}${t.id === UI.selId && UI.form ? " sel" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${esc(t.name)}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${esc(t.wbs)}&nbsp; ${esc(t.name)}</a></td>`;
+    const roles = rolesOf(t.id);
+    for (const c of cols) {
+      const own = c.team ? roles.find(r => r.party_id === c.id) : null;
+      const mem = roles.filter(r => M.parties.get(r.party_id)?.kind === "person" && teamOf(r.party_id) === c.id);
+      const ownL = own ? roleLabel(t, own.role) : "";
+      const top = ownL || (mem[0] ? roleLabel(t, mem[0].role) : "");
+      const tip = [own ? `${c.name} (team): ${ownL}` : "", ...mem.map(r => `${partyName(r.party_id)}: ${roleLabel(t, r.role)}`)].filter(Boolean).join("\n") || `${c.name}: none`;
+      html += `<td class="cell tcell ${top[0] || ""}" data-t="${t.id}" data-team="${c.id}" title="${esc(tip)}">`
+        + (ownL ? `<b>${ownL}</b>` : "")
+        + mem.map(r => `<span class="mr r-${r.role}" data-p="${r.party_id}">${roleLabel(t, r.role)}·${esc(initials(partyName(r.party_id)))}</span>`).join("")
+        + (c.team && (M.members.get(c.id) || []).length ? `<button class="plus" data-plus="${c.id}" title="Give this to a member of ${esc(c.name)}">+</button>` : "")
+        + `</td>`;
+    }
+    html += `<td class="flag">${(issuesBy.get(t.id) || []).map(esc).join("; ")}</td></tr>`;
+  }
+  wrap.innerHTML = html + "</tbody></table>";
+}
+// Hand the team's role on a task to one of its members (or set a member's role when the team has none).
+function teamMemberPicker(anchor, tid, teamId) {
+  const t = M.tasks.get(tid), team = M.parties.get(teamId);
+  const own = rolesOf(tid).find(r => r.party_id === teamId);
+  const role = own?.role || "R";
+  const box = h("div", {}, h("h4", {}, own ? `Give ${team.name}'s ${roleLabel(t, own.role)} on ${t.wbs} to…` : `Assign a member of ${team.name} to ${t.wbs} as…`));
+  const roleSel = own ? null : h("select", {}, ...["R", "A", "C", "I"].map(x => h("option", { value: x }, `${x}: ${ROLE_NAMES[x]}`)));
+  if (roleSel) box.append(roleSel);
+  const list = h("div", { class: "pick" });
+  for (const pid of M.members.get(teamId) || []) {
+    const cur = rolesOf(tid).find(r => r.party_id === pid);
+    list.append(h("button", { class: "pick-btn", onclick: () => {
+      closePop();
+      const give = own ? own.role : roleSel.value;
+      mutate(`RACI ${t.wbs}: ${partyName(pid)} → ${give}${own ? ` (from ${team.name})` : ""}`, () => { if (own) opSetRole(tid, teamId, null); opSetRole(tid, pid, give); });
+    } }, partyName(pid), cur ? h("span", { class: "sub" }, ` now ${roleLabel(t, cur.role)}`) : null));
+  }
+  box.append(list);
+  openPop(anchor.left, anchor.bottom + 4, box);
+}
 function initRaci() {
   $("raciWrap").addEventListener("click", e => {
-    const link = e.target.closest("[data-open]"); if (link) { e.preventDefault(); openRecord(+link.dataset.open); return; }
+    const link = e.target.closest("[data-open]"); if (link) { e.preventDefault(); openRecord(+link.dataset.open); renderRaci(); return; }
+    const plus = e.target.closest("[data-plus]");
+    if (plus) { const td = plus.closest("td.cell"); teamMemberPicker(plus.getBoundingClientRect(), +td.dataset.t, +plus.dataset.plus); return; }
     const td = e.target.closest("td.cell"); if (!td) return;
-    const tid = +td.dataset.t, pid = +td.dataset.p, t = M.tasks.get(tid);
+    if (td.dataset.team === "0") return; // "No team" column: display only
+    const tid = +td.dataset.t, pid = +(td.dataset.team || td.dataset.p), t = M.tasks.get(tid);
     const role = rolesOf(tid).find(r => r.party_id === pid)?.role || "";
     const cur = role === "A" && t.r_is_a ? "A/R" : role;
     // A/R = Accountable plus the task's "Responsible same as Accountable" switch (DECISIONS #48).
-    const seq = ["", "R", "A", "A/R", "C", "I", ""]; const next = seq[seq.indexOf(cur) + 1];
+    const next = RACI_SEQ[RACI_SEQ.indexOf(cur) + 1];
     const keep = $("raciWrap").scrollTop, keepL = $("raciWrap").scrollLeft;
     mutate(`RACI ${t.wbs}: ${partyName(pid)} → ${next || "none"}`, () => {
       if (next === "A/R") { opSetRole(tid, pid, "A"); opSetRIsA(tid, true); return; }
@@ -140,6 +205,7 @@ function initRaci() {
     });
     $("raciWrap").scrollTop = keep; $("raciWrap").scrollLeft = keepL;
   });
+  $$("#raciBySeg button").forEach(b => b.addEventListener("click", () => { UI.raciBy = b.dataset.by; lsSet("pm.raciBy", UI.raciBy); renderRaci(); }));
   $("raciOnlyUsed").addEventListener("change", renderRaci);
   $("raciLeaves").addEventListener("change", renderRaci);
 }
@@ -178,7 +244,8 @@ function editParty(id, kind) {
   const memberSet = new Set(id ? M.members.get(id) || [] : []);
   const body = h("div", { class: "modal-b" });
   const frm = h("div", { class: "frm" }, h("label", {}, "Name"), name);
-  if (p.kind === "person") frm.append(h("label", {}, "Email"), email, h("label", {}, "Title"), title);
+  const teamSel = h("select", {}, h("option", { value: "" }, "— no team —"), ...M.teams.map(tm => h("option", { value: tm.id, selected: id && homeTeam(id) === tm.id }, tm.name)));
+  if (p.kind === "person") frm.append(h("label", {}, "Email"), email, h("label", {}, "Title"), title, h("label", {}, "Team"), teamSel);
   frm.append(h("label", {}, "Active"), h("label", { style: { color: "inherit" } }, active, " Can be assigned to tasks"));
   body.append(frm);
   if (p.kind === "team") {
@@ -187,7 +254,8 @@ function editParty(id, kind) {
     for (const person of M.people) {
       const cb = h("input", { type: "checkbox", checked: memberSet.has(person.id) });
       cb.addEventListener("change", () => cb.checked ? memberSet.add(person.id) : memberSet.delete(person.id));
-      pick.append(h("label", {}, cb, person.name, h("span", { class: "sub" }, person.title || "")));
+      const other = homeTeam(person.id); const moving = other && other !== id;
+      pick.append(h("label", {}, cb, person.name, h("span", { class: "sub" }, moving ? `in ${partyName(other)} (will move)` : person.title || "")));
     }
     if (!M.people.length) pick.append(h("div", { class: "hint" }, "Add people first."));
     body.append(pick);
@@ -198,6 +266,7 @@ function editParty(id, kind) {
       if (!id) newId = opAddParty(p.kind, name.value, { email: email.value, title: title.value });
       opUpdateParty(newId, { name: name.value, email: email.value, title: title.value, active: active.checked });
       if (p.kind === "team") opSetMembers(newId, [...memberSet]);
+      else if ((homeTeam(newId) ?? "") !== (+teamSel.value || "")) opSetPersonTeam(newId, +teamSel.value || null);
     });
     if (ok) closeModal();
   };

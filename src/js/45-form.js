@@ -21,9 +21,12 @@ function toggleForm(force) {
   UI.editNote = null; renderForm();
   $("gridBody").focus();
 }
+// The panel lives in the Plan split, or in the RACI page's split when opened from the matrix.
+const formHost = () => UI.view === "raci" ? $("raciSplit") : $("split");
+const formViews = new Set(["plan", "raci"]);
 function openRecord(id) {
   if (!M.tasks.has(id)) return;
-  if (UI.view !== "plan") switchView("plan");
+  if (!formViews.has(UI.view)) switchView("plan");
   UI.form = true;
   if (UI.selId !== id) { UI.editNote = null; selectTask(id); } // selectTask re-renders the form
   else renderForm(true);
@@ -32,9 +35,9 @@ function openRecord(id) {
 // so the outline's right-hand columns slide under it (DECISIONS #38).
 const formWidth = () => { const split = $("split").clientWidth || innerWidth; return Math.round(clamp(split / 3, Math.min(420, split - 160), split - 160)); };
 function sizeForm() {
-  const w = UI.form ? formWidth() : 0, full = gridFullWidth();
+  const inPlan = UI.view === "plan", w = UI.form ? (inPlan ? formWidth() : Math.round(clamp(($("raciSplit").clientWidth || innerWidth) / 3, 420, innerWidth - 200))) : 0, full = gridFullWidth();
   $("formPane").style.width = w + "px";
-  $("gridPane").style.width = Math.max(UI.form ? 0 : 240, full - w) + "px";
+  $("gridPane").style.width = (inPlan && UI.form ? Math.max(0, full - w) : full) + "px"; // only the Plan outline is pushed over
 }
 // Window resize / splitter: only the mini Gantt depends on the pane width, so leave fields (and focus) alone.
 function relayoutForm() {
@@ -62,7 +65,8 @@ let formBusy = false;
 function renderForm(force = false) {
   if (formBusy) return;
   if (formHold) { formHeldRender = true; return; }
-  const pane = $("formPane"), show = UI.form && UI.view === "plan";
+  const pane = $("formPane"), show = UI.form && formViews.has(UI.view);
+  if (show && pane.parentElement !== formHost()) { formHost().prepend(pane); pane.classList.remove("open"); }
   if (show !== pane.classList.contains("open")) sizeForm();
   pane.classList.toggle("open", show); pane.setAttribute("aria-hidden", String(!show));
   $("detailsBtn").classList.toggle("primary", show);
