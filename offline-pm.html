@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-yVBhl8r4CaB1tt7h2g02+xnacVj/6KiOewyWxdhiPJk=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-xGGNmpIiLsZd/uU6tNfsJguLRUk8CR8FEzYQctxVEuc='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-yVBhl8r4CaB1tt7h2g02+xnacVj/6KiOewyWxdhiPJk=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-d67B02Kc7FY6mw0zau24nNB9PW2iYpQTup2vMFDRVJA='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
 <title>Offline PM</title>
 <style>:root{
   --bg:#f5f6f8; --panel:#fff; --panel2:#fafbfc; --ink:#1b1f24; --muted:#667085; --line:#e4e7ec; --line2:#eef0f3;
@@ -873,11 +873,12 @@ function wdIndex(n) { const m = n + 3; const w = Math.floor(m / 7), r = m - w * 
 // Day number of working-day index i.
 function wdDay(i) { const w = Math.floor(i / 5), r = i - w * 5; return w * 7 + r - 3; }
 const nextWorkday = n => wdDay(wdIndex(n));
-// Half-open working-day span of a task: [s, e). Milestones have e === s.
+// Half-open working-day span of a task: [s, e). A milestone falls at the end of its day (as MS Project's
+// 5 pm finish), so a predecessor finishing that day doesn't conflict with it (DECISIONS #65).
 function span(start, finish, milestone) {
   if (start == null) return null;
+  if (milestone) { const m = wdIndex(start + 1); return { s: m, e: m }; }
   const s = wdIndex(start);
-  if (milestone) return { s, e: s };
   const e = wdIndex((finish ?? start) + 1);
   return { s, e: Math.max(e, s) };
 }
@@ -971,7 +972,9 @@ const lastId = () => scalar("SELECT last_insert_rowid()");
 const nowIso = () => new Date().toISOString().slice(0, 19).replace("T", " ");
 
 // sql.js export() closes and reopens the connection, which resets pragmas (DECISIONS #23).
-function exportBytes() { const b = db.export(); db.run("PRAGMA foreign_keys = ON"); return b; }
+// dbGen counts reopenings (export, install, undo), which reset SQLite's total_changes(); caches key on both.
+let dbGen = 0;
+function exportBytes() { const b = db.export(); dbGen++; db.run("PRAGMA foreign_keys = ON"); return b; }
 
 const SCHEMA_V1 = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -1195,7 +1198,7 @@ function installDb(bytes) {
     if (fixed) note = (note ? note + " " : "") + `Repaired ${fixed} invalid ${fixed === 1 ? "row" : "rows"} in the file.`;
   } catch (e) { d.close(); throw e; }
   if (db) db.close();
-  db = d;
+  db = d; dbGen++;
   db.run("PRAGMA foreign_keys = ON");
   if (!scalar("SELECT COUNT(*) FROM project")) run("INSERT INTO project(name, created_at) VALUES ('My project', ?)", [nowIso()]);
   rev = readRev(db);
@@ -1234,7 +1237,7 @@ function afterChange(desc) { hooks.onChange(); queueSave(desc); }
 // Undo/redo bring back an earlier state of the plan, but never an earlier file id (DECISIONS #63).
 function restoreSnapshot(bytes, desc) {
   const next = rev + 1, fid = readFileId(db);
-  db.close(); db = new SQL.Database(bytes); db.run("PRAGMA foreign_keys = ON");
+  db.close(); db = new SQL.Database(bytes); dbGen++; db.run("PRAGMA foreign_keys = ON");
   if (fid) run("UPDATE meta SET value=? WHERE key='file_id'", [fid]);
   rev = next; run("UPDATE meta SET value=? WHERE key='rev'", [String(rev)]);
   afterChange(desc);
@@ -1302,6 +1305,16 @@ const hasWork = () => !!scalar("SELECT (SELECT COUNT(*) FROM task) + (SELECT COU
 
 // ---------- Save queue: serialized, coalesced, disk first then buffer ----------
 let syncing = false; // comparing the file with the buffer: no disk writes until that's decided
+// A failed disk write (file locked by antivirus or a sync client, say) is retried with growing gaps (DECISIONS #68).
+const RETRY_SECS = [2, 5, 15, 30, 60];
+let retryTimer = null, retryN = 0;
+function scheduleRetry(target) {
+  if (retryTimer) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    if (fileHandle === target && filePerm && diskRev !== rev) queueSave(`Retry write to file (attempt ${retryN + 1})`);
+  }, RETRY_SECS[Math.min(retryN++, RETRY_SECS.length - 1)] * 1000);
+}
 function queueSave(desc) {
   pendingReasons.push(desc); pending = true; hooks.onSaveState();
   if (!saving) drain();
@@ -1324,11 +1337,11 @@ async function drain() {
             const t0 = performance.now();
             const w = await target.createWritable(); // temp file swapped in on close() → atomic
             await w.write(bytes); await w.close();
-            entry.disk = "ok"; entry.diskMs = Math.round(performance.now() - t0);
+            entry.disk = "ok"; entry.diskMs = Math.round(performance.now() - t0); retryN = 0;
             if (fileHandle === target) { diskRev = r; lastDiskAt = Date.now(); }
           } catch (e) {
             entry.disk = "fail"; errs.push("Disk: " + e.message);
-            if (e.name === "NotAllowedError") filePerm = false;
+            if (e.name === "NotAllowedError") filePerm = false; else scheduleRetry(target);
           }
         }
         if (!readOnly) {
@@ -1350,7 +1363,8 @@ async function drain() {
   }
 }
 async function flushSaves() { while (saving || pending) await sleep(20); }
-window.addEventListener("beforeunload", e => { if (saving || pending) { e.preventDefault(); e.returnValue = ""; } });
+// Warn while a save is under way, or while the connected file is behind (a write failed and hasn't been retried yet).
+window.addEventListener("beforeunload", e => { if (!readOnly && (saving || pending || (fileHandle && filePerm && diskRev !== rev))) { e.preventDefault(); e.returnValue = ""; } });
 
 function logInfo(text) { saveLog.unshift({ info: text, at: Date.now() }); if (saveLog.length > 80) saveLog.pop(); hooks.onSaveState(); }
 
@@ -1416,6 +1430,8 @@ async function rememberHandle(h) {
   try { await idb.set("mirror", { rev, bytes: exportBytes(), ts: Date.now(), file: h.name, fileId: readFileId(db), disk: diskRev }); mirrorRev = rev; } catch { }
   await idb.set("handle", h);
 }
+// Is h the file this plan is saved in? (Chrome asks "Replace?" but that's easy to click through.)
+async function isOpenFile(h) { try { return !!fileHandle && await h.isSameEntry(fileHandle); } catch { return false; } }
 function needFs() { if (!needWriter()) return false; if (!fsSupported) { toast("Saving to files needs Chrome or Edge. You can still export to Excel.", "err"); return false; } return true; }
 function confirmDiscard(action) {
   return !unsavedWork() || confirm(`The current plan has changes that aren't saved to a file.\n\n${action} will replace it in this window. Continue?\n(Tip: cancel and use File → Save a copy first. A backup is also kept under File → Recover replaced copies.)`);
@@ -1425,6 +1441,7 @@ async function newPlanFile() {
   if (!needFs() || !confirmDiscard("Creating a new plan")) return;
   try {
     const h = await showSaveFilePicker({ ...pickerOpts, suggestedName: "plan.db" });
+    if (await isOpenFile(h)) return toast("That's the file this plan is saved in. Pick another name: a new plan would wipe it.", "err");
     const old = unsavedWork() ? exportBytes() : null;
     installDb(null);
     fileHandle = h; filePerm = true; diskRev = null; await rememberHandle(h);
@@ -1457,6 +1474,7 @@ async function saveCopy() {
   if (!needFs()) return;
   try {
     const h = await showSaveFilePicker({ ...pickerOpts, suggestedName: fileHandle ? fileHandle.name.replace(/\.db$/i, "") + " copy.db" : "plan.db" });
+    if (await isOpenFile(h)) return toast("That's the file this plan is already saved in. Pick another name for the copy.", "err");
     // The copy is a new plan from here on: a new file id keeps the two apart (DECISIONS #31, #63).
     run("UPDATE meta SET value=lower(hex(randomblob(8))) WHERE key='file_id'");
     fileHandle = h; filePerm = true; diskRev = null; await rememberHandle(h);
@@ -1723,7 +1741,7 @@ function opIndent(id) {
   const newParent = sib[i - 1];
   insertAt(newParent, null, id);
   renumber(siblingsOf(t.parent_id));
-  dropHierarchyLinks();
+  dropHierarchyLinks(); checkDateCycles();
 }
 
 // Outdent keeps the visual row order: later siblings become children of the outdented task (DECISIONS #27).
@@ -1736,7 +1754,7 @@ function opOutdent(id) {
   insertAt(parent.parent_id, gp.indexOf(parent.id) + 1, id);
   if (later.length) { const kids = siblingsOf(id); later.forEach(x => run("UPDATE task SET parent_id=? WHERE id=?", [id, x])); renumber([...kids, ...later]); }
   renumber(siblingsOf(parent.id));
-  dropHierarchyLinks();
+  dropHierarchyLinks(); checkDateCycles();
 }
 
 function opMove(id, delta) {
@@ -1756,7 +1774,7 @@ function opMoveTo(id, targetId, where) {
     insertAt(target.parent_id, sib.indexOf(targetId) + (where === "after" ? 1 : 0), id);
   }
   if (t.parent_id !== (where === "child" ? targetId : target.parent_id)) renumber(siblingsOf(t.parent_id));
-  dropHierarchyLinks();
+  dropHierarchyLinks(); checkDateCycles();
 }
 
 function opDelete(id) {
@@ -1833,23 +1851,77 @@ function opSetField(id, field, value) {
   }
 }
 
-function depCheck(pred, succ) {
+// Date-order graph of a project: node 2i is task i's start, 2i+1 its finish; an edge u -> v means v can't come
+// before u. Besides the links, a task starts before it finishes and a summary spans its subtasks, so a cycle
+// means some links can never all be met, even when the links alone form no loop (DECISIONS #66).
+// Cached per project while nothing but our own link inserts has changed the database (imports add many links).
+let dateGraphCache = null;
+function dateGraph(pid, skipDep = null) {
+  const tc = scalar("SELECT total_changes()");
+  const c = dateGraphCache;
+  if (skipDep == null && c && c.pid === pid && c.tc === tc && c.gen === dbGen) return c;
+  const tasks = q("SELECT id, parent_id FROM task WHERE project_id=?", [pid]);
+  const ix = new Map(tasks.map((t, i) => [t.id, i])), adj = Array.from({ length: tasks.length * 2 }, () => []);
+  const end = (id, side) => 2 * ix.get(id) + (side === "S" ? 0 : 1);
+  for (const t of tasks) {
+    adj[end(t.id, "S")].push(end(t.id, "F"));
+    if (ix.has(t.parent_id)) { adj[end(t.parent_id, "S")].push(end(t.id, "S")); adj[end(t.id, "F")].push(end(t.parent_id, "F")); }
+  }
+  for (const d of q("SELECT d.id, d.pred_id, d.succ_id, d.type FROM dep d JOIN task t ON t.id=d.succ_id WHERE t.project_id=?", [pid]))
+    if (d.id !== skipDep) adj[end(d.pred_id, d.type[0])].push(end(d.succ_id, d.type[1]));
+  const g = { pid, tc, gen: dbGen, adj, end };
+  if (skipDep == null) dateGraphCache = g;
+  return g;
+}
+function reaches(adj, from, to) {
+  const seen = new Set([from]), stack = [from];
+  while (stack.length) { const u = stack.pop(); if (u === to) return true; for (const v of adj[u]) if (!seen.has(v)) { seen.add(v); stack.push(v); } }
+  return false;
+}
+function hasCycle(adj) {
+  const state = new Uint8Array(adj.length); // 0 new, 1 on the stack, 2 done
+  for (let r = 0; r < adj.length; r++) {
+    if (state[r]) continue;
+    const stack = [[r, 0]]; state[r] = 1;
+    while (stack.length) {
+      const top = stack[stack.length - 1], u = top[0];
+      if (top[1] < adj[u].length) { const v = adj[u][top[1]++]; if (state[v] === 1) return true; if (!state[v]) { state[v] = 1; stack.push([v, 0]); } }
+      else { state[u] = 2; stack.pop(); }
+    }
+  }
+  return false;
+}
+// After indent, outdent or a drag move: refuse a position that makes existing links impossible to meet.
+function checkDateCycles() {
+  if (hasCycle(dateGraph(M.projectId).adj)) throw new Error("That would put a task inside a summary task that its links say must come before or after it. Change the links first");
+}
+
+function depCheck(pred, succ, type = "FS", skipDep = null) {
   if (pred === succ) throw new Error("A task can't depend on itself");
   const a = taskRow(pred), b = taskRow(succ);
   if (a.project_id !== b.project_id) throw new Error("Links between projects aren't supported");
   if (subtreeIds(pred).includes(succ) || subtreeIds(succ).includes(pred)) throw new Error("Can't link a summary task to its own subtask");
   const cyc = scalar("WITH RECURSIVE down(id) AS (SELECT ? UNION SELECT d.succ_id FROM dep d JOIN down ON d.pred_id=down.id) SELECT 1 FROM down WHERE id=?", [succ, pred]);
   if (cyc) throw new Error("That link would create a circular dependency");
+  const g = dateGraph(a.project_id, skipDep);
+  if (reaches(g.adj, g.end(succ, type[1]), g.end(pred, type[0]))) throw new Error("That link would create a circular dependency through a summary task and its subtasks");
 }
 function opAddDep(pred, succ, type = "FS", lag = 0) {
   if (!DEP_TYPES.includes(type)) throw new Error("Unknown link type");
   const existing = one("SELECT id FROM dep WHERE pred_id=? AND succ_id=?", [pred, succ]);
-  if (existing) { run("UPDATE dep SET type=?, lag=? WHERE id=?", [type, Math.round(lag), existing.id]); return existing.id; }
-  depCheck(pred, succ);
+  if (existing) { depCheck(pred, succ, type, existing.id); run("UPDATE dep SET type=?, lag=? WHERE id=?", [type, Math.round(lag), existing.id]); return existing.id; }
+  depCheck(pred, succ, type);
+  const g = dateGraph(taskRow(pred).project_id);
   run("INSERT INTO dep(pred_id, succ_id, type, lag) VALUES (?,?,?,?)", [pred, succ, type, Math.round(lag)]);
+  g.adj[g.end(pred, type[0])].push(g.end(succ, type[1])); g.tc = scalar("SELECT total_changes()"); // keep the cache in step
   return lastId();
 }
-function opUpdateDep(id, type, lag) { if (!DEP_TYPES.includes(type)) throw new Error("Unknown link type"); run("UPDATE dep SET type=?, lag=? WHERE id=?", [type, Math.round(+lag || 0), id]); }
+function opUpdateDep(id, type, lag) {
+  if (!DEP_TYPES.includes(type)) throw new Error("Unknown link type");
+  const d = one("SELECT pred_id, succ_id FROM dep WHERE id=?", [id]); if (!d) throw new Error("Link not found");
+  depCheck(d.pred_id, d.succ_id, type, id);
+  run("UPDATE dep SET type=?, lag=? WHERE id=?", [type, Math.round(+lag || 0), id]);
+}
 function opRemoveDep(id) { run("DELETE FROM dep WHERE id=?", [id]); }
 function opSetPredText(succId, text) {
   const items = parsePredText(text);
@@ -2017,11 +2089,10 @@ function loadRisks() {
   }
 }
 
-// Status: Tested is always set by hand; with linked tasks, Planned until every task is Done, then Implemented;
-// without tasks the hand-set status applies (DECISIONS #53).
+// Status: with linked tasks, Planned until every task is Done, then Implemented, or Tested if set by hand.
+// A hand-set Tested doesn't count while a linked task is still open. Without tasks the hand-set status applies (DECISIONS #53).
 function mitStatus(m) {
-  if (m.status === "Tested") return "Tested";
-  if (m.tasks.length) return m.tasks.every(t => t.ST === "Done") ? "Implemented" : "Planned";
+  if (m.tasks.length) return !m.tasks.every(t => t.ST === "Done") ? "Planned" : m.status === "Tested" ? "Tested" : "Implemented";
   return m.status || "Not started";
 }
 // Achieved: Implemented for a one-off mitigant, Tested for a control (DECISIONS #54).
@@ -2031,6 +2102,7 @@ function mitGaps(m) {
   if (!m.tasks.length && m.eff === "Not started") g.push("No task and not started");
   if (m.is_control && m.eff === "Implemented") g.push("Control implemented but not tested");
   if (m.is_control && m.eff === "Tested" && !m.testing.trim()) g.push("Tested, but no testing notes");
+  if (m.status === "Tested" && m.eff !== "Tested") g.push(`Marked Tested, but ${m.tasks.filter(t => t.ST !== "Done").map(t => "task " + t.wbs).join(", ")} ${m.tasks.filter(t => t.ST !== "Done").length > 1 ? "aren't" : "isn't"} done`);
   for (const t of m.tasks) if (t.F != null && t.F < today && t.ST !== "Done") g.push(`Task ${t.wbs} is overdue`);
   return g;
 }
@@ -2646,9 +2718,11 @@ function backgroundSvg(sc, height, x0 = 0, x1 = sc.width) {
   return s;
 }
 
+// Milestones are drawn at the end of their day, where the link checks place them (DECISIONS #65).
+const msX = (sc, day) => xOf(sc, day + 1);
 // Anchor point of a task end, side "S" or "F".
 function anchor(sc, t, side, y) {
-  if (t.isMilestone) { const cx = xOf(sc, t.S) + sc.px / 2; return { x: side === "S" ? cx - 7 : cx + 7, y }; }
+  if (t.isMilestone) { const cx = msX(sc, t.S); return { x: side === "S" ? cx - 7 : cx + 7, y }; }
   return { x: xOf(sc, side === "S" ? t.S : t.F + 1), y };
 }
 function barSvg(sc, t, y, opts = {}) {
@@ -2658,7 +2732,7 @@ function barSvg(sc, t, y, opts = {}) {
   const cy = y + ROW / 2;
   const label = opts.noLabel ? "" : esc(t.name) + (opts.labelExtra || "");
   if (t.isMilestone) {
-    const cx = xOf(sc, S) + sc.px / 2;
+    const cx = msX(sc, S);
     return `<g class="bar ms${sel}" data-id="${t.id}"><path d="M${cx} ${cy - 8}L${cx + 8} ${cy}L${cx} ${cy + 8}L${cx - 8} ${cy}Z"/>`
       + (opts.print ? "" : `<circle class="hnd" data-side="S" cx="${cx - 13}" cy="${cy}" r="4.5"/><circle class="hnd" data-side="F" cx="${cx + 13}" cy="${cy}" r="4.5"/>`)
       + `<text class="lbl" x="${cx + 21}" y="${cy + 4}">${label}</text></g>`;
@@ -2833,7 +2907,7 @@ function beginLink(e, from, side) {
     if (el && +el.dataset.id !== from.id) {
       const t = M.tasks.get(+el.dataset.id);
       const bx1 = xOf(SC, t.S), bx2 = t.isMilestone ? bx1 + SC.px : xOf(SC, t.F + 1);
-      tside = p.x < (bx1 + bx2) / 2 ? "S" : "F";
+      tside = p.x < (t.isMilestone ? msX(SC, t.S) : (bx1 + bx2) / 2) ? "S" : "F";
       target = t; el.classList.add("target");
       const type = (side === "F" ? "F" : "S") + tside;
       showTip(ev, `${DEP_NAMES[type]}: ${from.wbs} → ${t.wbs} ${t.name}`);
@@ -4295,10 +4369,30 @@ function autoMap(headers) {
   return map;
 }
 
+// CSV text is UTF-8 when it decodes cleanly; otherwise it's what Excel's plain "CSV (Comma delimited)" writes
+// on Western Windows (Windows-1252), so "José" doesn't turn into "Jos�" (DECISIONS #67).
+function decodeCsv(buf) {
+  try { return { text: new TextDecoder("utf-8", { fatal: true }).decode(buf), encoding: "utf-8" }; }
+  catch { return { text: new TextDecoder("windows-1252").decode(buf), encoding: "windows-1252" }; }
+}
 function readWorkbook(file, buf) {
   const isCsv = /\.(csv|txt|tsv)$/i.test(file.name);
-  const wb = isCsv ? XLSX.read(new TextDecoder().decode(buf), { type: "string", raw: true }) : XLSX.read(buf, { type: "array", cellDates: false });
-  return { wb, isCsv, date1904: !!wb.Workbook?.WBProps?.date1904 };
+  const csv = isCsv ? decodeCsv(buf) : null;
+  const wb = isCsv ? XLSX.read(csv.text, { type: "string", raw: true }) : XLSX.read(buf, { type: "array", cellDates: false });
+  return { wb, isCsv, encoding: csv?.encoding ?? null, date1904: !!wb.Workbook?.WBProps?.date1904 };
+}
+// The task id an ID cell refers to: whole numbers only, so "12b", "1.9" or "1,234" never update task 12, 1 or 1.
+const idKey = v => { const s = String(v ?? "").trim(); return /^\d+$/.test(s) ? String(+s) : null; };
+// Update mode: which rows update which existing task. Only the first row with a given ID does; later copies
+// (a row copied and pasted to make a new task) are added as new tasks (DECISIONS #67).
+function updateMatches(plan, taskIds) {
+  const match = new Map(), seen = new Set(), dupRows = [];
+  for (const it of plan.items) {
+    const k = idKey(it.srcId); if (k == null || !taskIds.has(k)) continue;
+    if (seen.has(k)) { dupRows.push(it.rowNo); continue; }
+    seen.add(k); match.set(it, taskIds.get(k));
+  }
+  return { match, dupRows };
 }
 function sheetRows(ws) {
   const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "", blankrows: false });
@@ -4322,12 +4416,12 @@ function startImport() {
 }
 
 async function loadImportFile(name, buf) {
-  const { wb, isCsv, date1904 } = readWorkbook({ name }, buf);
+  const { wb, isCsv, encoding, date1904 } = readWorkbook({ name }, buf);
   const meta = readMeta(wb);
   const sheetName = meta && wb.Sheets.Tasks ? "Tasks" : wb.SheetNames.find(n => n !== "_meta") || wb.SheetNames[0];
   // Default to "update" only for an export of this same project from this same .db (ids mean nothing elsewhere).
   const sameFile = meta && +meta.project_id === M.projectId && meta.file_id && meta.file_id === scalar("SELECT value FROM meta WHERE key='file_id'");
-  W = { fileName: name, wb, isCsv, date1904, meta, sheetName, headerRow: 0, map: {}, hierarchy: "auto", predRef: "auto", dateOrder: "MDY", mode: sameFile ? "update" : "new", projectName: (meta?.project || name.replace(/\.[^.]+$/, "")), statusMap: {}, peopleMap: {}, step: 1 };
+  W = { fileName: name, wb, isCsv, encoding, sameFile: !!sameFile, updateConfirmed: false, date1904, meta, sheetName, headerRow: 0, map: {}, hierarchy: "auto", predRef: "auto", dateOrder: "MDY", mode: sameFile ? "update" : "new", projectName: (meta?.project || name.replace(/\.[^.]+$/, "")), statusMap: {}, peopleMap: {}, step: 1 };
   loadSheet();
   renderWizard();
 }
@@ -4586,10 +4680,11 @@ function applyPlan(plan, people) {
 
   // tasks
   const existing = W.mode === "update" ? new Map(q("SELECT id FROM task WHERE project_id=?", [pid]).map(r => [String(r.id), r.id])) : new Map();
+  const { match: matches } = W.mode === "update" ? updateMatches(plan, existing) : { match: new Map() };
   const nextPos = new Map(); const posFor = parent => { if (!nextPos.has(parent)) nextPos.set(parent, scalar("SELECT COALESCE(MAX(position)+1,0) FROM task WHERE project_id=? AND parent_id IS ?", [pid, parent])); const p = nextPos.get(parent); nextPos.set(parent, p + 1); return p; };
   const mapped = k => colOf(k) >= 0;
   for (const it of plan.items) {
-    const match = W.mode === "update" && it.srcId && existing.get(String(parseInt(it.srcId, 10)));
+    const match = matches.get(it);
     if (match) {
       it.taskId = match;
       const cols = { name: it.name };
@@ -4623,10 +4718,13 @@ function applyPlan(plan, people) {
       if (plan.predMode === "id" && it.srcId) ref.set(it.srcId, it);
       if (plan.predMode === "row") ref.set(String(it.r + 1), it);
     }
-    const inSheet = plan.items.map(i => i.taskId);
+    // Update mode replaces only links between tasks that are both in the sheet; links from rows a teammate removed survive.
+    // They all go first, so a link reversed in the sheet doesn't trip over the old one.
+    if (W.mode === "update") {
+      const inSheet = JSON.stringify(plan.items.map(i => i.taskId)), matched = JSON.stringify(plan.items.filter(i => existing.has(String(i.taskId))).map(i => i.taskId));
+      run("DELETE FROM dep WHERE succ_id IN (SELECT value FROM json_each(?)) AND pred_id IN (SELECT value FROM json_each(?))", [matched, inSheet]);
+    }
     for (const it of plan.items) {
-      // Update mode replaces only links between tasks that are both in the sheet; links from rows a teammate removed survive.
-      if (W.mode === "update" && existing.has(String(it.taskId))) run(`DELETE FROM dep WHERE succ_id=? AND pred_id IN (${inSheet.map(() => "?").join(",")})`, [it.taskId, ...inSheet]);
       for (const tok of String(it.pred || "").split(/[,;]+/).map(s => s.trim()).filter(Boolean)) {
         const m = /^(.+?)\s*(FS|SS|FF|SF)?\s*(?:([+-])\s*(\d+(?:\.\d+)?)\s*(d|days?|w|wks?|weeks?|ed|edays?|h|hrs?)?)?$/i.exec(tok);
         const target = m && ref.get(m[1].trim().replace(/\.$/, ""));
@@ -4724,10 +4822,22 @@ function renderWizard() {
     mode.addEventListener("change", () => { W.mode = mode.value; renderWizard(); });
     pname.addEventListener("input", () => W.projectName = pname.value);
     body.append(h("div", { class: "opts" }, h("label", {}, "Import into", mode), W.mode === "new" ? h("label", {}, "New project name", pname) : h("span")));
+    if (W.encoding === "windows-1252") body.append(h("div", { class: "msg" }, "This CSV isn't UTF-8, so it was read as Windows-1252 (Excel's plain “CSV (Comma delimited)”). Check that accented names look right below."));
+    let needConfirm = false;
     if (W.mode === "update") {
-      const ids = new Set(M.order.map(t => String(t.id)));
-      const n = plan.items.filter(it => it.srcId && ids.has(String(parseInt(it.srcId, 10)))).length;
+      const { match, dupRows } = updateMatches(plan, new Map(M.order.map(t => [String(t.id), t.id])));
+      const n = match.size;
       body.append(h("div", { class: colOf("id") < 0 ? "msg err" : "msg" }, colOf("id") < 0 ? "Map an ID column to update existing tasks." : `${n} rows match existing tasks and will be updated; ${plan.items.length - n} new rows will be added. Hierarchy of existing tasks isn't changed.`));
+      if (dupRows.length) body.append(h("div", { class: "msg warn" }, `${dupRows.length === 1 ? "Row" : "Rows"} ${dupRows.slice(0, 20).join(", ")}${dupRows.length > 20 ? "…" : ""} repeat an ID used by an earlier row, so they'll be added as new tasks instead of overwriting it.`));
+      // Task ids restart at 1 in every file, so updating from another file's sheet overwrites unrelated tasks (DECISIONS #31).
+      if (!W.sameFile && colOf("id") >= 0) {
+        needConfirm = !W.updateConfirmed;
+        const cb = h("input", { type: "checkbox", checked: W.updateConfirmed });
+        cb.addEventListener("change", () => { W.updateConfirmed = cb.checked; renderWizard(); });
+        body.append(h("div", { class: "msg err" }, W.isCsv ? "A CSV doesn't record which plan it came from. " : "This workbook wasn't exported from this plan file and project. ",
+          "IDs only mean something in the plan they came from: in any other plan they'd overwrite unrelated tasks. ",
+          h("label", { style: { display: "block", marginTop: "6px", fontWeight: 600 } }, cb, " This sheet came from this project: update tasks by ID anyway")));
+      }
     }
     for (const e of plan.errors) body.append(h("div", { class: "msg err" }, e));
     body.append(h("p", {}, `${plan.items.length} tasks · hierarchy from `, h("b", {}, plan.mode), colOf("pred") >= 0 ? ` · predecessors by ${plan.predMode}` : ""));
@@ -4739,7 +4849,7 @@ function renderWizard() {
     for (const it of plan.items.slice(0, 400)) rows.push([it.newWbs, "  ".repeat(it.depth) + (it.kind === "milestone" ? "◆ " : "") + it.name, fmtYMD(it.start), fmtYMD(it.finish), it.status || "", it.percent ?? "", (it.people.R || []).join(", "), (it.people.A || []).join(", ")]);
     body.append(previewTable(rows, true));
     if (plan.items.length > 400) body.append(h("p", { class: "hint" }, `…and ${plan.items.length - 400} more.`));
-    const go = h("button", { class: "primary", disabled: !!plan.errors.length || (W.mode === "update" && colOf("id") < 0), onclick: () => doImport() }, `Import ${plan.items.length} tasks`);
+    const go = h("button", { class: "primary", disabled: !!plan.errors.length || needConfirm || (W.mode === "update" && colOf("id") < 0), onclick: () => doImport() }, `Import ${plan.items.length} tasks`);
     foot.append(back, go);
   }
   const keep = W._lastStep === W.step ? $("modal").querySelector(".modal-b")?.scrollTop : 0;

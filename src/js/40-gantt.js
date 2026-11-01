@@ -98,9 +98,11 @@ function backgroundSvg(sc, height, x0 = 0, x1 = sc.width) {
   return s;
 }
 
+// Milestones are drawn at the end of their day, where the link checks place them (DECISIONS #65).
+const msX = (sc, day) => xOf(sc, day + 1);
 // Anchor point of a task end, side "S" or "F".
 function anchor(sc, t, side, y) {
-  if (t.isMilestone) { const cx = xOf(sc, t.S) + sc.px / 2; return { x: side === "S" ? cx - 7 : cx + 7, y }; }
+  if (t.isMilestone) { const cx = msX(sc, t.S); return { x: side === "S" ? cx - 7 : cx + 7, y }; }
   return { x: xOf(sc, side === "S" ? t.S : t.F + 1), y };
 }
 function barSvg(sc, t, y, opts = {}) {
@@ -110,7 +112,7 @@ function barSvg(sc, t, y, opts = {}) {
   const cy = y + ROW / 2;
   const label = opts.noLabel ? "" : esc(t.name) + (opts.labelExtra || "");
   if (t.isMilestone) {
-    const cx = xOf(sc, S) + sc.px / 2;
+    const cx = msX(sc, S);
     return `<g class="bar ms${sel}" data-id="${t.id}"><path d="M${cx} ${cy - 8}L${cx + 8} ${cy}L${cx} ${cy + 8}L${cx - 8} ${cy}Z"/>`
       + (opts.print ? "" : `<circle class="hnd" data-side="S" cx="${cx - 13}" cy="${cy}" r="4.5"/><circle class="hnd" data-side="F" cx="${cx + 13}" cy="${cy}" r="4.5"/>`)
       + `<text class="lbl" x="${cx + 21}" y="${cy + 4}">${label}</text></g>`;
@@ -285,7 +287,7 @@ function beginLink(e, from, side) {
     if (el && +el.dataset.id !== from.id) {
       const t = M.tasks.get(+el.dataset.id);
       const bx1 = xOf(SC, t.S), bx2 = t.isMilestone ? bx1 + SC.px : xOf(SC, t.F + 1);
-      tside = p.x < (bx1 + bx2) / 2 ? "S" : "F";
+      tside = p.x < (t.isMilestone ? msX(SC, t.S) : (bx1 + bx2) / 2) ? "S" : "F";
       target = t; el.classList.add("target");
       const type = (side === "F" ? "F" : "S") + tside;
       showTip(ev, `${DEP_NAMES[type]}: ${from.wbs} → ${t.wbs} ${t.name}`);

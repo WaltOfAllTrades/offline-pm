@@ -915,6 +915,55 @@ await test("form-review", "Gantt lines up with the outline again after closing t
       eq(nameIn(h.store)[1], ["base", "m1", "m2"], "browser copy written"); ok((await newestBackup(t0))?.file === "t.db", "file's version kept");
     } finally { P.db.attach(null); await P.db.idb.del("backups"); }
   });
+
+  // ---------- High-tier fixes (DECISIONS #65–#68) ----------
+  await test("violation", "a milestone falls at the end of its day", () => {
+    fresh(); const uat = T("UAT", null, "2026-11-02", "2026-11-06"), go = T("Go-live", null, "2026-11-06", "2026-11-06", { kind: "milestone" }), thu = T("Early", null, "2026-11-05", "2026-11-05", { kind: "milestone" });
+    const after = T("Hypercare", null, "2026-11-06", "2026-11-06"), mon = T("Retro", null, "2026-11-09", "2026-11-09");
+    m(() => { O.opAddDep(uat, go); O.opAddDep(uat, thu); O.opAddDep(go, after); O.opAddDep(go, mon); });
+    const v = (p, s) => P.M.deps.find(d => d.pred_id === p && d.succ_id === s).violated;
+    eq([v(uat, go), v(uat, thu), v(go, after), v(go, mon)], [false, true, true, false], "same-day milestone ok; day before conflicts; successor waits for the next working day");
+  });
+  await test("deps", "cycles through a summary task and its subtasks are refused, including after indent", () => {
+    fresh(); const p2 = T("P"), k2 = T("K", p2), c2 = T("C", p2), y2 = T("Y");
+    m(() => O.opAddDep(c2, y2));
+    ok(!P.mutate("t", () => O.opAddDep(y2, p2)), "Y→P refused when P contains C and C→Y");
+    eq(P.M.deps.length, 1);
+    fresh(); const p3 = T("P"), k3 = T("K", p3), c3 = T("C"), y3 = T("Y");
+    m(() => { O.opAddDep(c3, y3); O.opAddDep(y3, p3); });
+    ok(!P.mutate("t", () => O.opIndent(c3)), "indenting C under P refused"); eq(task(c3).parent_id, null);
+    ok(!P.mutate("t", () => O.opAddDep(k3, y3, "SS")), "K (inside P, after Y) can't start before Y starts");
+    const z3 = T("Z"); m(() => O.opAddDep(y3, z3)); eq(P.M.deps.length, 3, "unrelated links still allowed");
+  });
+  await test("risks", "a hand-set Tested only counts once the linked tasks are done", () => {
+    fresh(); const t1 = T("Build control"); let r, c;
+    m(() => { r = O.opAddRisk({ name: "Fraud" }); c = O.opAddMitigant(r, "Dual approval", null, { is_control: 1 }); O.opLinkTask(c, t1); O.opUpdateMitigant(c, { status: "Tested" }); });
+    eq([mt(c).eff, mt(c).achieved, rk(r).status], ["Planned", false, "Mitigating"]);
+    ok(mt(c).gaps.some(g => /Marked Tested, but task 1 isn't done/.test(g)), "gap names the open task");
+    m(() => O.opSetField(t1, "status", "Done")); eq([mt(c).eff, mt(c).achieved, rk(r).status], ["Tested", true, "Mitigated"]);
+  });
+  await test("import-update", "duplicate and malformed IDs never overwrite the wrong task; ANSI CSV keeps accents", async () => {
+    fresh(); const a = T("Alpha"), b = T("Beta");
+    const wb = P.io.exportWorkbook(); const ws = wb.Sheets.Tasks;
+    XL.utils.sheet_add_aoa(ws, [["", String(a), 1, "Alpha copy", "Task"], ["", `${b}b`, 1, "Beta-ish", "Task"]], { origin: -1 });
+    const { rep } = await runImport("dup.xlsx", XL.write(wb, { type: "array", bookType: "xlsx" }), W => eq(W.mode, "update"));
+    eq([rep.updated, rep.added], [2, 2], "first row with an ID updates it; the copy and '2b' are added");
+    eq(P.M.order.map(t => t.name), ["Alpha", "Beta", "Alpha copy", "Beta-ish"]);
+    const ansi = new Uint8Array([...new TextEncoder().encode("Name,Start\nJos"), 0xE9, ...new TextEncoder().encode(" Garc"), 0xED, ...new TextEncoder().encode("a,2026-03-02\n")]);
+    const r2 = await runImport("ansi.csv", ansi, W => { eq([W.encoding, W.sameFile], ["windows-1252", false]); W.mode = "new"; });
+    eq(P.M.order.map(t => t.name), ["José García"]);
+  });
+  await test("save-safety", "a failed disk write is retried", async () => {
+    fresh(); let fails = 1, store = null;
+    const h = { name: "r.db", async getFile() { return new File([store || new Uint8Array()], "r.db"); },
+      async createWritable() { if (fails-- > 0) throw new DOMException("locked", "NoModificationAllowedError"); let d; return { async write(b) { d = b; }, async close() { store = new Uint8Array(d); } }; } };
+    try {
+      P.db.attach(h, null); T("x"); await P.flushSaves();
+      ok(P.db.diskRev !== P.db.rev && !store, "first write failed");
+      await new Promise(r => setTimeout(r, 2600)); await P.flushSaves();
+      eq(P.db.diskRev, P.db.rev, "retried and caught up"); ok(store?.length, "file written");
+    } finally { P.db.attach(null); }
+  });
   P.reset();
   const failed = results.filter(r => !r.pass);
   return { total: results.length, passed: results.length - failed.length, failed };

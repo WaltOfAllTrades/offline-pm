@@ -50,11 +50,12 @@ function wdIndex(n) { const m = n + 3; const w = Math.floor(m / 7), r = m - w * 
 // Day number of working-day index i.
 function wdDay(i) { const w = Math.floor(i / 5), r = i - w * 5; return w * 7 + r - 3; }
 const nextWorkday = n => wdDay(wdIndex(n));
-// Half-open working-day span of a task: [s, e). Milestones have e === s.
+// Half-open working-day span of a task: [s, e). A milestone falls at the end of its day (as MS Project's
+// 5 pm finish), so a predecessor finishing that day doesn't conflict with it (DECISIONS #65).
 function span(start, finish, milestone) {
   if (start == null) return null;
+  if (milestone) { const m = wdIndex(start + 1); return { s: m, e: m }; }
   const s = wdIndex(start);
-  if (milestone) return { s, e: s };
   const e = wdIndex((finish ?? start) + 1);
   return { s, e: Math.max(e, s) };
 }

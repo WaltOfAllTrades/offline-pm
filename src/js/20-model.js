@@ -206,7 +206,7 @@ function opIndent(id) {
   const newParent = sib[i - 1];
   insertAt(newParent, null, id);
   renumber(siblingsOf(t.parent_id));
-  dropHierarchyLinks();
+  dropHierarchyLinks(); checkDateCycles();
 }
 
 // Outdent keeps the visual row order: later siblings become children of the outdented task (DECISIONS #27).
@@ -219,7 +219,7 @@ function opOutdent(id) {
   insertAt(parent.parent_id, gp.indexOf(parent.id) + 1, id);
   if (later.length) { const kids = siblingsOf(id); later.forEach(x => run("UPDATE task SET parent_id=? WHERE id=?", [id, x])); renumber([...kids, ...later]); }
   renumber(siblingsOf(parent.id));
-  dropHierarchyLinks();
+  dropHierarchyLinks(); checkDateCycles();
 }
 
 function opMove(id, delta) {
@@ -239,7 +239,7 @@ function opMoveTo(id, targetId, where) {
     insertAt(target.parent_id, sib.indexOf(targetId) + (where === "after" ? 1 : 0), id);
   }
   if (t.parent_id !== (where === "child" ? targetId : target.parent_id)) renumber(siblingsOf(t.parent_id));
-  dropHierarchyLinks();
+  dropHierarchyLinks(); checkDateCycles();
 }
 
 function opDelete(id) {
@@ -316,23 +316,77 @@ function opSetField(id, field, value) {
   }
 }
 
-function depCheck(pred, succ) {
+// Date-order graph of a project: node 2i is task i's start, 2i+1 its finish; an edge u -> v means v can't come
+// before u. Besides the links, a task starts before it finishes and a summary spans its subtasks, so a cycle
+// means some links can never all be met, even when the links alone form no loop (DECISIONS #66).
+// Cached per project while nothing but our own link inserts has changed the database (imports add many links).
+let dateGraphCache = null;
+function dateGraph(pid, skipDep = null) {
+  const tc = scalar("SELECT total_changes()");
+  const c = dateGraphCache;
+  if (skipDep == null && c && c.pid === pid && c.tc === tc && c.gen === dbGen) return c;
+  const tasks = q("SELECT id, parent_id FROM task WHERE project_id=?", [pid]);
+  const ix = new Map(tasks.map((t, i) => [t.id, i])), adj = Array.from({ length: tasks.length * 2 }, () => []);
+  const end = (id, side) => 2 * ix.get(id) + (side === "S" ? 0 : 1);
+  for (const t of tasks) {
+    adj[end(t.id, "S")].push(end(t.id, "F"));
+    if (ix.has(t.parent_id)) { adj[end(t.parent_id, "S")].push(end(t.id, "S")); adj[end(t.id, "F")].push(end(t.parent_id, "F")); }
+  }
+  for (const d of q("SELECT d.id, d.pred_id, d.succ_id, d.type FROM dep d JOIN task t ON t.id=d.succ_id WHERE t.project_id=?", [pid]))
+    if (d.id !== skipDep) adj[end(d.pred_id, d.type[0])].push(end(d.succ_id, d.type[1]));
+  const g = { pid, tc, gen: dbGen, adj, end };
+  if (skipDep == null) dateGraphCache = g;
+  return g;
+}
+function reaches(adj, from, to) {
+  const seen = new Set([from]), stack = [from];
+  while (stack.length) { const u = stack.pop(); if (u === to) return true; for (const v of adj[u]) if (!seen.has(v)) { seen.add(v); stack.push(v); } }
+  return false;
+}
+function hasCycle(adj) {
+  const state = new Uint8Array(adj.length); // 0 new, 1 on the stack, 2 done
+  for (let r = 0; r < adj.length; r++) {
+    if (state[r]) continue;
+    const stack = [[r, 0]]; state[r] = 1;
+    while (stack.length) {
+      const top = stack[stack.length - 1], u = top[0];
+      if (top[1] < adj[u].length) { const v = adj[u][top[1]++]; if (state[v] === 1) return true; if (!state[v]) { state[v] = 1; stack.push([v, 0]); } }
+      else { state[u] = 2; stack.pop(); }
+    }
+  }
+  return false;
+}
+// After indent, outdent or a drag move: refuse a position that makes existing links impossible to meet.
+function checkDateCycles() {
+  if (hasCycle(dateGraph(M.projectId).adj)) throw new Error("That would put a task inside a summary task that its links say must come before or after it. Change the links first");
+}
+
+function depCheck(pred, succ, type = "FS", skipDep = null) {
   if (pred === succ) throw new Error("A task can't depend on itself");
   const a = taskRow(pred), b = taskRow(succ);
   if (a.project_id !== b.project_id) throw new Error("Links between projects aren't supported");
   if (subtreeIds(pred).includes(succ) || subtreeIds(succ).includes(pred)) throw new Error("Can't link a summary task to its own subtask");
   const cyc = scalar("WITH RECURSIVE down(id) AS (SELECT ? UNION SELECT d.succ_id FROM dep d JOIN down ON d.pred_id=down.id) SELECT 1 FROM down WHERE id=?", [succ, pred]);
   if (cyc) throw new Error("That link would create a circular dependency");
+  const g = dateGraph(a.project_id, skipDep);
+  if (reaches(g.adj, g.end(succ, type[1]), g.end(pred, type[0]))) throw new Error("That link would create a circular dependency through a summary task and its subtasks");
 }
 function opAddDep(pred, succ, type = "FS", lag = 0) {
   if (!DEP_TYPES.includes(type)) throw new Error("Unknown link type");
   const existing = one("SELECT id FROM dep WHERE pred_id=? AND succ_id=?", [pred, succ]);
-  if (existing) { run("UPDATE dep SET type=?, lag=? WHERE id=?", [type, Math.round(lag), existing.id]); return existing.id; }
-  depCheck(pred, succ);
+  if (existing) { depCheck(pred, succ, type, existing.id); run("UPDATE dep SET type=?, lag=? WHERE id=?", [type, Math.round(lag), existing.id]); return existing.id; }
+  depCheck(pred, succ, type);
+  const g = dateGraph(taskRow(pred).project_id);
   run("INSERT INTO dep(pred_id, succ_id, type, lag) VALUES (?,?,?,?)", [pred, succ, type, Math.round(lag)]);
+  g.adj[g.end(pred, type[0])].push(g.end(succ, type[1])); g.tc = scalar("SELECT total_changes()"); // keep the cache in step
   return lastId();
 }
-function opUpdateDep(id, type, lag) { if (!DEP_TYPES.includes(type)) throw new Error("Unknown link type"); run("UPDATE dep SET type=?, lag=? WHERE id=?", [type, Math.round(+lag || 0), id]); }
+function opUpdateDep(id, type, lag) {
+  if (!DEP_TYPES.includes(type)) throw new Error("Unknown link type");
+  const d = one("SELECT pred_id, succ_id FROM dep WHERE id=?", [id]); if (!d) throw new Error("Link not found");
+  depCheck(d.pred_id, d.succ_id, type, id);
+  run("UPDATE dep SET type=?, lag=? WHERE id=?", [type, Math.round(+lag || 0), id]);
+}
 function opRemoveDep(id) { run("DELETE FROM dep WHERE id=?", [id]); }
 function opSetPredText(succId, text) {
   const items = parsePredText(text);

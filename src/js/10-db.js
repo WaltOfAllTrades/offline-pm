@@ -23,7 +23,9 @@ const lastId = () => scalar("SELECT last_insert_rowid()");
 const nowIso = () => new Date().toISOString().slice(0, 19).replace("T", " ");
 
 // sql.js export() closes and reopens the connection, which resets pragmas (DECISIONS #23).
-function exportBytes() { const b = db.export(); db.run("PRAGMA foreign_keys = ON"); return b; }
+// dbGen counts reopenings (export, install, undo), which reset SQLite's total_changes(); caches key on both.
+let dbGen = 0;
+function exportBytes() { const b = db.export(); dbGen++; db.run("PRAGMA foreign_keys = ON"); return b; }
 
 const SCHEMA_V1 = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -247,7 +249,7 @@ function installDb(bytes) {
     if (fixed) note = (note ? note + " " : "") + `Repaired ${fixed} invalid ${fixed === 1 ? "row" : "rows"} in the file.`;
   } catch (e) { d.close(); throw e; }
   if (db) db.close();
-  db = d;
+  db = d; dbGen++;
   db.run("PRAGMA foreign_keys = ON");
   if (!scalar("SELECT COUNT(*) FROM project")) run("INSERT INTO project(name, created_at) VALUES ('My project', ?)", [nowIso()]);
   rev = readRev(db);
@@ -286,7 +288,7 @@ function afterChange(desc) { hooks.onChange(); queueSave(desc); }
 // Undo/redo bring back an earlier state of the plan, but never an earlier file id (DECISIONS #63).
 function restoreSnapshot(bytes, desc) {
   const next = rev + 1, fid = readFileId(db);
-  db.close(); db = new SQL.Database(bytes); db.run("PRAGMA foreign_keys = ON");
+  db.close(); db = new SQL.Database(bytes); dbGen++; db.run("PRAGMA foreign_keys = ON");
   if (fid) run("UPDATE meta SET value=? WHERE key='file_id'", [fid]);
   rev = next; run("UPDATE meta SET value=? WHERE key='rev'", [String(rev)]);
   afterChange(desc);
@@ -354,6 +356,16 @@ const hasWork = () => !!scalar("SELECT (SELECT COUNT(*) FROM task) + (SELECT COU
 
 // ---------- Save queue: serialized, coalesced, disk first then buffer ----------
 let syncing = false; // comparing the file with the buffer: no disk writes until that's decided
+// A failed disk write (file locked by antivirus or a sync client, say) is retried with growing gaps (DECISIONS #68).
+const RETRY_SECS = [2, 5, 15, 30, 60];
+let retryTimer = null, retryN = 0;
+function scheduleRetry(target) {
+  if (retryTimer) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    if (fileHandle === target && filePerm && diskRev !== rev) queueSave(`Retry write to file (attempt ${retryN + 1})`);
+  }, RETRY_SECS[Math.min(retryN++, RETRY_SECS.length - 1)] * 1000);
+}
 function queueSave(desc) {
   pendingReasons.push(desc); pending = true; hooks.onSaveState();
   if (!saving) drain();
@@ -376,11 +388,11 @@ async function drain() {
             const t0 = performance.now();
             const w = await target.createWritable(); // temp file swapped in on close() → atomic
             await w.write(bytes); await w.close();
-            entry.disk = "ok"; entry.diskMs = Math.round(performance.now() - t0);
+            entry.disk = "ok"; entry.diskMs = Math.round(performance.now() - t0); retryN = 0;
             if (fileHandle === target) { diskRev = r; lastDiskAt = Date.now(); }
           } catch (e) {
             entry.disk = "fail"; errs.push("Disk: " + e.message);
-            if (e.name === "NotAllowedError") filePerm = false;
+            if (e.name === "NotAllowedError") filePerm = false; else scheduleRetry(target);
           }
         }
         if (!readOnly) {
@@ -402,7 +414,8 @@ async function drain() {
   }
 }
 async function flushSaves() { while (saving || pending) await sleep(20); }
-window.addEventListener("beforeunload", e => { if (saving || pending) { e.preventDefault(); e.returnValue = ""; } });
+// Warn while a save is under way, or while the connected file is behind (a write failed and hasn't been retried yet).
+window.addEventListener("beforeunload", e => { if (!readOnly && (saving || pending || (fileHandle && filePerm && diskRev !== rev))) { e.preventDefault(); e.returnValue = ""; } });
 
 function logInfo(text) { saveLog.unshift({ info: text, at: Date.now() }); if (saveLog.length > 80) saveLog.pop(); hooks.onSaveState(); }
 
@@ -468,6 +481,8 @@ async function rememberHandle(h) {
   try { await idb.set("mirror", { rev, bytes: exportBytes(), ts: Date.now(), file: h.name, fileId: readFileId(db), disk: diskRev }); mirrorRev = rev; } catch { }
   await idb.set("handle", h);
 }
+// Is h the file this plan is saved in? (Chrome asks "Replace?" but that's easy to click through.)
+async function isOpenFile(h) { try { return !!fileHandle && await h.isSameEntry(fileHandle); } catch { return false; } }
 function needFs() { if (!needWriter()) return false; if (!fsSupported) { toast("Saving to files needs Chrome or Edge. You can still export to Excel.", "err"); return false; } return true; }
 function confirmDiscard(action) {
   return !unsavedWork() || confirm(`The current plan has changes that aren't saved to a file.\n\n${action} will replace it in this window. Continue?\n(Tip: cancel and use File → Save a copy first. A backup is also kept under File → Recover replaced copies.)`);
@@ -477,6 +492,7 @@ async function newPlanFile() {
   if (!needFs() || !confirmDiscard("Creating a new plan")) return;
   try {
     const h = await showSaveFilePicker({ ...pickerOpts, suggestedName: "plan.db" });
+    if (await isOpenFile(h)) return toast("That's the file this plan is saved in. Pick another name: a new plan would wipe it.", "err");
     const old = unsavedWork() ? exportBytes() : null;
     installDb(null);
     fileHandle = h; filePerm = true; diskRev = null; await rememberHandle(h);
@@ -509,6 +525,7 @@ async function saveCopy() {
   if (!needFs()) return;
   try {
     const h = await showSaveFilePicker({ ...pickerOpts, suggestedName: fileHandle ? fileHandle.name.replace(/\.db$/i, "") + " copy.db" : "plan.db" });
+    if (await isOpenFile(h)) return toast("That's the file this plan is already saved in. Pick another name for the copy.", "err");
     // The copy is a new plan from here on: a new file id keeps the two apart (DECISIONS #31, #63).
     run("UPDATE meta SET value=lower(hex(randomblob(8))) WHERE key='file_id'");
     fileHandle = h; filePerm = true; diskRev = null; await rememberHandle(h);

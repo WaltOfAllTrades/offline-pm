@@ -29,11 +29,10 @@ function loadRisks() {
   }
 }
 
-// Status: Tested is always set by hand; with linked tasks, Planned until every task is Done, then Implemented;
-// without tasks the hand-set status applies (DECISIONS #53).
+// Status: with linked tasks, Planned until every task is Done, then Implemented, or Tested if set by hand.
+// A hand-set Tested doesn't count while a linked task is still open. Without tasks the hand-set status applies (DECISIONS #53).
 function mitStatus(m) {
-  if (m.status === "Tested") return "Tested";
-  if (m.tasks.length) return m.tasks.every(t => t.ST === "Done") ? "Implemented" : "Planned";
+  if (m.tasks.length) return !m.tasks.every(t => t.ST === "Done") ? "Planned" : m.status === "Tested" ? "Tested" : "Implemented";
   return m.status || "Not started";
 }
 // Achieved: Implemented for a one-off mitigant, Tested for a control (DECISIONS #54).
@@ -43,6 +42,7 @@ function mitGaps(m) {
   if (!m.tasks.length && m.eff === "Not started") g.push("No task and not started");
   if (m.is_control && m.eff === "Implemented") g.push("Control implemented but not tested");
   if (m.is_control && m.eff === "Tested" && !m.testing.trim()) g.push("Tested, but no testing notes");
+  if (m.status === "Tested" && m.eff !== "Tested") g.push(`Marked Tested, but ${m.tasks.filter(t => t.ST !== "Done").map(t => "task " + t.wbs).join(", ")} ${m.tasks.filter(t => t.ST !== "Done").length > 1 ? "aren't" : "isn't"} done`);
   for (const t of m.tasks) if (t.F != null && t.F < today && t.ST !== "Done") g.push(`Task ${t.wbs} is overdue`);
   return g;
 }

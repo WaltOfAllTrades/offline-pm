@@ -47,10 +47,30 @@ function autoMap(headers) {
   return map;
 }
 
+// CSV text is UTF-8 when it decodes cleanly; otherwise it's what Excel's plain "CSV (Comma delimited)" writes
+// on Western Windows (Windows-1252), so "José" doesn't turn into "Jos�" (DECISIONS #67).
+function decodeCsv(buf) {
+  try { return { text: new TextDecoder("utf-8", { fatal: true }).decode(buf), encoding: "utf-8" }; }
+  catch { return { text: new TextDecoder("windows-1252").decode(buf), encoding: "windows-1252" }; }
+}
 function readWorkbook(file, buf) {
   const isCsv = /\.(csv|txt|tsv)$/i.test(file.name);
-  const wb = isCsv ? XLSX.read(new TextDecoder().decode(buf), { type: "string", raw: true }) : XLSX.read(buf, { type: "array", cellDates: false });
-  return { wb, isCsv, date1904: !!wb.Workbook?.WBProps?.date1904 };
+  const csv = isCsv ? decodeCsv(buf) : null;
+  const wb = isCsv ? XLSX.read(csv.text, { type: "string", raw: true }) : XLSX.read(buf, { type: "array", cellDates: false });
+  return { wb, isCsv, encoding: csv?.encoding ?? null, date1904: !!wb.Workbook?.WBProps?.date1904 };
+}
+// The task id an ID cell refers to: whole numbers only, so "12b", "1.9" or "1,234" never update task 12, 1 or 1.
+const idKey = v => { const s = String(v ?? "").trim(); return /^\d+$/.test(s) ? String(+s) : null; };
+// Update mode: which rows update which existing task. Only the first row with a given ID does; later copies
+// (a row copied and pasted to make a new task) are added as new tasks (DECISIONS #67).
+function updateMatches(plan, taskIds) {
+  const match = new Map(), seen = new Set(), dupRows = [];
+  for (const it of plan.items) {
+    const k = idKey(it.srcId); if (k == null || !taskIds.has(k)) continue;
+    if (seen.has(k)) { dupRows.push(it.rowNo); continue; }
+    seen.add(k); match.set(it, taskIds.get(k));
+  }
+  return { match, dupRows };
 }
 function sheetRows(ws) {
   const raw = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "", blankrows: false });
@@ -74,12 +94,12 @@ function startImport() {
 }
 
 async function loadImportFile(name, buf) {
-  const { wb, isCsv, date1904 } = readWorkbook({ name }, buf);
+  const { wb, isCsv, encoding, date1904 } = readWorkbook({ name }, buf);
   const meta = readMeta(wb);
   const sheetName = meta && wb.Sheets.Tasks ? "Tasks" : wb.SheetNames.find(n => n !== "_meta") || wb.SheetNames[0];
   // Default to "update" only for an export of this same project from this same .db (ids mean nothing elsewhere).
   const sameFile = meta && +meta.project_id === M.projectId && meta.file_id && meta.file_id === scalar("SELECT value FROM meta WHERE key='file_id'");
-  W = { fileName: name, wb, isCsv, date1904, meta, sheetName, headerRow: 0, map: {}, hierarchy: "auto", predRef: "auto", dateOrder: "MDY", mode: sameFile ? "update" : "new", projectName: (meta?.project || name.replace(/\.[^.]+$/, "")), statusMap: {}, peopleMap: {}, step: 1 };
+  W = { fileName: name, wb, isCsv, encoding, sameFile: !!sameFile, updateConfirmed: false, date1904, meta, sheetName, headerRow: 0, map: {}, hierarchy: "auto", predRef: "auto", dateOrder: "MDY", mode: sameFile ? "update" : "new", projectName: (meta?.project || name.replace(/\.[^.]+$/, "")), statusMap: {}, peopleMap: {}, step: 1 };
   loadSheet();
   renderWizard();
 }
@@ -338,10 +358,11 @@ function applyPlan(plan, people) {
 
   // tasks
   const existing = W.mode === "update" ? new Map(q("SELECT id FROM task WHERE project_id=?", [pid]).map(r => [String(r.id), r.id])) : new Map();
+  const { match: matches } = W.mode === "update" ? updateMatches(plan, existing) : { match: new Map() };
   const nextPos = new Map(); const posFor = parent => { if (!nextPos.has(parent)) nextPos.set(parent, scalar("SELECT COALESCE(MAX(position)+1,0) FROM task WHERE project_id=? AND parent_id IS ?", [pid, parent])); const p = nextPos.get(parent); nextPos.set(parent, p + 1); return p; };
   const mapped = k => colOf(k) >= 0;
   for (const it of plan.items) {
-    const match = W.mode === "update" && it.srcId && existing.get(String(parseInt(it.srcId, 10)));
+    const match = matches.get(it);
     if (match) {
       it.taskId = match;
       const cols = { name: it.name };
@@ -375,10 +396,13 @@ function applyPlan(plan, people) {
       if (plan.predMode === "id" && it.srcId) ref.set(it.srcId, it);
       if (plan.predMode === "row") ref.set(String(it.r + 1), it);
     }
-    const inSheet = plan.items.map(i => i.taskId);
+    // Update mode replaces only links between tasks that are both in the sheet; links from rows a teammate removed survive.
+    // They all go first, so a link reversed in the sheet doesn't trip over the old one.
+    if (W.mode === "update") {
+      const inSheet = JSON.stringify(plan.items.map(i => i.taskId)), matched = JSON.stringify(plan.items.filter(i => existing.has(String(i.taskId))).map(i => i.taskId));
+      run("DELETE FROM dep WHERE succ_id IN (SELECT value FROM json_each(?)) AND pred_id IN (SELECT value FROM json_each(?))", [matched, inSheet]);
+    }
     for (const it of plan.items) {
-      // Update mode replaces only links between tasks that are both in the sheet; links from rows a teammate removed survive.
-      if (W.mode === "update" && existing.has(String(it.taskId))) run(`DELETE FROM dep WHERE succ_id=? AND pred_id IN (${inSheet.map(() => "?").join(",")})`, [it.taskId, ...inSheet]);
       for (const tok of String(it.pred || "").split(/[,;]+/).map(s => s.trim()).filter(Boolean)) {
         const m = /^(.+?)\s*(FS|SS|FF|SF)?\s*(?:([+-])\s*(\d+(?:\.\d+)?)\s*(d|days?|w|wks?|weeks?|ed|edays?|h|hrs?)?)?$/i.exec(tok);
         const target = m && ref.get(m[1].trim().replace(/\.$/, ""));
@@ -476,10 +500,22 @@ function renderWizard() {
     mode.addEventListener("change", () => { W.mode = mode.value; renderWizard(); });
     pname.addEventListener("input", () => W.projectName = pname.value);
     body.append(h("div", { class: "opts" }, h("label", {}, "Import into", mode), W.mode === "new" ? h("label", {}, "New project name", pname) : h("span")));
+    if (W.encoding === "windows-1252") body.append(h("div", { class: "msg" }, "This CSV isn't UTF-8, so it was read as Windows-1252 (Excel's plain “CSV (Comma delimited)”). Check that accented names look right below."));
+    let needConfirm = false;
     if (W.mode === "update") {
-      const ids = new Set(M.order.map(t => String(t.id)));
-      const n = plan.items.filter(it => it.srcId && ids.has(String(parseInt(it.srcId, 10)))).length;
+      const { match, dupRows } = updateMatches(plan, new Map(M.order.map(t => [String(t.id), t.id])));
+      const n = match.size;
       body.append(h("div", { class: colOf("id") < 0 ? "msg err" : "msg" }, colOf("id") < 0 ? "Map an ID column to update existing tasks." : `${n} rows match existing tasks and will be updated; ${plan.items.length - n} new rows will be added. Hierarchy of existing tasks isn't changed.`));
+      if (dupRows.length) body.append(h("div", { class: "msg warn" }, `${dupRows.length === 1 ? "Row" : "Rows"} ${dupRows.slice(0, 20).join(", ")}${dupRows.length > 20 ? "…" : ""} repeat an ID used by an earlier row, so they'll be added as new tasks instead of overwriting it.`));
+      // Task ids restart at 1 in every file, so updating from another file's sheet overwrites unrelated tasks (DECISIONS #31).
+      if (!W.sameFile && colOf("id") >= 0) {
+        needConfirm = !W.updateConfirmed;
+        const cb = h("input", { type: "checkbox", checked: W.updateConfirmed });
+        cb.addEventListener("change", () => { W.updateConfirmed = cb.checked; renderWizard(); });
+        body.append(h("div", { class: "msg err" }, W.isCsv ? "A CSV doesn't record which plan it came from. " : "This workbook wasn't exported from this plan file and project. ",
+          "IDs only mean something in the plan they came from: in any other plan they'd overwrite unrelated tasks. ",
+          h("label", { style: { display: "block", marginTop: "6px", fontWeight: 600 } }, cb, " This sheet came from this project: update tasks by ID anyway")));
+      }
     }
     for (const e of plan.errors) body.append(h("div", { class: "msg err" }, e));
     body.append(h("p", {}, `${plan.items.length} tasks · hierarchy from `, h("b", {}, plan.mode), colOf("pred") >= 0 ? ` · predecessors by ${plan.predMode}` : ""));
@@ -491,7 +527,7 @@ function renderWizard() {
     for (const it of plan.items.slice(0, 400)) rows.push([it.newWbs, "  ".repeat(it.depth) + (it.kind === "milestone" ? "◆ " : "") + it.name, fmtYMD(it.start), fmtYMD(it.finish), it.status || "", it.percent ?? "", (it.people.R || []).join(", "), (it.people.A || []).join(", ")]);
     body.append(previewTable(rows, true));
     if (plan.items.length > 400) body.append(h("p", { class: "hint" }, `…and ${plan.items.length - 400} more.`));
-    const go = h("button", { class: "primary", disabled: !!plan.errors.length || (W.mode === "update" && colOf("id") < 0), onclick: () => doImport() }, `Import ${plan.items.length} tasks`);
+    const go = h("button", { class: "primary", disabled: !!plan.errors.length || needConfirm || (W.mode === "update" && colOf("id") < 0), onclick: () => doImport() }, `Import ${plan.items.length} tasks`);
     foot.append(back, go);
   }
   const keep = W._lastStep === W.step ? $("modal").querySelector(".modal-b")?.scrollTop : 0;

@@ -32,7 +32,7 @@ Each story lists its acceptance criteria. A tag in brackets after a criterion na
 ## D. Dependencies (they don't move dates)
 - **D1 Types and lag.** Finish-to-start (FS), start-to-start (SS), finish-to-finish (FF) and start-to-finish (SF), with a lag or lead in working days. [deps]
 - **D2 Three ways to create one:** type in the Predecessors cell (`1.2FS+3d, 4`), use the record form's Predecessors/Successors tabs, or drag between bars on the Gantt. [pred-parse]
-- **D3 Validity checks.** Circular dependencies, links to self and links between a parent and its own child are rejected. [deps]
+- **D3 Validity checks.** Circular dependencies, links to self and links between a parent and its own child are rejected, including loops that run through a summary task and its subtasks. [deps]
 - **D4 Conflicts are flagged, never fixed.** A link whose dates conflict shows as a red arrow and appears under Issues. [violation]
 
 ## E. Gantt
