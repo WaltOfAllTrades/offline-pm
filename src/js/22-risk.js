@@ -125,6 +125,7 @@ function opLinkTask(mitId, taskId) {
   const m = mitRow(mitId), t = taskRow(taskId);
   if (riskRow(m.risk_id).project_id !== t.project_id) throw new Error("The task is in a different project");
   run("INSERT OR IGNORE INTO mitigant_task(mitigant_id, task_id) VALUES (?,?)", [mitId, taskId]);
+  run("UPDATE mitigant SET status='' WHERE id=? AND status NOT IN ('', 'Tested')", [mitId]); // the tasks drive it now; don't resurrect it on unlink
 }
 function opUnlinkTask(mitId, taskId) { run("DELETE FROM mitigant_task WHERE mitigant_id=? AND task_id=?", [mitId, taskId]); }
 const recTable = kind => kind === "risk" ? ["risk_party", "risk_id", "risk"] : ["mitigant_party", "mitigant_id", "mitigant"];
@@ -144,7 +145,7 @@ function opSetRecRIsA(kind, id, on) {
 // "Split into mitigants": one per line or bullet, else one per sentence (DECISIONS #56).
 function splitMitigationPlan(text) {
   const s = String(text || "").replace(/\r/g, "").trim(); if (!s) return [];
-  const bullet = /^\s*(?:[-*•▪◦–]|\(?\d+[.)]|\(?[a-z][.)])\s+/i, enumr = /(?:^|\s)\(?\d{1,2}[.)]\s+/g;
+  const bullet = /^\s*(?:[-*•▪◦–]|\(?\d+[.)]|\(?[a-z][.)])\s+/, enumr = /(?:^|\s)\(?\d{1,2}[.)]\s+/g;
   let parts = s.split(/\n+/).map(x => x.trim()).filter(Boolean);
   if (parts.length === 1 && (s.match(enumr) || []).length >= 2) parts = s.split(enumr).map(x => x.trim()).filter(Boolean); // "1. … 2. …" on one line
   if (parts.length === 1) { // sentences, without breaking after abbreviations like "e.g."
@@ -159,10 +160,13 @@ function splitMitigationPlan(text) {
 }
 
 // Where "＋ Task" puts new tasks: the parent last used, else a top-level "Risk mitigation" summary (made if missing).
-const mitParentKey = () => "pm.mitParent." + M.projectId;
+// Stored as { parent } so "top level" (null) can be remembered too; keyed by file id like the collapse state.
+const mitParentKey = () => `pm.mitParent.${readFileId(db) || "?"}.${M.projectId}`;
 function mitigationParent() {
   const saved = lsGet(mitParentKey(), null);
-  if (saved != null && one("SELECT 1 FROM task WHERE id=? AND project_id=?", [saved, M.projectId])) return saved;
+  if (saved && typeof saved === "object" && "parent" in saved) {
+    if (saved.parent == null || one("SELECT 1 FROM task WHERE id=? AND project_id=?", [saved.parent, M.projectId])) return saved.parent;
+  }
   const found = one("SELECT id FROM task WHERE project_id=? AND parent_id IS NULL AND name='Risk mitigation' ORDER BY position LIMIT 1", [M.projectId]);
   return found ? found.id : opAddTask({ name: "Risk mitigation" });
 }
@@ -176,7 +180,7 @@ function opTaskFromMitigant(mitId, place = null) {
     const tgt = taskRow(place.targetId);
     id = opAddTask({ name, parentId: tgt.parent_id, start: parseYMD(tgt.start) ?? undefined, finish: parseYMD(tgt.start) ?? undefined });
     opMoveTo(id, place.targetId, place.where);
-    lsSet(mitParentKey(), tgt.parent_id);
+    lsSet(mitParentKey(), { parent: tgt.parent_id });
   } else id = opAddTask({ name, parentId: mitigationParent() });
   opLinkTask(mitId, id);
   const rec = M.mitById.get(mitId);

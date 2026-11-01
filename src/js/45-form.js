@@ -352,7 +352,7 @@ function relDeps(t, dir) {
   add.addEventListener("change", () => {
     const oid = +add.value; if (!oid) return;
     const [p, s] = dir === "in" ? [oid, t.id] : [t.id, oid];
-    mutate(`Linked ${M.tasks.get(p).wbs} → ${M.tasks.get(s).wbs}`, () => opAddDep(p, s, "FS", 0));
+    mutate(`Linked ${M.tasks.get(p).wbs} → ${M.tasks.get(s).wbs}`, () => opAddDep(p, s, "FS", null));
   });
   return h("div", {}, h("div", { class: "rel-bar" }, add),
     relTable([dir === "in" ? "Predecessor" : "Successor", "Name", "Type", "Lag (d)", "Dates", ""], rows, dir === "in" ? "Nothing has to happen before this task." : "Nothing waits on this task."));

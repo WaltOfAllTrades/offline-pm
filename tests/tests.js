@@ -1074,6 +1074,29 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     eq(document.activeElement, gb, "focus back on the outline");
     eq(document.getElementById("toast").getAttribute("aria-live"), "polite", "messages are announced");
   });
+
+  // ---------- Low tier, batch D ----------
+  await test("deps", "re-linking a linked pair keeps its lag; weekend-only tasks get a note", () => {
+    fresh(); const a = T("A"), b = T("B", null, "2026-03-09"), w = T("W", null, "2026-03-07", "2026-03-08");
+    m(() => O.opAddDep(a, b, "FS", 3)); m(() => O.opAddDep(a, b, "SS", null));
+    eq(P.q("SELECT type, lag FROM dep"), [{ type: "SS", lag: 3 }]);
+    ok(P.M.issues.some(i => i.task.id === w && /weekend/.test(i.text)), "weekend note");
+  });
+  await test("risks", "linking a task clears a stale hand-set status; 'A. Smith' isn't a bullet; top level is remembered", () => {
+    fresh(); const t1 = T("T"); let r, mi;
+    m(() => { r = O.opAddRisk({ name: "R" }); mi = O.opAddMitigant(r, "M"); O.opUpdateMitigant(mi, { status: "Implemented" }); });
+    m(() => O.opLinkTask(mi, t1)); m(() => O.opUnlinkTask(mi, t1));
+    eq([mt(mi).eff, mt(mi).achieved], ["Not started", false], "old Implemented didn't come back");
+    eq(R.splitMitigationPlan("A. Smith to review contracts\na) Check the SLA"), ["A. Smith to review contracts", "Check the SLA"]);
+    m(() => O.opTaskFromMitigant(mi, { targetId: t1, where: "after" }));
+    m(() => O.opTaskFromMitigant(mi)); eq(P.M.order.filter(t => t.depth === 0).length, 3, "second ＋ Task also at the top level, no 'Risk mitigation' summary");
+  });
+  await test("filter", "collapse state belongs to one plan file", () => {
+    fresh(); const p = T("P"); T("c", p);
+    P.cmd.toggleCollapse(p, true); ok(P.UI.collapsed.has(p));
+    P.run("UPDATE meta SET value='another-file' WHERE key='file_id'"); P.renderAll(); P.refresh();
+    m(() => {}); ok(!P.UI.collapsed.has(p), "another file id: fresh collapse state");
+  });
   P.reset();
   const failed = results.filter(r => !r.pass);
   return { total: results.length, passed: results.length - failed.length, failed };

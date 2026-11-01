@@ -22,7 +22,7 @@ function renderAll() {
   else if (UI.view === "people") renderPeople();
   else if (UI.view === "issues") renderIssues();
 }
-function onDataChanged() { if (!ready) return; refresh(); computeRows(); renderAll(); }
+function onDataChanged() { if (!ready) return; refresh(); if (UI.collapsedFor !== collapsedKey()) loadCollapsed(); computeRows(); renderAll(); } // another file or project: its own collapse state
 
 function switchView(v) {
   UI.view = v; closePop();
@@ -98,7 +98,7 @@ function initToolbar() {
 hooks.onChange = onDataChanged;
 hooks.onSaveState = () => { if (ready) renderSaveState(); };
 hooks.onReadOnly = () => { $("roText").textContent = readOnlyWhy; $("roBanner").hidden = false; };
-hooks.onReplace = () => { UI.noteDrafts.clear(); UI.editNote = null; UI.riskSel = null; UI.riskForm = false; UI.riskFocus = null; }; // ids from another file mean nothing here
+hooks.onReplace = () => { UI.selId = null; UI.noteDrafts.clear(); UI.editNote = null; UI.riskSel = null; UI.riskForm = false; UI.riskFocus = null; }; // ids from another file mean nothing here
 setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
 
 (async () => {

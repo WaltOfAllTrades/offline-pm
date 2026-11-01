@@ -45,7 +45,7 @@ Each story lists its acceptance criteria. A tag in brackets after a criterion na
 - **F1 People** have a name, email, title and an active flag. **Teams** have a name and members. Deleting either asks for confirmation. [people]
 - **F2 RACI.** Any task can have R, A, C or I set for any person **or** team, one letter per party per task. [raci]
 - **F3 RACI matrix.** Tasks are rows and people/teams are columns. Clicking a cell cycles blank → R → A → A/R → C → I → blank (A/R turns on "Responsible same as Accountable"). Clicking a task name slides its record panel out beside the matrix. **By team** (default) shows teams as columns with members rolled up: clicking cycles the team's role, and **+** hands it to a team member. Each person has one team. [raci-ra] [raci-team]
-- **F4 RACI warnings** (warnings only, never blocking): no Accountable (unless inherited from a parent), more than one Accountable, a team as Accountable, a leaf task with no Responsible, an inactive person assigned, an empty team assigned. [raci-rules]
+- **F4 RACI warnings** (warnings only, never blocking): no Accountable (unless inherited from a parent), more than one Accountable, a team as Accountable, a leaf task (not a milestone) with no Responsible, a task that falls only on a weekend, an inactive person assigned, an empty team assigned. [raci-rules]
 - **F5 Involvement page.** For each person, a printable list of tasks grouped by role, including tasks assigned through their teams.
 
 ## G. Import / export

@@ -306,7 +306,7 @@ function beginLink(e, from, side) {
       stop();
       if (target) {
         const type = (side === "F" ? "F" : "S") + tside;
-        mutate(`Linked ${from.wbs} → ${target.wbs} (${type})`, () => opAddDep(from.id, target.id, type, 0));
+        mutate(`Linked ${from.wbs} → ${target.wbs} (${type})`, () => opAddDep(from.id, target.id, type, null));
       } else renderGanttRows();
     },
     cancel: () => { stop(); renderGanttRows(); },

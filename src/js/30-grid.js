@@ -23,8 +23,10 @@ const ROLLED = new Set(["start", "finish", "duration", "percent", "status"]);
 const stClass = s => ({ "Not started": "st-ns", "In progress": "st-ip", "Blocked": "st-bl", "Done": "st-dn" }[s] || "st-ns");
 
 const gridFullWidth = () => lsGet("pm.split", null) ?? Math.round(($("split").clientWidth || innerWidth) * 2 / 3);
-function loadCollapsed() { UI.collapsed = new Set(lsGet("pm.collapsed." + M.projectId, [])); }
-function saveCollapsed() { lsSet("pm.collapsed." + M.projectId, [...UI.collapsed]); }
+// Keyed by the plan's file id too: task ids restart at 1 in every file, so another plan mustn't inherit this one's state.
+const collapsedKey = () => `pm.collapsed.${readFileId(db) || "?"}.${M.projectId}`;
+function loadCollapsed() { UI.collapsedFor = collapsedKey(); UI.collapsed = new Set(lsGet(UI.collapsedFor, [])); }
+function saveCollapsed() { lsSet(collapsedKey(), [...UI.collapsed]); }
 
 function filterActive() { return !!(UI.search.trim() || UI.person); }
 function matchesFilter(t) {
@@ -249,7 +251,7 @@ function cmdDelete() {
   const notes = [t, ...M.order.slice(t.index + 1, t.index + 1 + n)].reduce((s, x) => s + (M.noteCount.get(x.id) || 0), 0);
   const parts = [n ? `its ${n} subtask${n > 1 ? "s" : ""}` : "", notes ? `${notes} work note${notes > 1 ? "s" : ""}` : ""].filter(Boolean);
   if (parts.length && !confirm(`Delete “${t.name}” and ${parts.join(" and ")}? (Undo is available.)`)) return;
-  const next = UI.rows[t.row + 1 + (UI.collapsed.has(t.id) ? 0 : n)] || UI.rows[t.row - 1];
+  const next = UI.rows.slice(t.row + 1).find(r => !isAncestor(t, r)) || UI.rows[t.row - 1]; // first visible row after the subtree
   if (mutate(`Deleted “${t.name}”${n ? ` (+${n} subtasks)` : ""}`, () => opDelete(t.id))) selectTask(next && M.tasks.has(next.id) ? next.id : null);
 }
 const countDesc = t => t.children.reduce((s, c) => s + 1 + countDesc(c), 0);
@@ -308,7 +310,8 @@ function gridKey(e) {
     case "Delete": e.preventDefault(); return cmdDelete();
     case "Escape": if (!UI.form && t) selectTask(null); return;
   }
-  if (!ctrl && !e.altKey && e.key.length === 1 && t) {
+  const altGr = e.getModifierState?.("AltGraph"); // AltGr arrives as Ctrl+Alt on Windows: "@" or "{" on many layouts
+  if ((altGr || (!ctrl && !e.altKey)) && e.key.length === 1 && t) {
     const c = colByKey(UI.col);
     if (c?.edit === "text" || c?.edit === "date") { e.preventDefault(); startEdit(UI.col, e.key); }
     else if (c?.edit === "party" || c?.edit === "select") { e.preventDefault(); startEdit(UI.col); }

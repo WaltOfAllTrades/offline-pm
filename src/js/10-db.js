@@ -171,7 +171,7 @@ function migrate(d) {
         d.run("INSERT INTO task(id, project_id, position, name, status, percent, start, finish, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
           [id, pid, i, title || "Untitled", st[status] || "Not started", status === "done" ? 100 : 0, due || null, due || null, notes || "", nowIso()]);
       });
-      if (tableExists(d, "deps")) d.run("INSERT OR IGNORE INTO dep(pred_id, succ_id, type, lag) SELECT depends_on, task_id, 'FS', 0 FROM deps WHERE depends_on IN (SELECT id FROM task) AND task_id IN (SELECT id FROM task)");
+      if (tableExists(d, "deps")) d.run("INSERT OR IGNORE INTO dep(pred_id, succ_id, type, lag) SELECT depends_on, task_id, 'FS', 0 FROM deps WHERE depends_on <> task_id AND depends_on IN (SELECT id FROM task) AND task_id IN (SELECT id FROM task)");
       d.run("DROP TABLE IF EXISTS deps"); d.run("DROP TABLE tasks"); d.run("DROP TABLE IF EXISTS meta_v0");
       d.run("UPDATE meta SET value=? WHERE key='rev'", [String(oldRev)]);
       note = `Upgraded a proof-of-concept file: ${rows.length} tasks moved into project “Imported plan”.`;

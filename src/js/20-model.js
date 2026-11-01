@@ -153,6 +153,7 @@ function computeIssues() {
     }
     if (!t.isSummary && t.S == null) add("info", t, "No dates set", "dates");
     if (!t.isSummary && t.F != null && t.S != null && t.F < t.S) add("warn", t, "Finish is before start", "dates");
+    else if (!t.isSummary && !t.isMilestone && t.S != null && t.F != null && workdays(t.S, t.F) === 0) add("info", t, "Falls on a weekend: no working days, so it carries no weight in % complete", "dates");
     if (t.F != null && t.F < today && t.ST !== "Done" && !t.isSummary) add("info", t, `Overdue: finish was ${fmtShort(t.F)}`, "dates");
   }
   for (const d of M.deps) if (d.violated) {
@@ -383,10 +384,16 @@ function depCheck(pred, succ, type = "FS", skipDep = null) {
   const g = dateGraph(a.project_id, skipDep);
   if (reaches(g.adj, g.end(succ, type[1]), g.end(pred, type[0]))) throw new Error("That link would create a circular dependency through a summary task and its subtasks");
 }
+// lag = null keeps an existing link's lag (dragging onto an already linked pair only changes its type) and means 0 for a new one.
 function opAddDep(pred, succ, type = "FS", lag = 0) {
   if (!DEP_TYPES.includes(type)) throw new Error("Unknown link type");
-  const existing = one("SELECT id FROM dep WHERE pred_id=? AND succ_id=?", [pred, succ]);
-  if (existing) { depCheck(pred, succ, type, existing.id); run("UPDATE dep SET type=?, lag=? WHERE id=?", [type, Math.round(lag), existing.id]); return existing.id; }
+  const existing = one("SELECT id, type, lag FROM dep WHERE pred_id=? AND succ_id=?", [pred, succ]);
+  if (existing) {
+    depCheck(pred, succ, type, existing.id);
+    if (lag == null && existing.type !== type) opNotes.push(`That link already existed: changed it to ${DEP_NAMES[type]}, lag kept.`);
+    run("UPDATE dep SET type=?, lag=? WHERE id=?", [type, lag == null ? existing.lag : Math.round(lag), existing.id]); return existing.id;
+  }
+  lag = lag ?? 0;
   depCheck(pred, succ, type);
   const g = dateGraph(taskRow(pred).project_id);
   run("INSERT INTO dep(pred_id, succ_id, type, lag) VALUES (?,?,?,?)", [pred, succ, type, Math.round(lag)]);
