@@ -102,6 +102,7 @@ Each story lists its acceptance criteria. A tag in brackets after a criterion na
   - a linked task is overdue.
 
   A **Gaps** filter and a count on the tab show them. [risks-ui]
-- **J10 Closeout.** A report listing each risk and mitigant with its status, **Achieved ✓/✗**, evidence (linked tasks with status and finish date), testing notes and handover. A summary line reads like "x of y mitigants achieved · a of b risks fully mitigated · c accepted". It can be printed or exported to Excel, and Excel export of the plan includes a Risks sheet. [risks]
+- **J10 Closeout.** A report listing each risk and mitigant with its status, **Achieved ✓/✗**, evidence (linked tasks with status and finish date), testing notes and handover. A summary line reads like "x of y mitigants achieved · a of b risks fully mitigated · c accepted". It can be printed or exported to Excel, and Excel export of the plan includes it as a Risk closeout sheet. [risks]
 - **J11 Import.** **Import risks…** reads a risk register from Excel/CSV: it finds the header row, auto-maps columns (risk, owner, likelihood, impact, mitigation plan, response), matches owner names to people (or adds them), converts Low/Medium/High or 1–5 values, and optionally splits each plan into mitigants. [risks]
+- **J12 Round trip.** Excel export of the plan includes **Risk register** and **Mitigants** sheets with IDs. Importing the workbook brings back the risks, mitigants, their people and their task links; in Update mode, edits made in Excel update them by ID without duplicates. [roundtrip, import-update]
 

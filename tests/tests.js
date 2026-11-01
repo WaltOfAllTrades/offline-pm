@@ -735,7 +735,57 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     const rows = R.closeoutRows();
     eq(rows.map(x => [x.risk, x.mitigant, x.achieved]), [["R1", "Do X", "Yes"], ["R1", "Control Y", "No"], ["R2", "", "n/a"]]); eq(rows[2].reason, "Cheap to absorb");
     ok(rows[0].evidence.startsWith("1 Done task (Done"), rows[0].evidence);
-    const wb = P.io.exportWorkbook(); ok(wb.SheetNames.includes("Risks"), "Risks sheet in export");
+    const wb = P.io.exportWorkbook(); eq(wb.SheetNames.filter(n => /risk|mitigant/i.test(n)), ["Risk register", "Mitigants", "Risk closeout"], "risk sheets in export");
+  });
+
+  // One plan with everything a risk can carry, for the round-trip tests below.
+  const riskPlan = () => {
+    fresh(); const a = T("Build"), b = T("Test"); let ids = {};
+    m(() => {
+      const ana = O.opAddParty("person", "Ana"), ben = O.opAddParty("person", "Ben"), eng = O.opAddParty("team", "Eng");
+      const r1 = O.opAddRisk({ name: "Vendor late", description: "Parts ship from abroad", plan: "Backup vendor", probability: "H", impact: "M" });
+      O.opSetRecParties("risk", r1, "A", [ana]); O.opSetRecRIsA("risk", r1, true);
+      const m1 = O.opAddMitigant(r1, "Second supplier"); O.opLinkTask(m1, a); O.opLinkTask(m1, b); O.opSetRecParties("mitigant", m1, "R", [ben, eng]);
+      const m2 = O.opAddMitigant(r1, "Weekly check", null, { is_control: 1, status: "Tested", testing: "Sampled 4 weeks", handed_to: "Ops" });
+      O.opSetRecParties("mitigant", m2, "A", [ben]);
+      const r2 = O.opAddRisk({ name: "Office move", response: "accept", accept_reason: "Low cost" });
+      ids = { a, b, r1, r2, m1, m2 };
+    });
+    return ids;
+  };
+  const riskSnap = () => P.M.risks.map(r => [r.name, r.description, r.plan, r.response, r.accept_reason, r.probability, r.impact, r.r_is_a,
+    r.parties.map(p => p.role + ":" + P.M.parties.get(p.party_id).name).sort().join(","),
+    r.mitigants.map(x => [x.text, x.is_control, x.status, x.testing, x.handed_to, x.r_is_a, x.tasks.map(t => t.name).join(","), x.parties.map(p => p.role + ":" + P.M.parties.get(p.party_id).name).sort().join(",")])]);
+
+  await test("roundtrip", "risks, mitigants, their people and task links survive export → import as a new project", async () => {
+    riskPlan(); const before = riskSnap();
+    const { rep } = await runImport("rk.xlsx", XL.write(P.io.exportWorkbook(), { type: "array", bookType: "xlsx" }), W => { W.mode = "new"; ok(W.risks && W.risks.risks.length === 2 && W.risks.mits.length === 2, "sheets read"); });
+    eq(rep.risks, { added: 2, updated: 0, mitAdded: 2, mitUpdated: 0 });
+    eq(riskSnap(), before, "identical after round trip");
+    ok(P.M.risks.every(r => r.project_id === P.M.projectId) && P.M.risks[0].mitigants[0].tasks.every(t => t.project_id === P.M.projectId), "linked to the new project's tasks");
+  });
+
+  await test("import-update", "edit the risk sheets, re-import updates by ID without duplicating", async () => {
+    const { a, b, r1, m1, m2 } = riskPlan();
+    // Unchanged re-import: nothing added.
+    let { rep } = await runImport("same.xlsx", XL.write(P.io.exportWorkbook(), { type: "array", bookType: "xlsx" }));
+    eq(rep.risks, { added: 0, updated: 2, mitAdded: 0, mitUpdated: 2 }, "unchanged sheet only updates");
+    eq(P.scalar("SELECT COUNT(*) FROM mitigant"), 2);
+    const wb = P.io.exportWorkbook(), rs = wb.Sheets["Risk register"], ms = wb.Sheets.Mitigants;
+    rs.B2.v = "Vendor very late"; rs.G2.v = "Low"; rs.H2.v = "Huge";            // rename; probability; bad impact is left alone
+    ms.F2.v = String(b);                                                      // Second supplier now only implemented by Test
+    ms.B3.v = 2 + r1;                                                         // risk ID that doesn't exist
+    XL.utils.sheet_add_aoa(ms, [["", r1, "Escrow parts", "No", "Planned", "", "Ana", "", "", ""]], { origin: -1 });
+    let preview;
+    ({ rep } = await runImport("edit.xlsx", XL.write(wb, { type: "array", bookType: "xlsx" }), W => { eq(W.mode, "update"); preview = P.io.riskPreviewText(); ok(W.risks.warnings.some(w => /Huge/.test(w)), "bad impact warned"); }));
+    ok(/2 risks and 2 mitigants match existing ones/.test(preview), preview);
+    const r = P.M.riskById.get(r1);
+    eq([r.name, r.probability, r.impact], ["Vendor very late", "L", "M"]);
+    eq(P.M.mitById.get(m1).tasks.map(t => t.id), [b], "links replaced");
+    eq(P.M.mitById.get(m2).risk_id, r1, "row with an unknown risk ID is skipped, mitigant untouched");
+    ok(rep.warnings.some(w => /isn't in the Risk register/.test(w)), "warned: " + rep.warnings);
+    eq(r.mitigants.map(x => x.text), ["Second supplier", "Weekly check", "Escrow parts"], "blank ID adds a mitigant");
+    eq(r.mitigants[2].parties.map(p => P.M.parties.get(p.party_id).name), ["Ana"]);
   });
 
   await test("risks", "import a risk register: mapping, owners, LMH, split plans", () => {
@@ -1070,7 +1120,7 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     const btns = [...modal.querySelectorAll("button")]; btns.at(-1).focus();
     const ev = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }); document.activeElement.dispatchEvent(ev);
     ok(ev.defaultPrevented && document.activeElement === btns[0], "Tab wraps to the first control");
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     eq(document.activeElement, gb, "focus back on the outline");
     eq(document.getElementById("toast").getAttribute("aria-live"), "polite", "messages are announced");
   });

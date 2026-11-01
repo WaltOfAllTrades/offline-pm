@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-91RQ5VtwpYu7mfdBaW/FQLQSuGMYaZcpNaI4hI17iMM='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-umgf5Jn1OGM2ubkwFT/dUFF7W+i4qIqnwNWB2soRoQQ='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
 <title>Offline PM</title>
 <style>:root{
   --bg:#f5f6f8; --panel:#fff; --panel2:#fafbfc; --ink:#1b1f24; --muted:#667085; --line:#e4e7ec; --line2:#eef0f3;
@@ -4548,7 +4548,7 @@ async function loadImportFile(name, buf) {
   const sheetName = meta && wb.Sheets.Tasks ? "Tasks" : wb.SheetNames.find(n => n !== "_meta") || wb.SheetNames[0];
   // Default to "update" only for an export of this same project from this same .db (ids mean nothing elsewhere).
   const sameFile = meta && +meta.project_id === M.projectId && meta.file_id && meta.file_id === scalar("SELECT value FROM meta WHERE key='file_id'");
-  W = { fileName: name, wb, isCsv, encoding, sameFile: !!sameFile, updateConfirmed: false, date1904, meta, sheetName, headerRow: 0, map: {}, hierarchy: "auto", predRef: "auto", dateOrder: "MDY", mode: sameFile ? "update" : "new", projectName: (meta?.project || name.replace(/\.[^.]+$/, "")), statusMap: Object.create(null), peopleMap: Object.create(null), step: 1 }; // keyed by file text: no prototype keys
+  W = { fileName: name, wb, isCsv, encoding, sameFile: !!sameFile, updateConfirmed: false, date1904, meta, sheetName, risks: meta ? readRiskSheets(wb) : null, headerRow: 0, map: {}, hierarchy: "auto", predRef: "auto", dateOrder: "MDY", mode: sameFile ? "update" : "new", projectName: (meta?.project || name.replace(/\.[^.]+$/, "")), statusMap: Object.create(null), peopleMap: Object.create(null), step: 1 }; // keyed by file text: no prototype keys
   loadSheet();
   renderWizard();
 }
@@ -4766,10 +4766,11 @@ function collectPeople(plan) {
   const out = new Map();
   const extra = W.meta ? metaParties() : [];
   const parse = raw => { const m = /^(team|user|person)\s*:\s*(.+)$/i.exec(raw); return { kind: m ? (m[1].toLowerCase() === "team" ? "team" : "person") : null, name: (m ? m[2] : raw).trim() }; };
+  const sources = [...plan.items.map(it => it.people), ...(W.risks ? [...W.risks.risks, ...W.risks.mits] : [])]; // { R: [...], A: [...] }
   const prefixed = new Map(); // name → kind, when the file uses a team:/user: prefix somewhere
-  for (const it of plan.items) for (const role of ROLES) for (const raw of it.people[role] || []) { const p = parse(raw); if (p.kind) prefixed.set(p.name.toLowerCase(), p.kind); }
+  for (const src of sources) for (const role of ROLES) for (const raw of src[role] || []) { const p = parse(raw); if (p.kind) prefixed.set(p.name.toLowerCase(), p.kind); }
   W.prefixed = prefixed;
-  for (const it of plan.items) for (const role of ROLES) for (const raw of it.people[role] || []) {
+  for (const src of sources) for (const role of ROLES) for (const raw of src[role] || []) {
     const pr = parse(raw);
     const kind = pr.kind || prefixed.get(pr.name.toLowerCase()) || null;
     const name = pr.name; const key = (kind ? kind + ":" : "") + name.toLowerCase();
@@ -4894,6 +4895,7 @@ function applyPlan(plan, people) {
       catch (e) { report.warnings.push(`Row ${it.rowNo}: link from “${l.tok}” skipped (${e.message})`); }
     }
   }
+  if (W.risks) applyRisks(pid, plan, lookupParty, report);
   // remember mapping
   const cfg = { map: Object.fromEntries(Object.entries(W.map).map(([i, k]) => [normHdr(W.headers[i]), k])), hierarchy: W.hierarchy, predRef: W.predRef, dateOrder: W.dateOrder, statusMap: W.statusMap };
   run("INSERT OR REPLACE INTO import_map(signature, config, updated_at) VALUES (?,?,?)", [W.signature, JSON.stringify(cfg), nowIso()]);
@@ -5000,8 +5002,10 @@ function renderWizard() {
     }
     for (const e of plan.errors) body.append(h("div", { class: "msg err" }, e));
     body.append(h("p", {}, `${plan.items.length} tasks · hierarchy from `, h("b", {}, plan.mode), colOf("pred") >= 0 ? ` · predecessors by ${plan.predMode}` : ""));
-    if (plan.warnings.length) {
-      const det = h("details", {}, h("summary", { class: "msg warn" }, `${plan.warnings.length} warning${plan.warnings.length > 1 ? "s" : ""} (rows still import)`), h("ul", {}, ...plan.warnings.slice(0, 200).map(w => h("li", {}, w))));
+    if (W.risks) body.append(h("p", {}, riskPreviewText()));
+    const warns = [...plan.warnings, ...(W.risks?.warnings || [])];
+    if (warns.length) {
+      const det = h("details", {}, h("summary", { class: "msg warn" }, `${warns.length} warning${warns.length > 1 ? "s" : ""} (rows still import)`), h("ul", {}, ...warns.slice(0, 200).map(w => h("li", {}, w))));
       body.append(det);
     }
     const rows = [["WBS", "Task", "Start", "Finish", "Status", "%", "R", "A"]];
@@ -5028,8 +5032,8 @@ function doImport() {
   if (!ok) return;
   closeModal();
   if (report.projectId !== M.projectId) switchProject(report.projectId);
-  const warn = plan.warnings.length + report.warnings.length;
-  toast(`Imported: ${report.added} added, ${report.updated} updated, ${report.deps} links${report.people ? `, ${report.people} people/teams created` : ""}${warn ? ` · ${warn} warnings` : ""}`);
+  const warn = plan.warnings.length + (W.risks?.warnings.length || 0) + report.warnings.length, rk = report.risks;
+  toast(`Imported: ${report.added} added, ${report.updated} updated, ${report.deps} links${rk ? `, ${rk.added + rk.updated} risks, ${rk.mitAdded + rk.mitUpdated} mitigants` : ""}${report.people ? `, ${report.people} people/teams created` : ""}${warn ? ` · ${warn} warnings` : ""}`);
   if (report.warnings.length) logInfo("Import warnings: " + report.warnings.slice(0, 20).join(" | "));
   return report;
 }
@@ -5069,9 +5073,132 @@ function exportWorkbook() {
   for (const t of M.order) for (const n of notesFor(t.id).reverse()) notes.push([t.id, t.wbs, t.name, localTs(n.created_at), localTs(n.updated_at), n.body]);
   const nws = XLSX.utils.aoa_to_sheet(notes); nws["!cols"] = [7, 8, 32, 16, 16, 80].map(w => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, nws, "Notes");
-  if (M.risks.length) XLSX.utils.book_append_sheet(wb, closeoutSheet(), "Risks");
+  if (M.risks.length) {
+    const { risks, mits } = riskSheets();
+    XLSX.utils.book_append_sheet(wb, risks, "Risk register"); XLSX.utils.book_append_sheet(wb, mits, "Mitigants");
+    XLSX.utils.book_append_sheet(wb, closeoutSheet(), "Risk closeout"); // the report, for reading; import ignores it
+  }
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(meta), "_meta");
   return wb;
+}
+// ---------- Risks in the plan workbook (DECISIONS #73) ----------
+// Two sheets meant for loading back: one row per risk, and one per mitigant with its risk's ID and its tasks' IDs.
+// People are written the way the Tasks sheet writes them: an own Accountable, and the Accountable in Responsible
+// when "same as Accountable" is on.
+const RISK_COLS = ["ID", "Risk", "Description", "Mitigation plan", "Response", "Reason accepted", "Probability", "Impact", "Accountable", "Responsible"];
+const MIT_COLS = ["ID", "Risk ID", "Mitigant", "Control", "Status", "Tasks", "Accountable", "Responsible", "Testing", "Handed to"];
+function riskSheets() {
+  const names = list => list.map(p => partyLabel(p.party_id)).join("; ");
+  const lmh = v => v ? LMH[v] : "";
+  const risks = [RISK_COLS], mits = [MIT_COLS];
+  for (const r of M.risks) {
+    risks.push([r.id, r.name, r.description, r.plan, r.response === "accept" ? "Accept" : "Mitigate", r.accept_reason, lmh(r.probability), lmh(r.impact), names(recRoles(r, "A")), names(recResponsible(r).list)]);
+    // Status is the one set by hand: with tasks linked, the tasks decide it (DECISIONS #53), so it's blank or Tested.
+    for (const x of r.mitigants) mits.push([x.id, r.id, x.text, x.is_control ? "Yes" : "No", x.status, x.tasks.map(t => t.id).join(", "), names(recRoles(x, "A")), names(recResponsible(x).list), x.testing, x.handed_to]);
+  }
+  const rws = XLSX.utils.aoa_to_sheet(risks); rws["!cols"] = [6, 34, 40, 40, 10, 30, 11, 9, 20, 20].map(w => ({ wch: w }));
+  const mws = XLSX.utils.aoa_to_sheet(mits); mws["!cols"] = [6, 7, 44, 8, 12, 14, 20, 20, 30, 20].map(w => ({ wch: w }));
+  return { risks: rws, mits: mws };
+}
+// Reads them back from our own export (pure: no DB writes). A missing column means "leave it as it is".
+function readRiskSheets(wb) {
+  const rs = wb.Sheets["Risk register"]; if (!rs) return null;
+  const warnings = [];
+  const rowsOf = (ws, label) => {
+    if (!ws) return [];
+    trimRange(ws);
+    const all = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "", blankrows: true });
+    const hd = (all[0] || []).map(x => String(x).trim());
+    const out = [];
+    all.slice(1).forEach((r, i) => {
+      if (!r.some(c => String(c).trim())) return;
+      out.push({ where: `${label} row ${i + 2}`, get: k => { const c = hd.indexOf(k); return c < 0 ? undefined : String(r[c] ?? "").trim(); } });
+    });
+    return { rows: out, has: k => hd.includes(k) };
+  };
+  const given = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+  const ppl = v => v === undefined ? undefined : splitNames(v, true);
+  const lmh = (row, k) => { const v = row.get(k); if (v === undefined || v === "") return v; const x = toLMH(v); if (!x) warnings.push(`${row.where}: ${k} “${v}” isn't Low, Medium or High, so it's left as it is`); return x || undefined; };
+  const R = rowsOf(rs, "Risk register");
+  if (!R.has("Risk")) return { risks: [], mits: [], warnings: ["The Risk register sheet has no Risk column, so no risks are imported"] };
+  const risks = [];
+  for (const row of R.rows) {
+    const name = row.get("Risk");
+    if (!name) { warnings.push(`${row.where}: no risk name, so it's skipped`); continue; }
+    let response = row.get("Response");
+    if (response !== undefined) { const s = response.toLowerCase(); response = /^acc/.test(s) ? "accept" : /^mit/.test(s) || !s ? "mitigate" : (warnings.push(`${row.where}: response “${response}” isn't Accept or Mitigate, so it's left as it is`), undefined); }
+    risks.push({ where: row.where, srcId: idKey(row.get("ID")), A: ppl(row.get("Accountable")), R: ppl(row.get("Responsible")),
+      f: given({ name, description: row.get("Description"), plan: row.get("Mitigation plan"), response, accept_reason: row.get("Reason accepted"), probability: lmh(row, "Probability"), impact: lmh(row, "Impact") }) });
+  }
+  const mits = [];
+  const MS = rowsOf(wb.Sheets.Mitigants, "Mitigants");
+  if (MS.rows) for (const row of MS.rows) {
+    const text = row.get("Mitigant");
+    if (!text) { warnings.push(`${row.where}: no mitigant text, so it's skipped`); continue; }
+    let status = row.get("Status");
+    if (status) { const s = MIT_STATUSES.find(x => x.toLowerCase() === status.toLowerCase()); if (!s) warnings.push(`${row.where}: status “${status}” isn't one of ${MIT_STATUSES.join(", ")}, so it's left as it is`); status = s; }
+    const ctl = row.get("Control"), tv = row.get("Tasks");
+    const tasks = tv === undefined ? undefined : tv.split(/[,;\s]+/).filter(Boolean).filter(x => idKey(x) != null || (warnings.push(`${row.where}: “${x}” isn't a task ID, so that link is skipped`), false)).map(idKey);
+    mits.push({ where: row.where, srcId: idKey(row.get("ID")), riskSrc: idKey(row.get("Risk ID")), tasks, A: ppl(row.get("Accountable")), R: ppl(row.get("Responsible")),
+      f: given({ text, is_control: ctl === undefined ? undefined : /^(yes|y|true|1|x|✓)$/i.test(ctl) ? 1 : 0, status, testing: row.get("Testing"), handed_to: row.get("Handed to") }) });
+  }
+  return { risks, mits, warnings };
+}
+// Update mode matches by ID within the project, like tasks; anything else adds. Nothing missing from the sheet is deleted.
+function riskIdMatches(pid) {
+  const upd = W.mode === "update", seenR = new Set(), seenM = new Set();
+  const riskIn = k => upd && k != null ? scalar("SELECT id FROM risk WHERE id=? AND project_id=?", [+k, pid]) : null;
+  const mitIn = k => upd && k != null ? scalar("SELECT m.id FROM mitigant m JOIN risk r ON r.id=m.risk_id WHERE m.id=? AND r.project_id=?", [+k, pid]) : null;
+  const risks = W.risks.risks.map(r => { const id = seenR.has(r.srcId) ? null : riskIn(r.srcId); if (r.srcId != null) seenR.add(r.srcId); return id; });
+  const mits = W.risks.mits.map(x => { const id = seenM.has(x.srcId) ? null : mitIn(x.srcId); if (x.srcId != null) seenM.add(x.srcId); return id; });
+  return { risks, mits, riskIn };
+}
+function riskPreviewText() {
+  const { risks, mits } = W.risks, n = W.mode === "update" ? riskIdMatches(M.projectId) : null;
+  const upd = a => n ? a.filter(Boolean).length : 0;
+  const nr = upd(n?.risks || []), nm = upd(n?.mits || []);
+  return `Also ${risks.length} risk${risks.length === 1 ? "" : "s"} and ${mits.length} mitigant${mits.length === 1 ? "" : "s"} from the Risk register and Mitigants sheets` +
+    (n ? ` (${nr} risk${nr === 1 ? "" : "s"} and ${nm} mitigant${nm === 1 ? "" : "s"} match existing ones by ID and will be updated; the rest are added).` : ".");
+}
+function applyRisks(pid, plan, lookupParty, report) {
+  const rk = report.risks = { added: 0, updated: 0, mitAdded: 0, mitUpdated: 0 };
+  const match = riskIdMatches(pid), upd = W.mode === "update";
+  // A task ID means the row with that ID in this sheet (first one wins), else in update mode an existing task of the project.
+  const taskOf = new Map(); for (const it of plan.items) { const k = idKey(it.srcId); if (k != null && !taskOf.has(k)) taskOf.set(k, it.taskId); }
+  const findTask = k => taskOf.get(k) ?? (upd ? scalar("SELECT id FROM task WHERE id=? AND project_id=?", [+k, pid]) : null);
+  // Same rule as tasks (DECISIONS #48): a Responsible equal to the record's own Accountable turns "same as Accountable" back on.
+  const setParties = (kind, id, rec) => {
+    const ids = list => [...new Set(list.map(lookupParty).filter(Boolean))].sort((a, b) => a - b);
+    const a = rec.A && ids(rec.A), r = rec.R && ids(rec.R);
+    if (a) opSetRecParties(kind, id, "A", a);
+    if (r) { if (a && r.length && r.join() === a.join()) opSetRecRIsA(kind, id, true); else opSetRecParties(kind, id, "R", r); }
+  };
+  const riskId = new Map(); // sheet ID → risk id
+  W.risks.risks.forEach((r, i) => {
+    let id = match.risks[i];
+    try {
+      if (id) { opUpdateRisk(id, r.f); rk.updated++; } else { id = opAddRisk({ ...r.f, projectId: pid }); rk.added++; }
+      setParties("risk", id, r);
+      if (r.srcId != null && !riskId.has(r.srcId)) riskId.set(r.srcId, id);
+    } catch (e) { report.warnings.push(`${r.where}: skipped (${e.message})`); }
+  });
+  W.risks.mits.forEach((x, i) => {
+    let id = match.mits[i];
+    const rid = x.riskSrc == null ? null : riskId.get(x.riskSrc) ?? match.riskIn(x.riskSrc);
+    if (x.riskSrc != null && !rid) return report.warnings.push(`${x.where}: risk ID ${x.riskSrc} isn't in the Risk register, so it's skipped`);
+    if (!rid && !id) return report.warnings.push(`${x.where}: no Risk ID, so it's skipped`);
+    try {
+      if (id) {
+        if (rid && rid !== scalar("SELECT risk_id FROM mitigant WHERE id=?", [id])) { run("UPDATE mitigant SET risk_id=? WHERE id=?", [rid, id]); placeAfter("mitigant", "risk_id", rid, id, null); }
+        opUpdateMitigant(id, x.f); rk.mitUpdated++;
+      } else { id = opAddMitigant(rid, x.f.text, null, x.f); rk.mitAdded++; }
+      setParties("mitigant", id, x);
+      if (x.tasks) {
+        run("DELETE FROM mitigant_task WHERE mitigant_id=?", [id]);
+        for (const k of x.tasks) { const t = findTask(k); if (t) opLinkTask(id, t); else report.warnings.push(`${x.where}: task ${k} isn't in the plan, so that link is skipped`); }
+      }
+    } catch (e) { report.warnings.push(`${x.where}: skipped (${e.message})`); }
+  });
 }
 const safeName = s => (s || "plan").replace(/[\\/:*?"<>|]+/g, "-").trim() || "plan";
 function exportXlsx() { const wb = exportWorkbook(); const name = safeName(M.projects.find(p => p.id === M.projectId)?.name) + ".xlsx"; XLSX.writeFile(wb, name); logInfo(`Exported ${name}`); }
@@ -5275,7 +5402,7 @@ setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
       opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote },
     risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport, riskImportItems, doRiskImport, openRiskRecord, closeRiskForm, renderRisks, get RI() { return RI; }, recNotes, toLMH },
     util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum },
-    io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, csvText, autoMap, get W() { return W; } },
+    io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, csvText, autoMap, riskPreviewText, get W() { return W; } },
     db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; },
       get diskRev() { return diskRev; }, get readOnly() { return readOnly; }, get fileId() { return readFileId(db); },
       // test aid: attach a stand-in file handle without a picker

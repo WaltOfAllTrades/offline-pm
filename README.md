@@ -12,7 +12,7 @@ A project-planning tool that is **one HTML file** and needs no network. Open `of
   - Only Offline PM plans can be opened. Any other SQLite file is refused and left unchanged.
 - **Share with your team:** send the `.db` file (they open it with File → *Open plan file…*), an Excel export, or a PDF (File → *Print / save as PDF*).
 - **Import:** File → *Import from Excel / CSV…* runs a four-step wizard: choose the file and sheet, map columns, map statuses and people, then preview. It rebuilds the outline from WBS numbers (1.2.3), outline levels, a parent column or name indentation.
-  - An exported workbook can be edited in Excel and re-imported in **Update** mode. Rows are matched by the ID column.
+  - An exported workbook can be edited in Excel and re-imported in **Update** mode. Rows are matched by the ID column, and so are risks and mitigants on the Risk register and Mitigants sheets.
 - **Record form:** click ↗ next to a task name (or 📄 Record, Ctrl+I, or double-click a Gantt bar). A panel slides in over the outline with the task's fields, a mini Gantt of its subtasks (for parents), dated work notes you can edit, and tabs of related records (subtasks, links, RACI, issues, and RAID coming soon). The Gantt stays visible: click a bar to switch records. Esc closes it.
 - **Keyboard:** see File → *Help & shortcuts*. The main ones: Insert, Tab/Shift+Tab, Enter, Delete, Ctrl+Z.
 

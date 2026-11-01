@@ -129,7 +129,7 @@ setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
       opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote },
     risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport, riskImportItems, doRiskImport, openRiskRecord, closeRiskForm, renderRisks, get RI() { return RI; }, recNotes, toLMH },
     util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum },
-    io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, csvText, autoMap, get W() { return W; } },
+    io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, csvText, autoMap, riskPreviewText, get W() { return W; } },
     db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; },
       get diskRev() { return diskRev; }, get readOnly() { return readOnly; }, get fileId() { return readFileId(db); },
       // test aid: attach a stand-in file handle without a picker
