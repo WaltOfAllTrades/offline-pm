@@ -200,6 +200,16 @@ function dropHierarchyLinks() {
   if (bad.length) opNotes.push(`Removed ${bad.length} link${bad.length > 1 ? "s" : ""} between a summary task and its own subtask.`);
 }
 
+// A task that loses its last subtask keeps the dates, % and status it showed as a summary, instead of falling
+// back to whatever it stored before it had subtasks (DECISIONS #5). Call after the change, with the parent's id;
+// M still holds the rolled-up values from before the change.
+function keepRollupIfChildless(parentId) {
+  const was = parentId != null && M.tasks.get(parentId);
+  if (!was || !was.isSummary || hasChildren(parentId)) return;
+  run("UPDATE task SET start=?, finish=?, percent=?, status=?, kind='task', updated_at=? WHERE id=?",
+    [fmtYMD(was.S) || null, fmtYMD(was.F) || null, was.P ?? 0, was.ST || "Not started", nowIso(), parentId]);
+}
+
 function opIndent(id) {
   const t = taskRow(id), sib = siblingsOf(t.parent_id), i = sib.indexOf(id);
   if (i <= 0) throw new Error("Nothing above to indent under. A task can only be indented under the task directly above it at the same level");
@@ -219,6 +229,7 @@ function opOutdent(id) {
   insertAt(parent.parent_id, gp.indexOf(parent.id) + 1, id);
   if (later.length) { const kids = siblingsOf(id); later.forEach(x => run("UPDATE task SET parent_id=? WHERE id=?", [id, x])); renumber([...kids, ...later]); }
   renumber(siblingsOf(parent.id));
+  keepRollupIfChildless(parent.id);
   dropHierarchyLinks(); checkDateCycles();
 }
 
@@ -238,7 +249,7 @@ function opMoveTo(id, targetId, where) {
     const sib = siblingsOf(target.parent_id).filter(x => x !== id);
     insertAt(target.parent_id, sib.indexOf(targetId) + (where === "after" ? 1 : 0), id);
   }
-  if (t.parent_id !== (where === "child" ? targetId : target.parent_id)) renumber(siblingsOf(t.parent_id));
+  if (t.parent_id !== (where === "child" ? targetId : target.parent_id)) { renumber(siblingsOf(t.parent_id)); keepRollupIfChildless(t.parent_id); }
   dropHierarchyLinks(); checkDateCycles();
 }
 
@@ -246,6 +257,7 @@ function opDelete(id) {
   const t = taskRow(id);
   run("DELETE FROM task WHERE id=?", [id]); // cascades to subtree, deps, raci
   renumber(siblingsOf(t.parent_id));
+  keepRollupIfChildless(t.parent_id);
 }
 
 // Field edits on a single task; dates use working-day rules (DECISIONS #2–#4, #8).

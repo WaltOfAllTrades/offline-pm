@@ -35,7 +35,8 @@ function parseYMD(s) {
   if (!s) return null;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) return null;
-  return Math.round(Date.UTC(+m[1], +m[2] - 1, +m[3]) / DAY);
+  const n = Math.round(Date.UTC(+m[1], +m[2] - 1, +m[3]) / DAY);
+  return fmtYMD(n) === s ? n : null; // "2026-02-30" isn't a date (Date.UTC would roll it to March 2)
 }
 function fmtYMD(n) {
   if (n == null) return "";

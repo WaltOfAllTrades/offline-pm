@@ -2,6 +2,7 @@
 // It wipes the in-page database, so never run it against a page holding real work.
 window.runPmTests = async function () {
   const P = window.PM, results = [];
+  if (P.db.readOnly) return { total: 0, passed: 0, failed: [{ tag: "setup", name: "page is read-only", pass: false, err: "Another tab holds the editing lock. Close it (or click Take over editing here) and run again." }] };
   const U = P.util, O = P.op;
   const eq = (a, b, msg) => { const A = JSON.stringify(a), B = JSON.stringify(b); if (A !== B) throw new Error(`${msg || "expected equal"}: got ${A}, want ${B}`); };
   const ok = (c, msg) => { if (!c) throw new Error(msg || "assertion failed"); };
@@ -963,6 +964,63 @@ await test("form-review", "Gantt lines up with the outline again after closing t
       await new Promise(r => setTimeout(r, 2600)); await P.flushSaves();
       eq(P.db.diskRev, P.db.rev, "retried and caught up"); ok(store?.length, "file written");
     } finally { P.db.attach(null); }
+  });
+
+  // ---------- Medium tier, batch A: import/export and data (DECISIONS #5, #48, #69) ----------
+  await test("dates", "impossible ISO dates are rejected", () => {
+    eq([U.parseYMD("2026-02-30"), U.parseYMD("2026-13-01"), U.parseYMD("2028-02-29") != null], [null, null, true]);
+    fresh(); const a = T("x"); ok(!P.mutate("t", () => O.opSetField(a, "start", "2026-02-30")), "edit refused"); eq(U.fmtYMD(task(a).S), "2026-03-02");
+  });
+  await test("rollup", "a task that loses its last subtask keeps what it showed as a summary", () => {
+    fresh(); const p = T("P", null, "2026-03-02", "2026-03-02"), c = T("C", p, "2026-03-09", "2026-03-13");
+    m(() => O.opSetField(c, "status", "Done"));
+    m(() => O.opDelete(c));
+    eq([U.fmtYMD(task(p).S), U.fmtYMD(task(p).F), task(p).P, task(p).ST], ["2026-03-09", "2026-03-13", 100, "Done"]);
+  });
+  await test("roundtrip", "'Responsible same as Accountable' survives export and import (own Accountable)", async () => {
+    fresh(); const p = T("P"), a = T("Own"), c = T("Child", p); let ana, ben;
+    m(() => { ana = O.opAddParty("person", "Ana"); ben = O.opAddParty("person", "Ben"); O.opSetRole(a, ana, "A"); O.opSetRIsA(a, true); O.opSetRole(p, ben, "A"); O.opSetRIsA(c, true); });
+    const buf = XL.write(P.io.exportWorkbook(), { type: "array", bookType: "xlsx" });
+    await runImport("rt2.xlsx", buf, W => W.mode = "new");
+    const byName = n => P.M.order.find(t => t.name === n);
+    eq([byName("Own").r_is_a, byName("Child").r_is_a], [1, 0], "switch back on where the task has its own A");
+    eq(P.q("SELECT t.name, r.role FROM raci r JOIN task t ON t.id=r.task_id WHERE t.project_id=? AND r.role='R'", [P.M.projectId]), [{ name: "Child", role: "R" }], "inherited case kept as an R");
+  });
+  await test("import-update", "predecessor problems show before importing; such rows keep their links", async () => {
+    fresh(); const a = T("A"), b = T("B"); m(() => O.opAddDep(a, b));
+    const wb = P.io.exportWorkbook(); const ws = wb.Sheets.Tasks; ws["K3"].v = "9.9";
+    let warned;
+    await runImport("bad.xlsx", XL.write(wb, { type: "array", bookType: "xlsx" }), W => { warned = P.io.buildPlan().warnings.filter(w => /9\.9/.test(w)); });
+    ok(warned.length && /existing links are kept/.test(warned[0]), "preview warns: " + warned);
+    eq(P.M.deps.length, 1, "link kept");
+  });
+  await test("import", "step-3 choices beat the People sheet; one team per person; ANSI-safe names; prototype-named values", async () => {
+    fresh(); const a = T("A"); let ana, eng;
+    m(() => { ana = O.opAddParty("person", "Ana"); eng = O.opAddParty("team", "Eng"); O.opSetMembers(eng, [ana]); O.opSetRole(a, ana, "R"); });
+    const buf = XL.write(P.io.exportWorkbook(), { type: "array", bookType: "xlsx" });
+    m(() => O.opDeleteParty(ana));
+    await runImport("ppl.xlsx", buf, W => { W.mode = "new"; W.peopleMap["ana"] = "ignore"; });
+    eq(P.scalar("SELECT COUNT(*) FROM party WHERE name='Ana'"), 0, "ignored person not created from the People sheet");
+    const csv = new TextEncoder().encode("Name,Status,Responsible\nOne,constructor,toString\n");
+    const r = await runImport("proto.csv", csv, W => W.mode = "new");
+    eq([P.M.order[0].ST, P.M.parties.size > 0], ["Not started", true], "odd values import instead of aborting");
+  });
+  await test("export", "CSV: one kind of line break, wider formula guard, notes unguarded on re-import", async () => {
+    fresh(); const a = T("A");
+    m(() => O.opSetField(a, "notes", "\t=1+1")); ok(P.io.csvText().includes("'\t=1+1"), "tab-led formula guarded");
+    m(() => O.opSetField(a, "notes", "line1\rline2"));
+    const csv = P.io.csvText(); ok(csv.includes("line1\nline2") && !csv.includes("\r"), "CR normalised");
+    m(() => O.opSetField(a, "notes", "- bullet"));
+    await runImport("n.csv", new TextEncoder().encode(P.io.csvText()), W => W.mode = "new");
+    eq(P.M.order[0].notes, "- bullet", "guard stripped from notes");
+  });
+  await test("import", "a huge declared range reads quickly; column guesses prefer the main synonym", async () => {
+    const wb = XL.utils.book_new(), ws = XL.utils.aoa_to_sheet([["Name", "Start"], ["Only", "2026-03-02"]]); ws["!ref"] = "A1:Z200000";
+    XL.utils.book_append_sheet(wb, ws, "S");
+    const bytes = XL.write(wb, { type: "array", bookType: "xlsx" });
+    const t0 = performance.now(); await runImport("big.xlsx", bytes, W => W.mode = "new");
+    ok(performance.now() - t0 < 3000, "took " + Math.round(performance.now() - t0) + "ms"); eq(P.M.order.map(t => t.name), ["Only"]);
+    eq(P.io.autoMap(["Baseline Start", "Start", "Description", "Task Name", "Completed On"]), { 1: "start", 3: "name" }, "Start and Task Name win; Completed On isn't % complete");
   });
   P.reset();
   const failed = results.filter(r => !r.pass);
