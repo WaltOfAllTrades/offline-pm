@@ -8,17 +8,17 @@ Object.assign(UI, {
 // Collapsible section header; open/closed state is remembered per browser.
 function secHead(key, title, ...extras) {
   const closed = UI.secClosed.has(key);
-  const toggle = () => { closed ? UI.secClosed.delete(key) : UI.secClosed.add(key); lsSet("pm.formClosed", [...UI.secClosed]); renderForm(true); };
+  const toggle = () => { closed ? UI.secClosed.delete(key) : UI.secClosed.add(key); lsSet("pm.formClosed", [...UI.secClosed]); redraw("formForce"); };
   return h("div", { class: "f-sec-h" }, h("button", { class: "sec-tog", "aria-expanded": String(!closed), title: closed ? "Show section" : "Hide section", onclick: toggle }, h("span", { class: "car" }, closed ? "▶" : "▼"), h("h3", {}, title)), ...extras);
 }
 
 function toggleForm(force) {
   const want = force ?? !UI.form;
-  if (want === UI.form) { renderForm(); return; }
+  if (want === UI.form) { redraw("form"); return; }
   UI.form = want;
   formHold = formHeldRender = false; // closing/opening must not wait for a held render
-  if (want) { renderForm(true); return; }
-  UI.editNote = null; renderForm();
+  if (want) { redraw("formForce"); return; }
+  UI.editNote = null; redraw("form");
   $("gridBody").focus();
 }
 // The panel lives in the Plan split, or in the RACI page's split when opened from the matrix.
@@ -29,7 +29,7 @@ function openRecord(id) {
   if (!formViews.has(UI.view)) switchView("plan");
   UI.form = true;
   if (UI.selId !== id) { UI.editNote = null; selectTask(id); } // selectTask re-renders the form
-  else renderForm(true);
+  else redraw("formForce");
 }
 // The panel takes a third of the width (at least 420px) and pushes the outline right; the Gantt keeps its place,
 // so the outline's right-hand columns slide under it (DECISIONS #38).
@@ -56,8 +56,8 @@ function holdFormRender() {
     removeEventListener("pointerup", release, true); removeEventListener("pointercancel", release, true);
     setTimeout(() => {
       formHold = false;
-      if (formHeldRender) { formHeldRender = false; renderForm(true); }
-      if (riskHeldRender) { riskHeldRender = false; renderRisks(); }
+      if (formHeldRender) { formHeldRender = false; redraw("formForce"); }
+      if (riskHeldRender) { riskHeldRender = false; redraw("risks"); }
     }, 0);
   };
   addEventListener("pointerup", release, true); addEventListener("pointercancel", release, true);
@@ -182,7 +182,7 @@ function miniGanttSection(t) {
   const rows = UI.mgAll ? descendantsOf(t) : t.children;
   const shown = rows.slice(0, MG_MAX);
   const allCb = h("input", { type: "checkbox", checked: UI.mgAll });
-  allCb.addEventListener("change", () => { UI.mgAll = allCb.checked; lsSet("pm.mgAll", UI.mgAll); renderForm(true); });
+  allCb.addEventListener("change", () => { UI.mgAll = allCb.checked; lsSet("pm.mgAll", UI.mgAll); redraw("formForce"); });
   const sec = h("section", { class: "f-sec mg" },
     secHead("mg", "Subtask schedule", h("span", { class: "hint" }, `${rows.length} ${UI.mgAll ? "subtasks at all levels" : "direct subtasks"}`),
       h("span", { class: "spacer" }), h("label", { class: "hint" }, allCb, " All levels")));
@@ -235,9 +235,9 @@ const PERSON_SVG = html`<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="
 function notesSection(t) {
   const withSub = t.isSummary && UI.notesWithSub;
   const subCb = t.isSummary ? h("input", { type: "checkbox", checked: UI.notesWithSub }) : null;
-  subCb?.addEventListener("change", () => { UI.notesWithSub = subCb.checked; lsSet("pm.notesWithSub", UI.notesWithSub); renderForm(true); });
+  subCb?.addEventListener("change", () => { UI.notesWithSub = subCb.checked; lsSet("pm.notesWithSub", UI.notesWithSub); redraw("formForce"); });
   return notesBlock({
-    draftKey: t.id, list: notesFor(t.id, withSub), pane: "formPane", rerender: () => renderForm(true), label: n => `Task ${(M.tasks.get(n?.task_id) || t).wbs}`,
+    draftKey: t.id, list: notesFor(t.id, withSub), pane: "formPane", rerender: () => redraw("formForce"), label: n => `Task ${(M.tasks.get(n?.task_id) || t).wbs}`,
     extras: subCb ? h("label", { class: "hint" }, subCb, " Include subtask notes") : null,
     empty: withSub ? "No work notes on this task or its subtasks yet." : "No work notes yet.",
     post: body => mutate(`Task ${t.wbs}: added a work note`, () => opAddNote(t.id, body)),
@@ -278,9 +278,9 @@ function noteEntry(o, n) {
     ed ? h("span", { class: "n-ed", title: `Edited ${ed.abs}` }, "(edited)") : null,
     h("span", { class: "spacer" }),
     editing ? null : h("button", { class: "link", onclick: () => {
-      UI.editNote = { id: n.id, created: n.created_at, text: n.body }; o.rerender();
+      UI.editNote = { id: n.id, created: n.created_at, text: n.body }; o.rerender(); drawNow();
       const focus = () => { const ta = $(o.pane).querySelector(".n-edit"); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } };
-      focus(); setTimeout(focus, 0); // the re-render may be deferred until the click finishes
+      focus(); setTimeout(focus, 0); // again once a render held for the click (holdFormRender) has run
     } }, "Edit"),
     editing ? null : h("button", { class: "link danger", onclick: () => { if (confirm("Delete this work note? (Undo is available.)")) mutate(`${label}: deleted a work note`, () => opDeleteNote(n.id)); } }, "Delete"));
   let body;
@@ -314,7 +314,7 @@ function relatedSection(t) {
   const bar = h("div", { class: "rel-tabs", role: "tablist" });
   for (const tab of RELATED_TABS) {
     const n = tab.count(t);
-    bar.append(h("button", { class: "rel-tab" + (tab === cur ? " on" : ""), role: "tab", "data-tab": tab.key, onclick: () => { UI.formTab = tab.key; lsSet("pm.formTab", tab.key); renderForm(true); } },
+    bar.append(h("button", { class: "rel-tab" + (tab === cur ? " on" : ""), role: "tab", "data-tab": tab.key, onclick: () => { UI.formTab = tab.key; lsSet("pm.formTab", tab.key); redraw("formForce"); } },
       tab.label, n != null ? h("span", { class: "cnt" }, String(n)) : null, tab.soon ? h("span", { class: "soon" }, "soon") : null));
   }
   return h("section", { class: "f-sec rel" }, h("div", { class: "f-sec-h" }, h("h3", {}, "Related records")), bar, h("div", { class: "rel-body" }, cur.render(t)));

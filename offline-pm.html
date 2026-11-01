@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-sxyJeTz0/33MhJTHt9o5PbZqBb5KyYi9ANzk/XJKejk='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-CSQMld+pSjLch4PKb2hlkjPv+ZL2XFLZGpqMf4zLjMc='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
 <title>Offline PM</title>
 <style>:root{
   --bg:#f5f6f8; --panel:#fff; --panel2:#fafbfc; --ink:#1b1f24; --muted:#667085; --line:#e4e7ec; --line2:#eef0f3;
@@ -2469,13 +2469,13 @@ function renderGridRows() {
 function selectTask(id, { scroll = true, col } = {}) {
   UI.selId = id; if (col) UI.col = col;
   if (id != null && scroll) revealTask(id);
-  renderGridRows(); renderGanttRows(); renderForm();
+  redraw("gridRows", "ganttRows", "form");
 }
 function revealTask(id) {
   const t = M.tasks.get(id); if (!t) return;
   let changed = false;
   for (let x = t.parent; x; x = x.parent) if (UI.collapsed.delete(x.id)) changed = true;
-  if (changed) { saveCollapsed(); computeRows(); renderGrid(); renderGantt(); }
+  if (changed) { saveCollapsed(); computeRows(); redraw("rows"); drawNow(); } // the scrolling below needs the new height
   if (t.row == null || UI.rows[t.row] !== t) return;
   const body = $("gridBody"), top = t.row * ROW;
   if (top < body.scrollTop) body.scrollTop = top;
@@ -2491,19 +2491,19 @@ function moveSel(dr) {
   i = clamp(i + dr, 0, UI.rows.length - 1);
   selectTask(UI.rows[i].id);
 }
-function moveCol(dc) { UI.col = COLS[clamp(colIndex(UI.col) + dc, 1, COLS.length - 1)].key; if (UI.selId) revealTask(UI.selId); renderGridRows(); }
+function moveCol(dc) { UI.col = COLS[clamp(colIndex(UI.col) + dc, 1, COLS.length - 1)].key; if (UI.selId) revealTask(UI.selId); redraw("gridRows"); }
 
 function toggleCollapse(id, force) {
   const has = UI.collapsed.has(id), want = force ?? !has;
   if (want === has) return;
   want ? UI.collapsed.add(id) : UI.collapsed.delete(id);
-  saveCollapsed(); computeRows(); renderGrid(); renderGantt();
+  saveCollapsed(); computeRows(); redraw("rows");
 }
 function showLevel(level) {
   UI.collapsed.clear();
   if (level !== "all") for (const t of M.order) if (t.isSummary && t.depth >= +level - 1) UI.collapsed.add(t.id);
   if (UI.selId && UI.collapsed.size) { const t = selTask(); if (t && t.depth >= +level) UI.selId = t.parent ? ancestorAtDepth(t, +level - 1).id : t.id; }
-  saveCollapsed(); computeRows(); renderGrid(); renderGantt(); renderForm();
+  saveCollapsed(); computeRows(); redraw("rows", "form");
 }
 function ancestorAtDepth(t, d) { let x = t; while (x.depth > d && x.parent) x = x.parent; return x; }
 
@@ -2513,7 +2513,7 @@ function startEdit(colKey = UI.col, initial = null) {
   const c = colByKey(colKey); if (!c || !c.edit) return;
   if (UI.editing) commitEdit(0, 0, true);
   if (t.isSummary && ROLLED.has(c.key)) { toast("Summary rows roll up from their subtasks"); return; }
-  UI.col = colKey; revealTask(t.id); renderGridRows();
+  UI.col = colKey; revealTask(t.id); redraw("gridRows"); drawNow(); // the cell is looked up next
   const cell = $("gridCanvas").querySelector(`.grow[data-id="${t.id}"] [data-col="${colKey}"]`);
   if (!cell) return;
   if (c.edit === "party") { openPartyPicker(cell.getBoundingClientRect(), t.id, colKey); return; }
@@ -2542,7 +2542,7 @@ function startEdit(colKey = UI.col, initial = null) {
   if (el.select && initial == null && el.type === "text") el.select();
   if (el.tagName === "SELECT" && el.showPicker) try { el.showPicker(); } catch { }
 }
-function cancelEdit() { if (!UI.editing) return; const e = UI.editing; UI.editing = null; e.el.remove(); $("gridBody").focus(); renderGridRows(); }
+function cancelEdit() { if (!UI.editing) return; const e = UI.editing; UI.editing = null; e.el.remove(); $("gridBody").focus(); redraw("gridRows"); }
 function commitEdit(dr, dc, fromBlur) {
   const e = UI.editing; if (!e || e.done) return;
   e.done = true; UI.editing = null;
@@ -2555,7 +2555,7 @@ function commitEdit(dr, dc, fromBlur) {
     // Refused (bad date, finish before start…): keep the editor open with what was typed, so it can be fixed.
     if (!ok && M.tasks.has(e.taskId)) { e.done = false; UI.editing = e; e.el.focus(); e.el.select?.(); return; }
     e.el.remove();
-  } else { e.el.remove(); renderGridRows(); }
+  } else { e.el.remove(); redraw("gridRows"); }
   if (!fromBlur) {
     $("gridBody").focus();
     if (dr) moveSel(dr);
@@ -2610,7 +2610,7 @@ function initGrid() {
   body.addEventListener("scroll", () => {
     $("gridHead").scrollLeft = body.scrollLeft;
     if ($("ganttBody").scrollTop !== body.scrollTop) $("ganttBody").scrollTop = body.scrollTop;
-    renderGridRows();
+    redraw("gridRows");
   });
   body.addEventListener("pointerdown", e => {
     if (e.target.closest(".cell-editor")) return;
@@ -2676,7 +2676,7 @@ function beginRowDrag(e, id) {
     clearInterval(timer);
     // Scrolling re-renders the rows, so the target is found again on every tick, under the pointer.
     const dy = ev.clientY < r.top + 24 ? -12 : ev.clientY > r.bottom - 24 ? 12 : 0;
-    if (dy) timer = setInterval(() => { body.scrollTop += dy; renderGridRows(); hit(last); }, 30);
+    if (dy) timer = setInterval(() => { body.scrollTop += dy; redraw("gridRows"); drawNow(); hit(last); }, 30); // hit() reads the new rows
     hit(ev);
   };
   const hit = ev => {
@@ -2898,7 +2898,7 @@ function scrollGanttTo(day, frac = 0.3) { const b = $("ganttBody"); b.scrollLeft
 function setGrain(g) {
   UI.grain = g; lsSet("pm.grain", g);
   $$("#grainSeg button").forEach(b => b.classList.toggle("on", b.dataset.grain === g));
-  renderGantt();
+  redraw("gantt"); drawNow(); // rescaling moves the scroll position, which "fit" then resets
   if (g === "fit") $("ganttBody").scrollLeft = 0;
 }
 
@@ -2909,19 +2909,19 @@ function initGantt() {
   body.addEventListener("scroll", () => {
     $("ganttHead").scrollLeft = body.scrollLeft;
     if ($("gridBody").scrollTop !== body.scrollTop) $("gridBody").scrollTop = body.scrollTop;
-    renderGanttRows();
+    redraw("ganttRows");
   });
   svg.addEventListener("pointerdown", e => {
     if (e.button !== 0) return;
     closePop();
     const depEl = e.target.closest(".dep");
-    if (depEl) { const id = +depEl.dataset.dep; UI.selDep = id; renderGanttRows(); openDepEditor(id, e.clientX, e.clientY); return; }
+    if (depEl) { const id = +depEl.dataset.dep; UI.selDep = id; redraw("ganttRows"); openDepEditor(id, e.clientX, e.clientY); return; }
     UI.selDep = null;
     const barEl = e.target.closest(".bar");
     if (!barEl) {
       const row = Math.floor(svgPoint(e).y / ROW);
       if (UI.rows[row]) selectTask(UI.rows[row].id, { scroll: false });
-      else renderGanttRows();
+      else redraw("ganttRows");
       return;
     }
     // Commit any open edit first and work from the result, or the drag would write the old dates back.
@@ -2938,7 +2938,7 @@ function initGantt() {
 function beginBarDrag(e, t, mode, barEl) {
   const svg = $("ganttSvg"), start = svgPoint(e);
   const wasSel = UI.selId === t.id;
-  if (!wasSel) { UI.selId = t.id; renderGridRows(); }
+  if (!wasSel) { UI.selId = t.id; redraw("gridRows"); }
   if (t.isSummary || t.S == null) { selectTask(t.id, { scroll: true }); barClicked(t); return; }
   svg.setPointerCapture(e.pointerId);
   let days = 0, moved = false, S = t.S, F = t.F;
@@ -2972,7 +2972,7 @@ function beginBarDrag(e, t, mode, barEl) {
       if (moved && (S !== t.S || F !== t.F)) mutate(`${mode === "move" ? "Moved" : "Resized"} “${t.name}” to ${fmtYMD(S)}${t.isMilestone ? "" : " → " + fmtYMD(F)}`, () => opSetField(t.id, "dates", { start: S, finish: F }));
       else { selectTask(t.id, { scroll: false }); barClicked(t); }
     },
-    cancel: () => { hideTip(); renderGanttRows(); }, // Escape puts the bar back
+    cancel: () => { hideTip(); redraw("ganttRows"); }, // Escape puts the bar back
   });
 }
 // Our own double-click detection: bars are re-rendered between clicks, so native dblclick can't find them.
@@ -3012,9 +3012,9 @@ function beginLink(e, from, side) {
       if (target) {
         const type = (side === "F" ? "F" : "S") + tside;
         mutate(`Linked ${from.wbs} → ${target.wbs} (${type})`, () => opAddDep(from.id, target.id, type, null));
-      } else renderGanttRows();
+      } else redraw("ganttRows");
     },
-    cancel: () => { stop(); renderGanttRows(); },
+    cancel: () => { stop(); redraw("ganttRows"); },
   });
 }
 
@@ -3029,17 +3029,17 @@ Object.assign(UI, {
 // Collapsible section header; open/closed state is remembered per browser.
 function secHead(key, title, ...extras) {
   const closed = UI.secClosed.has(key);
-  const toggle = () => { closed ? UI.secClosed.delete(key) : UI.secClosed.add(key); lsSet("pm.formClosed", [...UI.secClosed]); renderForm(true); };
+  const toggle = () => { closed ? UI.secClosed.delete(key) : UI.secClosed.add(key); lsSet("pm.formClosed", [...UI.secClosed]); redraw("formForce"); };
   return h("div", { class: "f-sec-h" }, h("button", { class: "sec-tog", "aria-expanded": String(!closed), title: closed ? "Show section" : "Hide section", onclick: toggle }, h("span", { class: "car" }, closed ? "▶" : "▼"), h("h3", {}, title)), ...extras);
 }
 
 function toggleForm(force) {
   const want = force ?? !UI.form;
-  if (want === UI.form) { renderForm(); return; }
+  if (want === UI.form) { redraw("form"); return; }
   UI.form = want;
   formHold = formHeldRender = false; // closing/opening must not wait for a held render
-  if (want) { renderForm(true); return; }
-  UI.editNote = null; renderForm();
+  if (want) { redraw("formForce"); return; }
+  UI.editNote = null; redraw("form");
   $("gridBody").focus();
 }
 // The panel lives in the Plan split, or in the RACI page's split when opened from the matrix.
@@ -3050,7 +3050,7 @@ function openRecord(id) {
   if (!formViews.has(UI.view)) switchView("plan");
   UI.form = true;
   if (UI.selId !== id) { UI.editNote = null; selectTask(id); } // selectTask re-renders the form
-  else renderForm(true);
+  else redraw("formForce");
 }
 // The panel takes a third of the width (at least 420px) and pushes the outline right; the Gantt keeps its place,
 // so the outline's right-hand columns slide under it (DECISIONS #38).
@@ -3077,8 +3077,8 @@ function holdFormRender() {
     removeEventListener("pointerup", release, true); removeEventListener("pointercancel", release, true);
     setTimeout(() => {
       formHold = false;
-      if (formHeldRender) { formHeldRender = false; renderForm(true); }
-      if (riskHeldRender) { riskHeldRender = false; renderRisks(); }
+      if (formHeldRender) { formHeldRender = false; redraw("formForce"); }
+      if (riskHeldRender) { riskHeldRender = false; redraw("risks"); }
     }, 0);
   };
   addEventListener("pointerup", release, true); addEventListener("pointercancel", release, true);
@@ -3203,7 +3203,7 @@ function miniGanttSection(t) {
   const rows = UI.mgAll ? descendantsOf(t) : t.children;
   const shown = rows.slice(0, MG_MAX);
   const allCb = h("input", { type: "checkbox", checked: UI.mgAll });
-  allCb.addEventListener("change", () => { UI.mgAll = allCb.checked; lsSet("pm.mgAll", UI.mgAll); renderForm(true); });
+  allCb.addEventListener("change", () => { UI.mgAll = allCb.checked; lsSet("pm.mgAll", UI.mgAll); redraw("formForce"); });
   const sec = h("section", { class: "f-sec mg" },
     secHead("mg", "Subtask schedule", h("span", { class: "hint" }, `${rows.length} ${UI.mgAll ? "subtasks at all levels" : "direct subtasks"}`),
       h("span", { class: "spacer" }), h("label", { class: "hint" }, allCb, " All levels")));
@@ -3256,9 +3256,9 @@ const PERSON_SVG = html`<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="
 function notesSection(t) {
   const withSub = t.isSummary && UI.notesWithSub;
   const subCb = t.isSummary ? h("input", { type: "checkbox", checked: UI.notesWithSub }) : null;
-  subCb?.addEventListener("change", () => { UI.notesWithSub = subCb.checked; lsSet("pm.notesWithSub", UI.notesWithSub); renderForm(true); });
+  subCb?.addEventListener("change", () => { UI.notesWithSub = subCb.checked; lsSet("pm.notesWithSub", UI.notesWithSub); redraw("formForce"); });
   return notesBlock({
-    draftKey: t.id, list: notesFor(t.id, withSub), pane: "formPane", rerender: () => renderForm(true), label: n => `Task ${(M.tasks.get(n?.task_id) || t).wbs}`,
+    draftKey: t.id, list: notesFor(t.id, withSub), pane: "formPane", rerender: () => redraw("formForce"), label: n => `Task ${(M.tasks.get(n?.task_id) || t).wbs}`,
     extras: subCb ? h("label", { class: "hint" }, subCb, " Include subtask notes") : null,
     empty: withSub ? "No work notes on this task or its subtasks yet." : "No work notes yet.",
     post: body => mutate(`Task ${t.wbs}: added a work note`, () => opAddNote(t.id, body)),
@@ -3299,9 +3299,9 @@ function noteEntry(o, n) {
     ed ? h("span", { class: "n-ed", title: `Edited ${ed.abs}` }, "(edited)") : null,
     h("span", { class: "spacer" }),
     editing ? null : h("button", { class: "link", onclick: () => {
-      UI.editNote = { id: n.id, created: n.created_at, text: n.body }; o.rerender();
+      UI.editNote = { id: n.id, created: n.created_at, text: n.body }; o.rerender(); drawNow();
       const focus = () => { const ta = $(o.pane).querySelector(".n-edit"); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } };
-      focus(); setTimeout(focus, 0); // the re-render may be deferred until the click finishes
+      focus(); setTimeout(focus, 0); // again once a render held for the click (holdFormRender) has run
     } }, "Edit"),
     editing ? null : h("button", { class: "link danger", onclick: () => { if (confirm("Delete this work note? (Undo is available.)")) mutate(`${label}: deleted a work note`, () => opDeleteNote(n.id)); } }, "Delete"));
   let body;
@@ -3335,7 +3335,7 @@ function relatedSection(t) {
   const bar = h("div", { class: "rel-tabs", role: "tablist" });
   for (const tab of RELATED_TABS) {
     const n = tab.count(t);
-    bar.append(h("button", { class: "rel-tab" + (tab === cur ? " on" : ""), role: "tab", "data-tab": tab.key, onclick: () => { UI.formTab = tab.key; lsSet("pm.formTab", tab.key); renderForm(true); } },
+    bar.append(h("button", { class: "rel-tab" + (tab === cur ? " on" : ""), role: "tab", "data-tab": tab.key, onclick: () => { UI.formTab = tab.key; lsSet("pm.formTab", tab.key); redraw("formForce"); } },
       tab.label, n != null ? h("span", { class: "cnt" }, String(n)) : null, tab.soon ? h("span", { class: "soon" }, "soon") : null));
   }
   return h("section", { class: "f-sec rel" }, h("div", { class: "f-sec-h" }, h("h3", {}, "Related records")), bar, h("div", { class: "rel-body" }, cur.render(t)));
@@ -3581,7 +3581,7 @@ function statusSelect(m, cls = "") {
 // Same place as the Plan outline: right after the name, shown on hover or when the row is selected.
 const openBtn = (kind, id) => h("button", { class: "open-rec rk-open", title: "Open record", onclick: e => { e.stopPropagation(); openRiskRecord(kind, id); } }, "↗");
 const isSel = rec => UI.riskSel && UI.riskSel.kind === rec.kind && UI.riskSel.id === rec.id;
-function focusRisk(key, select) { UI.riskFocus = { key, select }; renderRisks(); }
+function focusRisk(key, select) { UI.riskFocus = { key, select }; redraw("risks"); }
 function deleteRiskRec(r) {
   const n = r.mitigants.length;
   if (n && !confirm(`Delete risk “${r.name}” and its ${n} mitigant${n > 1 ? "s" : ""}? (Undo is available.)`)) return;
@@ -3708,13 +3708,13 @@ function chooseMitigant(ev, r, suggested, then) {
 function openRiskRecord(kind, id) {
   if (UI.view !== "risks") switchView("risks");
   UI.riskSel = { kind, id }; UI.riskForm = true; UI.editNote = null;
-  renderRisks();
+  redraw("risks");
 }
 function sizeRiskForm() {
   const split = $("riskSplit").clientWidth || innerWidth;
   $("riskFormPane").style.width = (UI.riskForm ? Math.round(clamp(split / 3, Math.min(420, split - 200), split - 200)) : 0) + "px";
 }
-function closeRiskForm() { UI.riskForm = false; UI.editNote = null; renderRisks(); }
+function closeRiskForm() { UI.riskForm = false; UI.editNote = null; redraw("risks"); }
 function renderRiskForm() {
   const pane = $("riskFormPane"), rec = UI.riskForm ? recOf(UI.riskSel) : null;
   const show = !!rec && UI.view === "risks";
@@ -3734,7 +3734,7 @@ function renderRiskForm() {
   pane.append(rec.kind === "risk" ? riskFields(rec) : mitFields(rec));
   pane.append(rec.kind === "risk" ? riskMitList(rec) : mitTaskList(rec));
   pane.append(notesBlock({
-    draftKey: key, list: recNotes(rec.kind, rec.id), pane: "riskFormPane", rerender: () => renderRisks(), label: rec.kind === "risk" ? "Risk" : "Mitigant",
+    draftKey: key, list: recNotes(rec.kind, rec.id), pane: "riskFormPane", rerender: () => redraw("risks"), label: rec.kind === "risk" ? "Risk" : "Mitigant",
     empty: "No work notes yet.", post: body => mutate(`${rec.kind === "risk" ? "Risk" : "Mitigant"}: added a work note`, () => opAddRecNote(rec.kind, rec.id, body)),
   }));
   pane.scrollTop = scroll;
@@ -3984,16 +3984,16 @@ function initRisks() {
   $("addRiskBtn").onclick = () => { if (UI.riskSearch || UI.riskFilter !== "all") { UI.riskSearch = ""; $("riskSearch").value = ""; UI.riskFilter = "all"; $$("#riskSeg button").forEach(x => x.classList.toggle("on", x.dataset.f === "all")); } let id; if (mutate("Added risk", () => { id = opAddRisk({ afterId: M.risks.at(-1)?.id ?? null }); })) focusRisk(`r${id}:name`, true); };
   $("riskImportBtn").onclick = startRiskImport;
   $("closeoutBtn").onclick = showCloseout;
-  $$("#riskSeg button").forEach(b => b.addEventListener("click", () => { UI.riskFilter = b.dataset.f; $$("#riskSeg button").forEach(x => x.classList.toggle("on", x === b)); renderRisks(); }));
+  $$("#riskSeg button").forEach(b => b.addEventListener("click", () => { UI.riskFilter = b.dataset.f; $$("#riskSeg button").forEach(x => x.classList.toggle("on", x === b)); redraw("risks"); }));
   $("riskSearch").addEventListener("input", e => { UI.riskSearch = e.target.value; renderRiskGrid(); });
-  $("planSearch").addEventListener("input", e => { UI.planSearch = e.target.value; renderPlanList(); });
+  $("planSearch").addEventListener("input", e => { UI.planSearch = e.target.value; redraw("planList"); });
   $("riskBody").addEventListener("pointerdown", e => {
     const ae = document.activeElement;
     if (ae?._dirty?.() && $("view-risks").contains(ae) && !ae.contains(e.target)) { holdFormRender(); ae._commit(); }
     const tr = e.target.closest("tr.rk-risk, tr.rk-mit"); if (!tr) return;
     const sel = tr.dataset.risk ? { kind: "risk", id: +tr.dataset.risk } : { kind: "mitigant", id: +tr.dataset.mit };
     if (e.target.closest(".rk-drag")) { e.preventDefault(); beginRecDrag(e, sel); }
-    if (!isSel(sel)) { UI.riskSel = sel; $$("#riskBody tr.sel").forEach(x => x.classList.remove("sel")); tr.classList.add("sel"); if (UI.riskForm) renderRisks(); }
+    if (!isSel(sel)) { UI.riskSel = sel; $$("#riskBody tr.sel").forEach(x => x.classList.remove("sel")); tr.classList.add("sel"); if (UI.riskForm) redraw("risks"); }
   }, true);
   $("riskBody").addEventListener("dblclick", e => {
     const tr = e.target.closest("tr.rk-risk, tr.rk-mit"); if (!tr || e.target.closest("input,textarea,select,button")) return;
@@ -4212,7 +4212,7 @@ function teamMemberPicker(anchor, tid, teamId) {
 }
 function initRaci() {
   $("raciWrap").addEventListener("click", e => {
-    const link = e.target.closest("[data-open]"); if (link) { e.preventDefault(); openRecord(+link.dataset.open); renderRaci(); return; }
+    const link = e.target.closest("[data-open]"); if (link) { e.preventDefault(); openRecord(+link.dataset.open); redraw("raci"); return; }
     const plus = e.target.closest("[data-plus]");
     if (plus) { const td = plus.closest("td.cell"); teamMemberPicker(plus.getBoundingClientRect(), +td.dataset.t, +plus.dataset.plus); return; }
     const td = e.target.closest("td.cell"); if (!td) return;
@@ -4230,7 +4230,7 @@ function initRaci() {
     });
     $("raciWrap").scrollTop = keep; $("raciWrap").scrollLeft = keepL;
   });
-  $$("#raciBySeg button").forEach(b => b.addEventListener("click", () => { UI.raciBy = b.dataset.by; lsSet("pm.raciBy", UI.raciBy); renderRaci(); }));
+  $$("#raciBySeg button").forEach(b => b.addEventListener("click", () => { UI.raciBy = b.dataset.by; lsSet("pm.raciBy", UI.raciBy); redraw("raci"); }));
   $("raciOnlyUsed").addEventListener("change", renderRaci);
   $("raciLeaves").addEventListener("change", renderRaci);
 }
@@ -4357,7 +4357,7 @@ function renderProjectMenu() {
 function switchProject(id) {
   M.projectId = id; lsSet("pm.project", id);
   UI.selId = null; UI.selDep = null;
-  refresh(); loadCollapsed(); computeRows(); renderAll();
+  refresh(); loadCollapsed(); computeRows(); redraw("all");
   const b = $("ganttBody"); const r = projectRange(); if (SC) scrollGanttTo(r.lo, 0.05); b.scrollTop = 0;
 }
 
@@ -5293,22 +5293,51 @@ function renderPersonFilter() {
   if (M.teams.length) sel.append(h("optgroup", { label: "Teams" }, ...M.teams.map(p => h("option", { value: "p:" + p.id, selected: cur === "p:" + p.id }, "👥 " + p.name))));
   if (cur && !M.parties.has(+cur.slice(2))) UI.person = "";
 }
-function renderAll() {
-  renderProjectMenu(); updateIssueBadge(); updateRiskBadge(); renderSaveState(); renderPersonFilter();
-  if (UI.view === "plan") { renderGrid(); renderGantt(); renderForm(); }
-  else if (UI.view === "risks") renderRisks();
-  else if (UI.view === "raci") { renderRaci(); renderForm(); }
-  else if (UI.view === "people") renderPeople();
-  else if (UI.view === "issues") renderIssues();
+// ---------- Redraws ----------
+// The one place that decides what gets drawn (DECISIONS #75). Code names what went stale with redraw(...parts), and
+// whatever the current view shows of it is drawn once, in a fixed order, in a microtask straight after the code that
+// asked: several requests from one event draw once, and it still runs in a background tab. Code that reads the new
+// DOM right away calls drawNow(). The render* functions are the drawing itself; only drawNow() calls them.
+//   all            everything: header bits and the whole current view (after any data change)
+//   rows           the outline's rows changed (filter, collapse): grid and Gantt in full
+//   gridRows, ganttRows   repaint the visible rows (selection, scrolling)      gantt   rescale the Gantt
+//   form, formForce       the record panel; formForce rebuilds it even while one of its fields has focus
+//   risks, planList, raci, issues, save
+const stale = new Set(); let drawQueued = false;
+function redraw(...parts) {
+  for (const p of parts) stale.add(p);
+  if (!drawQueued) { drawQueued = true; queueMicrotask(drawNow); }
 }
-function onDataChanged() { if (!ready) return; refresh(); if (UI.collapsedFor !== collapsedKey()) loadCollapsed(); computeRows(); renderAll(); } // another file or project: its own collapse state
+function drawNow() {
+  drawQueued = false;
+  if (!ready || !stale.size) return; // before startup finishes, requests wait for its redraw("all")
+  const s = new Set(stale); stale.clear();
+  const all = s.has("all"), v = UI.view, any = p => all || s.has(p);
+  if (all) { renderProjectMenu(); updateIssueBadge(); updateRiskBadge(); renderPersonFilter(); }
+  if (any("save")) renderSaveState();
+  if (v === "plan") {
+    if (any("rows")) { renderGrid(); renderGantt(); }
+    else {
+      if (s.has("gridRows")) renderGridRows();
+      if (s.has("gantt")) renderGantt(); else if (s.has("ganttRows")) renderGanttRows();
+    }
+  }
+  if (v === "risks") { if (any("risks")) renderRisks(); else if (s.has("planList")) renderPlanList(); }
+  if (v === "raci" && any("raci")) renderRaci();
+  if (v === "people" && all) renderPeople();
+  if (v === "issues" && any("issues")) renderIssues();
+  // The record panel last, beside the plan or the RACI matrix; asked for elsewhere, it just closes.
+  if (s.has("formForce")) renderForm(true);
+  else if (s.has("form") || (all && (v === "plan" || v === "raci"))) renderForm();
+}
+function onDataChanged() { if (!ready) return; refresh(); if (UI.collapsedFor !== collapsedKey()) loadCollapsed(); computeRows(); redraw("all"); } // another file or project: its own collapse state
 
 function switchView(v) {
   UI.view = v; closePop();
   if (v !== "plan" && v !== "raci") { const fp = $("formPane"); fp.classList.remove("open"); }
   $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.view === v));
   for (const s of ["plan", "risks", "raci", "people", "issues"]) $("view-" + s).hidden = s !== v;
-  renderAll();
+  redraw("all"); drawNow(); // a view that was hidden has stale sizes and contents
   if (v === "plan") $("gridBody").focus();
 }
 
@@ -5324,13 +5353,13 @@ function initToolbar() {
   $("delBtn").onclick = cmdDelete;
   $("levelSel").onchange = e => { if (e.target.value) showLevel(e.target.value); e.target.value = ""; };
   let searchTimer; // re-filter after a short pause, not on every keystroke
-  $("searchBox").addEventListener("input", e => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { UI.search = e.target.value; computeRows(); renderGrid(); renderGantt(); }, 150); });
-  $("personFilter").addEventListener("change", e => { UI.person = e.target.value; computeRows(); renderGrid(); renderGantt(); });
+  $("searchBox").addEventListener("input", e => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { UI.search = e.target.value; computeRows(); redraw("rows"); }, 150); });
+  $("personFilter").addEventListener("change", e => { UI.person = e.target.value; computeRows(); redraw("rows"); });
   $("detailsBtn").onclick = () => toggleForm();
   $$("#grainSeg button").forEach(b => b.addEventListener("click", () => setGrain(b.dataset.grain)));
   $("todayBtn").onclick = () => scrollGanttTo(todayNum(), 0.3);
   $("undoBtn").onclick = undo; $("redoBtn").onclick = redo;
-  $("savePill").onclick = () => { $("logPanel").hidden = !$("logPanel").hidden; renderSaveState(); };
+  $("savePill").onclick = () => { $("logPanel").hidden = !$("logPanel").hidden; redraw("save"); };
   $("logClose").onclick = () => $("logPanel").hidden = true;
   $("slowMo").onchange = e => slowSaves = e.target.checked;
   $("projBtn").onclick = () => { const m = $("projMenu"); const open = m.hidden; $$(".menu").forEach(x => x.hidden = true); m.hidden = !open; };
@@ -5342,7 +5371,7 @@ function initToolbar() {
   });
   $("addPersonBtn").onclick = () => editParty(null, "person");
   $("addTeamBtn").onclick = () => editParty(null, "team");
-  $$("#issueSeg button").forEach(b => b.addEventListener("click", () => { issueFilter = b.dataset.f; $$("#issueSeg button").forEach(x => x.classList.toggle("on", x === b)); renderIssues(); }));
+  $$("#issueSeg button").forEach(b => b.addEventListener("click", () => { issueFilter = b.dataset.f; $$("#issueSeg button").forEach(x => x.classList.toggle("on", x === b)); redraw("issues"); }));
   $("modalBack").addEventListener("pointerdown", e => { if (e.target === $("modalBack")) closeModal(); });
   // Committing a form field blurs it first, so the re-render after the change isn't skipped.
   $("formPane").addEventListener("pointerdown", e => {
@@ -5358,10 +5387,10 @@ function initToolbar() {
     sp.setPointerCapture(e.pointerId); sp.classList.add("drag");
     const x0 = e.clientX, w0 = pane.offsetWidth;
     const mv = ev => { pane.style.width = clamp(w0 + ev.clientX - x0, 240, innerWidth - 160) + "px"; };
-    const up = () => { sp.classList.remove("drag"); sp.removeEventListener("pointermove", mv); sp.removeEventListener("pointerup", up); lsSet("pm.split", pane.offsetWidth + (UI.form ? formWidth() : 0)); renderGridRows(); renderGantt(); if (UI.form) relayoutForm(); };
+    const up = () => { sp.classList.remove("drag"); sp.removeEventListener("pointermove", mv); sp.removeEventListener("pointerup", up); lsSet("pm.split", pane.offsetWidth + (UI.form ? formWidth() : 0)); redraw("gridRows", "gantt"); if (UI.form) relayoutForm(); };
     sp.addEventListener("pointermove", mv); sp.addEventListener("pointerup", up);
   });
-  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "risks") { if (UI.riskForm) sizeRiskForm(); $$("#riskBody textarea").forEach(autoGrow); } if (UI.view === "plan") { if (UI.form) relayoutForm(); else if (lsGet("pm.split", null) == null) pane.style.width = gridFullWidth() + "px"; renderGridRows(); renderGantt(); } }, 120); });
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "risks") { if (UI.riskForm) sizeRiskForm(); $$("#riskBody textarea").forEach(autoGrow); } if (UI.view === "plan") { if (UI.form) relayoutForm(); else if (lsGet("pm.split", null) == null) pane.style.width = gridFullWidth() + "px"; redraw("gridRows", "gantt"); } }, 120); });
 
   document.addEventListener("keydown", e => {
     const ctrl = e.ctrlKey || e.metaKey;
@@ -5375,10 +5404,10 @@ function initToolbar() {
 }
 
 hooks.onChange = onDataChanged;
-hooks.onSaveState = () => { if (ready) renderSaveState(); };
+hooks.onSaveState = () => redraw("save");
 hooks.onReadOnly = () => { $("roText").textContent = readOnlyWhy; $("roBanner").hidden = false; };
 hooks.onReplace = () => { UI.selId = null; UI.noteDrafts.clear(); UI.editNote = null; UI.riskSel = null; UI.riskForm = false; UI.riskFocus = null; }; // ids from another file mean nothing here
-setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
+setInterval(() => { if (fileHandle) redraw("save"); }, 15000); // "saved 2 min ago" ages
 
 (async () => {
   initToolbar(); initGrid(); initGantt(); initRaci(); initRisks();
@@ -5393,7 +5422,7 @@ setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
   UI.grain = lsGet("pm.grain", "week");
   $$("#grainSeg button").forEach(b => b.classList.toggle("on", b.dataset.grain === UI.grain));
   ready = true;
-  refresh(); loadCollapsed(); computeRows(); renderAll();
+  refresh(); loadCollapsed(); computeRows(); redraw("all"); drawNow();
   const r = projectRange(); scrollGanttTo(r.lo, 0.05);
   // Browsers without Web Locks can't make a second tab read-only, so at least warn.
   if (!navigator.locks) try {
@@ -5402,19 +5431,23 @@ setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
     bc.postMessage("hello");
   } catch { }
   if (!fsSupported) toast("This browser can't save to files. Use Chrome or Edge for live saving; Excel export still works.", "err");
+  const drawn = fn => (...a) => { try { return fn(...a); } finally { drawNow(); } }; // console/test calls see the result drawn
   window.PM = {
-    M, UI, q, run, one, scalar, mutate, undo, redo, flushSaves, refresh, renderAll, selectTask, switchView, switchProject, openRecord, toggleForm, renderForm, notesFor,
+    M, UI, q, run, one, scalar, undo: drawn(undo), redo: drawn(redo), flushSaves, refresh, redraw, drawNow, notesFor,
+    mutate: drawn(mutate), selectTask: drawn(selectTask), switchView: drawn(switchView), switchProject: drawn(switchProject), openRecord: drawn(openRecord), toggleForm: drawn(toggleForm),
+    renderAll: drawn(() => redraw("all")), renderForm: drawn(force => redraw(force ? "formForce" : "form")),
     op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote, opSetRIsA,
       opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote },
-    risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport, riskImportItems, doRiskImport, openRiskRecord, closeRiskForm, renderRisks, get RI() { return RI; }, recNotes, toLMH },
+    risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport: drawn(loadRiskImport), riskImportItems, doRiskImport: drawn(doRiskImport), openRiskRecord: drawn(openRiskRecord), closeRiskForm: drawn(closeRiskForm), renderRisks: drawn(() => redraw("risks")), get RI() { return RI; }, recNotes, toLMH },
     util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml },
-    io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, csvText, autoMap, riskPreviewText, get W() { return W; } },
+    io: { loadImportFile, buildPlan, doImport: drawn(doImport), collectPeople, exportWorkbook, csvText, autoMap, riskPreviewText, get W() { return W; } },
     db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; },
       get diskRev() { return diskRev; }, get readOnly() { return readOnly; }, get fileId() { return readFileId(db); },
       // test aid: attach a stand-in file handle without a picker
       attach(h, base = null) { fileHandle = h; filePerm = !!h; diskRev = base; }, endReadOnly() { readOnly = false; readOnlyWhy = ""; $("roBanner").hidden = true; } },
-    gantt: { buildScale, get SC() { return SC; }, setGrain }, cmd: { cmdAdd, cmdStructure, cmdDelete, startEdit, commitEdit, gridKey, toggleCollapse, showLevel, startImport, printPlan },
-    reset() { installDb(null); M.projectId = null; UI.selId = null; refresh(); loadCollapsed(); computeRows(); renderAll(); },
+    gantt: { buildScale, get SC() { return SC; }, setGrain },
+    cmd: Object.fromEntries(Object.entries({ cmdAdd, cmdStructure, cmdDelete, startEdit, commitEdit, gridKey, toggleCollapse, showLevel, startImport, printPlan }).map(([k, f]) => [k, drawn(f)])),
+    reset: drawn(() => { installDb(null); M.projectId = null; UI.selId = null; refresh(); loadCollapsed(); computeRows(); redraw("all"); }),
     get XLSX() { return XLSX; }, get SQL() { return SQL; },
   };
 })();

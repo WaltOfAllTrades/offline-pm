@@ -187,7 +187,7 @@ function scrollGanttTo(day, frac = 0.3) { const b = $("ganttBody"); b.scrollLeft
 function setGrain(g) {
   UI.grain = g; lsSet("pm.grain", g);
   $$("#grainSeg button").forEach(b => b.classList.toggle("on", b.dataset.grain === g));
-  renderGantt();
+  redraw("gantt"); drawNow(); // rescaling moves the scroll position, which "fit" then resets
   if (g === "fit") $("ganttBody").scrollLeft = 0;
 }
 
@@ -198,19 +198,19 @@ function initGantt() {
   body.addEventListener("scroll", () => {
     $("ganttHead").scrollLeft = body.scrollLeft;
     if ($("gridBody").scrollTop !== body.scrollTop) $("gridBody").scrollTop = body.scrollTop;
-    renderGanttRows();
+    redraw("ganttRows");
   });
   svg.addEventListener("pointerdown", e => {
     if (e.button !== 0) return;
     closePop();
     const depEl = e.target.closest(".dep");
-    if (depEl) { const id = +depEl.dataset.dep; UI.selDep = id; renderGanttRows(); openDepEditor(id, e.clientX, e.clientY); return; }
+    if (depEl) { const id = +depEl.dataset.dep; UI.selDep = id; redraw("ganttRows"); openDepEditor(id, e.clientX, e.clientY); return; }
     UI.selDep = null;
     const barEl = e.target.closest(".bar");
     if (!barEl) {
       const row = Math.floor(svgPoint(e).y / ROW);
       if (UI.rows[row]) selectTask(UI.rows[row].id, { scroll: false });
-      else renderGanttRows();
+      else redraw("ganttRows");
       return;
     }
     // Commit any open edit first and work from the result, or the drag would write the old dates back.
@@ -227,7 +227,7 @@ function initGantt() {
 function beginBarDrag(e, t, mode, barEl) {
   const svg = $("ganttSvg"), start = svgPoint(e);
   const wasSel = UI.selId === t.id;
-  if (!wasSel) { UI.selId = t.id; renderGridRows(); }
+  if (!wasSel) { UI.selId = t.id; redraw("gridRows"); }
   if (t.isSummary || t.S == null) { selectTask(t.id, { scroll: true }); barClicked(t); return; }
   svg.setPointerCapture(e.pointerId);
   let days = 0, moved = false, S = t.S, F = t.F;
@@ -261,7 +261,7 @@ function beginBarDrag(e, t, mode, barEl) {
       if (moved && (S !== t.S || F !== t.F)) mutate(`${mode === "move" ? "Moved" : "Resized"} “${t.name}” to ${fmtYMD(S)}${t.isMilestone ? "" : " → " + fmtYMD(F)}`, () => opSetField(t.id, "dates", { start: S, finish: F }));
       else { selectTask(t.id, { scroll: false }); barClicked(t); }
     },
-    cancel: () => { hideTip(); renderGanttRows(); }, // Escape puts the bar back
+    cancel: () => { hideTip(); redraw("ganttRows"); }, // Escape puts the bar back
   });
 }
 // Our own double-click detection: bars are re-rendered between clicks, so native dblclick can't find them.
@@ -301,8 +301,8 @@ function beginLink(e, from, side) {
       if (target) {
         const type = (side === "F" ? "F" : "S") + tside;
         mutate(`Linked ${from.wbs} → ${target.wbs} (${type})`, () => opAddDep(from.id, target.id, type, null));
-      } else renderGanttRows();
+      } else redraw("ganttRows");
     },
-    cancel: () => { stop(); renderGanttRows(); },
+    cancel: () => { stop(); redraw("ganttRows"); },
   });
 }

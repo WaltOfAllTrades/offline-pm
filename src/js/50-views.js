@@ -202,7 +202,7 @@ function teamMemberPicker(anchor, tid, teamId) {
 }
 function initRaci() {
   $("raciWrap").addEventListener("click", e => {
-    const link = e.target.closest("[data-open]"); if (link) { e.preventDefault(); openRecord(+link.dataset.open); renderRaci(); return; }
+    const link = e.target.closest("[data-open]"); if (link) { e.preventDefault(); openRecord(+link.dataset.open); redraw("raci"); return; }
     const plus = e.target.closest("[data-plus]");
     if (plus) { const td = plus.closest("td.cell"); teamMemberPicker(plus.getBoundingClientRect(), +td.dataset.t, +plus.dataset.plus); return; }
     const td = e.target.closest("td.cell"); if (!td) return;
@@ -220,7 +220,7 @@ function initRaci() {
     });
     $("raciWrap").scrollTop = keep; $("raciWrap").scrollLeft = keepL;
   });
-  $$("#raciBySeg button").forEach(b => b.addEventListener("click", () => { UI.raciBy = b.dataset.by; lsSet("pm.raciBy", UI.raciBy); renderRaci(); }));
+  $$("#raciBySeg button").forEach(b => b.addEventListener("click", () => { UI.raciBy = b.dataset.by; lsSet("pm.raciBy", UI.raciBy); redraw("raci"); }));
   $("raciOnlyUsed").addEventListener("change", renderRaci);
   $("raciLeaves").addEventListener("change", renderRaci);
 }
@@ -347,7 +347,7 @@ function renderProjectMenu() {
 function switchProject(id) {
   M.projectId = id; lsSet("pm.project", id);
   UI.selId = null; UI.selDep = null;
-  refresh(); loadCollapsed(); computeRows(); renderAll();
+  refresh(); loadCollapsed(); computeRows(); redraw("all");
   const b = $("ganttBody"); const r = projectRange(); if (SC) scrollGanttTo(r.lo, 0.05); b.scrollTop = 0;
 }
 

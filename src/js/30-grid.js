@@ -126,13 +126,13 @@ function renderGridRows() {
 function selectTask(id, { scroll = true, col } = {}) {
   UI.selId = id; if (col) UI.col = col;
   if (id != null && scroll) revealTask(id);
-  renderGridRows(); renderGanttRows(); renderForm();
+  redraw("gridRows", "ganttRows", "form");
 }
 function revealTask(id) {
   const t = M.tasks.get(id); if (!t) return;
   let changed = false;
   for (let x = t.parent; x; x = x.parent) if (UI.collapsed.delete(x.id)) changed = true;
-  if (changed) { saveCollapsed(); computeRows(); renderGrid(); renderGantt(); }
+  if (changed) { saveCollapsed(); computeRows(); redraw("rows"); drawNow(); } // the scrolling below needs the new height
   if (t.row == null || UI.rows[t.row] !== t) return;
   const body = $("gridBody"), top = t.row * ROW;
   if (top < body.scrollTop) body.scrollTop = top;
@@ -148,19 +148,19 @@ function moveSel(dr) {
   i = clamp(i + dr, 0, UI.rows.length - 1);
   selectTask(UI.rows[i].id);
 }
-function moveCol(dc) { UI.col = COLS[clamp(colIndex(UI.col) + dc, 1, COLS.length - 1)].key; if (UI.selId) revealTask(UI.selId); renderGridRows(); }
+function moveCol(dc) { UI.col = COLS[clamp(colIndex(UI.col) + dc, 1, COLS.length - 1)].key; if (UI.selId) revealTask(UI.selId); redraw("gridRows"); }
 
 function toggleCollapse(id, force) {
   const has = UI.collapsed.has(id), want = force ?? !has;
   if (want === has) return;
   want ? UI.collapsed.add(id) : UI.collapsed.delete(id);
-  saveCollapsed(); computeRows(); renderGrid(); renderGantt();
+  saveCollapsed(); computeRows(); redraw("rows");
 }
 function showLevel(level) {
   UI.collapsed.clear();
   if (level !== "all") for (const t of M.order) if (t.isSummary && t.depth >= +level - 1) UI.collapsed.add(t.id);
   if (UI.selId && UI.collapsed.size) { const t = selTask(); if (t && t.depth >= +level) UI.selId = t.parent ? ancestorAtDepth(t, +level - 1).id : t.id; }
-  saveCollapsed(); computeRows(); renderGrid(); renderGantt(); renderForm();
+  saveCollapsed(); computeRows(); redraw("rows", "form");
 }
 function ancestorAtDepth(t, d) { let x = t; while (x.depth > d && x.parent) x = x.parent; return x; }
 
@@ -170,7 +170,7 @@ function startEdit(colKey = UI.col, initial = null) {
   const c = colByKey(colKey); if (!c || !c.edit) return;
   if (UI.editing) commitEdit(0, 0, true);
   if (t.isSummary && ROLLED.has(c.key)) { toast("Summary rows roll up from their subtasks"); return; }
-  UI.col = colKey; revealTask(t.id); renderGridRows();
+  UI.col = colKey; revealTask(t.id); redraw("gridRows"); drawNow(); // the cell is looked up next
   const cell = $("gridCanvas").querySelector(`.grow[data-id="${t.id}"] [data-col="${colKey}"]`);
   if (!cell) return;
   if (c.edit === "party") { openPartyPicker(cell.getBoundingClientRect(), t.id, colKey); return; }
@@ -199,7 +199,7 @@ function startEdit(colKey = UI.col, initial = null) {
   if (el.select && initial == null && el.type === "text") el.select();
   if (el.tagName === "SELECT" && el.showPicker) try { el.showPicker(); } catch { }
 }
-function cancelEdit() { if (!UI.editing) return; const e = UI.editing; UI.editing = null; e.el.remove(); $("gridBody").focus(); renderGridRows(); }
+function cancelEdit() { if (!UI.editing) return; const e = UI.editing; UI.editing = null; e.el.remove(); $("gridBody").focus(); redraw("gridRows"); }
 function commitEdit(dr, dc, fromBlur) {
   const e = UI.editing; if (!e || e.done) return;
   e.done = true; UI.editing = null;
@@ -212,7 +212,7 @@ function commitEdit(dr, dc, fromBlur) {
     // Refused (bad date, finish before start…): keep the editor open with what was typed, so it can be fixed.
     if (!ok && M.tasks.has(e.taskId)) { e.done = false; UI.editing = e; e.el.focus(); e.el.select?.(); return; }
     e.el.remove();
-  } else { e.el.remove(); renderGridRows(); }
+  } else { e.el.remove(); redraw("gridRows"); }
   if (!fromBlur) {
     $("gridBody").focus();
     if (dr) moveSel(dr);
@@ -267,7 +267,7 @@ function initGrid() {
   body.addEventListener("scroll", () => {
     $("gridHead").scrollLeft = body.scrollLeft;
     if ($("ganttBody").scrollTop !== body.scrollTop) $("ganttBody").scrollTop = body.scrollTop;
-    renderGridRows();
+    redraw("gridRows");
   });
   body.addEventListener("pointerdown", e => {
     if (e.target.closest(".cell-editor")) return;
@@ -333,7 +333,7 @@ function beginRowDrag(e, id) {
     clearInterval(timer);
     // Scrolling re-renders the rows, so the target is found again on every tick, under the pointer.
     const dy = ev.clientY < r.top + 24 ? -12 : ev.clientY > r.bottom - 24 ? 12 : 0;
-    if (dy) timer = setInterval(() => { body.scrollTop += dy; renderGridRows(); hit(last); }, 30);
+    if (dy) timer = setInterval(() => { body.scrollTop += dy; redraw("gridRows"); drawNow(); hit(last); }, 30); // hit() reads the new rows
     hit(ev);
   };
   const hit = ev => {

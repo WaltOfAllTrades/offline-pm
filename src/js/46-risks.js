@@ -156,7 +156,7 @@ function statusSelect(m, cls = "") {
 // Same place as the Plan outline: right after the name, shown on hover or when the row is selected.
 const openBtn = (kind, id) => h("button", { class: "open-rec rk-open", title: "Open record", onclick: e => { e.stopPropagation(); openRiskRecord(kind, id); } }, "↗");
 const isSel = rec => UI.riskSel && UI.riskSel.kind === rec.kind && UI.riskSel.id === rec.id;
-function focusRisk(key, select) { UI.riskFocus = { key, select }; renderRisks(); }
+function focusRisk(key, select) { UI.riskFocus = { key, select }; redraw("risks"); }
 function deleteRiskRec(r) {
   const n = r.mitigants.length;
   if (n && !confirm(`Delete risk “${r.name}” and its ${n} mitigant${n > 1 ? "s" : ""}? (Undo is available.)`)) return;
@@ -283,13 +283,13 @@ function chooseMitigant(ev, r, suggested, then) {
 function openRiskRecord(kind, id) {
   if (UI.view !== "risks") switchView("risks");
   UI.riskSel = { kind, id }; UI.riskForm = true; UI.editNote = null;
-  renderRisks();
+  redraw("risks");
 }
 function sizeRiskForm() {
   const split = $("riskSplit").clientWidth || innerWidth;
   $("riskFormPane").style.width = (UI.riskForm ? Math.round(clamp(split / 3, Math.min(420, split - 200), split - 200)) : 0) + "px";
 }
-function closeRiskForm() { UI.riskForm = false; UI.editNote = null; renderRisks(); }
+function closeRiskForm() { UI.riskForm = false; UI.editNote = null; redraw("risks"); }
 function renderRiskForm() {
   const pane = $("riskFormPane"), rec = UI.riskForm ? recOf(UI.riskSel) : null;
   const show = !!rec && UI.view === "risks";
@@ -309,7 +309,7 @@ function renderRiskForm() {
   pane.append(rec.kind === "risk" ? riskFields(rec) : mitFields(rec));
   pane.append(rec.kind === "risk" ? riskMitList(rec) : mitTaskList(rec));
   pane.append(notesBlock({
-    draftKey: key, list: recNotes(rec.kind, rec.id), pane: "riskFormPane", rerender: () => renderRisks(), label: rec.kind === "risk" ? "Risk" : "Mitigant",
+    draftKey: key, list: recNotes(rec.kind, rec.id), pane: "riskFormPane", rerender: () => redraw("risks"), label: rec.kind === "risk" ? "Risk" : "Mitigant",
     empty: "No work notes yet.", post: body => mutate(`${rec.kind === "risk" ? "Risk" : "Mitigant"}: added a work note`, () => opAddRecNote(rec.kind, rec.id, body)),
   }));
   pane.scrollTop = scroll;
@@ -559,16 +559,16 @@ function initRisks() {
   $("addRiskBtn").onclick = () => { if (UI.riskSearch || UI.riskFilter !== "all") { UI.riskSearch = ""; $("riskSearch").value = ""; UI.riskFilter = "all"; $$("#riskSeg button").forEach(x => x.classList.toggle("on", x.dataset.f === "all")); } let id; if (mutate("Added risk", () => { id = opAddRisk({ afterId: M.risks.at(-1)?.id ?? null }); })) focusRisk(`r${id}:name`, true); };
   $("riskImportBtn").onclick = startRiskImport;
   $("closeoutBtn").onclick = showCloseout;
-  $$("#riskSeg button").forEach(b => b.addEventListener("click", () => { UI.riskFilter = b.dataset.f; $$("#riskSeg button").forEach(x => x.classList.toggle("on", x === b)); renderRisks(); }));
+  $$("#riskSeg button").forEach(b => b.addEventListener("click", () => { UI.riskFilter = b.dataset.f; $$("#riskSeg button").forEach(x => x.classList.toggle("on", x === b)); redraw("risks"); }));
   $("riskSearch").addEventListener("input", e => { UI.riskSearch = e.target.value; renderRiskGrid(); });
-  $("planSearch").addEventListener("input", e => { UI.planSearch = e.target.value; renderPlanList(); });
+  $("planSearch").addEventListener("input", e => { UI.planSearch = e.target.value; redraw("planList"); });
   $("riskBody").addEventListener("pointerdown", e => {
     const ae = document.activeElement;
     if (ae?._dirty?.() && $("view-risks").contains(ae) && !ae.contains(e.target)) { holdFormRender(); ae._commit(); }
     const tr = e.target.closest("tr.rk-risk, tr.rk-mit"); if (!tr) return;
     const sel = tr.dataset.risk ? { kind: "risk", id: +tr.dataset.risk } : { kind: "mitigant", id: +tr.dataset.mit };
     if (e.target.closest(".rk-drag")) { e.preventDefault(); beginRecDrag(e, sel); }
-    if (!isSel(sel)) { UI.riskSel = sel; $$("#riskBody tr.sel").forEach(x => x.classList.remove("sel")); tr.classList.add("sel"); if (UI.riskForm) renderRisks(); }
+    if (!isSel(sel)) { UI.riskSel = sel; $$("#riskBody tr.sel").forEach(x => x.classList.remove("sel")); tr.classList.add("sel"); if (UI.riskForm) redraw("risks"); }
   }, true);
   $("riskBody").addEventListener("dblclick", e => {
     const tr = e.target.closest("tr.rk-risk, tr.rk-mit"); if (!tr || e.target.closest("input,textarea,select,button")) return;

@@ -17,6 +17,11 @@ window.runPmTests = async function () {
     catch (e) { results.push({ tag, name, pass: false, err: e.message }); }
   };
   const origToast = null;
+  // A real input event gets a microtask checkpoint after each listener, so the app's redraws (DECISIONS #75) land
+  // before anything else happens. Events a test fires synchronously don't, so draw after each one the same way.
+  const shims = [[EventTarget.prototype, "dispatchEvent"], [HTMLElement.prototype, "click"], [HTMLElement.prototype, "focus"], [HTMLElement.prototype, "blur"]]
+    .map(([o, k]) => { const f = o[k]; o[k] = function (...a) { try { return f.apply(this, a); } finally { P.drawNow(); } }; return () => { o[k] = f; }; });
+  try {
 
   await test("smoke", "app API and SQLite present", () => { ok(P && P.SQL && P.XLSX, "PM/SQL/XLSX"); eq(P.scalar("select sqlite_version() >= '3.45'"), 1); });
 
@@ -1134,6 +1139,17 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     await new Promise(r => setTimeout(r, 50)); eq(window.__xss, 0, "no handler ran");
     P.toggleForm(false); P.switchView("plan");
   });
+  await test("redraw", "requests made together draw once, after the code that asked", async () => {
+    fresh(); T("A"); T("B"); P.switchView("plan");
+    let seen = 0; const rows = document.getElementById("gridRows"), mo = new MutationObserver(r => seen += r.length); mo.observe(rows, { childList: true });
+    const draws = () => seen + mo.takeRecords().length; // delivered to the callback, or still pending
+    P.UI.selId = P.M.order[1].id; P.redraw("gridRows"); P.redraw("gridRows", "ganttRows"); P.redraw("form");
+    eq(draws(), 0, "nothing drawn while the asking code runs");
+    ok(!rows.querySelector(".grow.sel"), "old rows still showing");
+    await null;
+    eq(draws(), 1, "drawn exactly once"); mo.disconnect();
+    eq(rows.querySelector(".grow.sel")?.dataset.id, String(P.M.order[1].id), "with the new selection");
+  });
   await test("a11y", "dialogs take focus, keep Tab inside, and give focus back when closed", () => {
     P.switchView("plan"); const gb = document.getElementById("gridBody"); gb.focus();
     document.querySelector('#fileMenu [data-act="help"]').click();
@@ -1170,6 +1186,7 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     m(() => {}); ok(!P.UI.collapsed.has(p), "another file id: fresh collapse state");
   });
   P.reset();
+  } finally { shims.forEach(undo => undo()); }
   const failed = results.filter(r => !r.pass);
   return { total: results.length, passed: results.length - failed.length, failed };
 };
