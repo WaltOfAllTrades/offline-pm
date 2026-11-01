@@ -28,10 +28,13 @@ function openRecord(id) {
   if (UI.selId !== id) { UI.editNote = null; selectTask(id); } // selectTask re-renders the form
   else renderForm(true);
 }
-// The panel takes a third of the width (at least 420px on small screens), leaving the rest of the outline and the Gantt visible.
+// The panel takes a third of the width (at least 420px) and pushes the outline right; the Gantt keeps its place,
+// so the outline's right-hand columns slide under it (DECISIONS #38).
+const formWidth = () => { const split = $("split").clientWidth || innerWidth; return Math.round(clamp(split / 3, Math.min(420, split - 160), split - 160)); };
 function sizeForm() {
-  const split = $("split").clientWidth || innerWidth;
-  $("formPane").style.width = Math.round(clamp(split / 3, Math.min(420, split - 160), split - 160)) + "px";
+  const w = UI.form ? formWidth() : 0, full = lsGet("pm.split", 760);
+  $("formPane").style.width = w + "px";
+  $("gridPane").style.width = Math.max(UI.form ? 0 : 240, full - w) + "px";
 }
 // Window resize / splitter: only the mini Gantt depends on the pane width, so leave fields (and focus) alone.
 function relayoutForm() {
@@ -56,7 +59,7 @@ function renderForm(force = false) {
   if (formBusy) return;
   if (formHold) { formHeldRender = true; return; }
   const pane = $("formPane"), show = UI.form && UI.view === "plan";
-  if (show && !pane.classList.contains("open")) sizeForm();
+  if (show !== pane.classList.contains("open")) sizeForm();
   pane.classList.toggle("open", show); pane.setAttribute("aria-hidden", String(!show));
   $("detailsBtn").classList.toggle("primary", show);
   if (!show) { pane.dataset.task = ""; return; }
@@ -170,7 +173,7 @@ function miniGanttSection(t) {
     secHead("mg", "Subtask schedule", h("span", { class: "hint" }, `${rows.length} ${UI.mgAll ? "subtasks at all levels" : "direct subtasks"}`),
       h("span", { class: "spacer" }), h("label", { class: "hint" }, allCb, " All levels")));
   if (UI.secClosed.has("mg")) return sec;
-  const avail = ($("formPane").clientWidth || 760) - 66; // pane + section padding and borders
+  const avail = (parseFloat($("formPane").style.width) || 760) - 14 - 66; // target width (it may still be animating) minus scrollbar, padding, borders
   const lbl = clamp(Math.round(avail * 0.34), 140, MG_LBL);
   sec.append(h("div", { class: "mg-wrap" }, miniGanttLabels(t, shown, lbl), h("div", { class: "mg-chart", html: miniGanttSvg(t, shown, Math.max(200, avail - lbl - 1)) })));
   if (rows.length > shown.length) sec.append(h("div", { class: "hint" }, `Showing the first ${MG_MAX} of ${rows.length}.`));

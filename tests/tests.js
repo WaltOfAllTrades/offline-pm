@@ -551,7 +551,8 @@ await test("form-review", "Gantt lines up with the outline again after closing t
   await test("form", "slide-over: clicking a Gantt bar switches the record; Esc closes", () => {
     fresh(); const a = T("A"), b = T("B");
     P.switchView("plan"); P.openRecord(a);
-    const sw = document.getElementById("split").clientWidth; ok(Math.abs(fp().offsetWidth - Math.max(sw / 3, Math.min(420, sw - 160))) < 2, "panel is a third of the width");
+    const sw = document.getElementById("split").clientWidth; ok(Math.abs(parseFloat(fp().style.width) - Math.max(sw / 3, Math.min(420, sw - 160))) < 2, "panel is a third of the width");
+    ok(fp().nextElementSibling === document.getElementById("gridPane"), "panel sits beside the outline, pushing it right");
     P.selectTask(b); ok(inForm(".f-title h2").textContent.includes("B"), "follows selection from the Gantt");
     ok(document.querySelector(`#gBars .bar[data-id="${b}"].sel`), "gantt shows the selection while the form is open");
     document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));

@@ -246,8 +246,10 @@ kbd{font:11.5px ui-monospace,Consolas,monospace;background:var(--line2);border:1
 
 /* print */
 /* record form */
-.form-pane{position:absolute;left:0;top:0;bottom:0;z-index:40;width:33.333%;scrollbar-gutter:stable;container-type:inline-size;overflow:auto;background:var(--bg);border-right:1px solid var(--line);box-shadow:8px 0 24px rgba(0,0,0,.18);padding:0 16px 24px;box-sizing:border-box;transform:translateX(-102%);visibility:hidden;transition:transform .22s ease,visibility 0s linear .22s}
-.form-pane.open{transform:none;visibility:visible;transition:transform .22s ease}
+.form-pane{flex:none;width:0;min-width:0;padding:0;scrollbar-gutter:stable;container-type:inline-size;overflow:hidden auto;background:var(--bg);border-right:1px solid var(--line);box-sizing:border-box;visibility:hidden;transition:width .22s ease,padding .22s ease,visibility 0s linear .22s}
+.form-pane.open{padding:0 16px 24px;visibility:visible;transition:width .22s ease,padding .22s ease}
+.split .grid-pane{transition:width .22s ease}
+.split .grid-pane{min-width:0}
 @media (prefers-reduced-motion:reduce){.form-pane,.form-pane.open{transition:none}}
 .f-head{position:sticky;top:0;z-index:5;display:flex;align-items:flex-start;gap:10px;margin:0 -16px 12px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
 .f-title{flex:1;min-width:0}
