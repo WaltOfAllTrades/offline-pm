@@ -261,10 +261,17 @@ kbd{font:11.5px ui-monospace,Consolas,monospace;background:var(--line2);border:1
 .f-crumbs a:hover,.f-field a:hover,.n-on a:hover,.rel-list a:hover{text-decoration:underline}
 .f-crumbs .sep{opacity:.6}
 .f-acts{display:flex;gap:4px}
-.f-fields{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
-.f-field{display:grid;grid-template-columns:104px 1fr;align-items:center;gap:8px;min-width:0}
+.f-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.f-field{display:flex;flex-direction:column;gap:3px;min-width:0}
 .f-field.wide{grid-column:1/-1}
-.f-field>label{color:var(--muted);font-size:12.5px;text-align:right}
+.f-field>label{color:var(--muted);font-size:12px}
+.f-rbox{display:flex;flex-direction:column;gap:4px}
+.f-sw{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer}
+.f-field input.sw{appearance:none;width:28px;height:16px;border-radius:9px;background:var(--muted);position:relative;cursor:pointer;margin:0;padding:0;border:0;flex:none;transition:background .15s}
+.f-field input.sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:left .15s}
+.f-field input.sw:checked{background:var(--accent)}
+.f-field input.sw:checked::after{left:14px}
+.f-party:disabled{opacity:.85;cursor:default}
 .f-field input,.f-field select,.f-field textarea{width:100%}
 .f-field textarea{resize:vertical;min-height:54px}
 .f-field input:disabled,.f-field select:disabled{opacity:.75;background:var(--panel2)}
@@ -328,7 +335,7 @@ table.rel-list{width:100%;border-collapse:collapse;font-size:12.5px}
 .gc .nc{margin-left:6px;font-size:11px;color:var(--muted);flex:none}
 .gc .open-rec{margin-left:auto;padding:0 4px;color:var(--accent);opacity:0;cursor:pointer;flex:none;font-weight:700}
 .grow:hover .open-rec,.grow.sel .open-rec{opacity:1}
-@container (max-width:620px){.f-fields{grid-template-columns:1fr}}
+@container (max-width:330px){.f-fields{grid-template-columns:1fr}}
 .print-root{display:none}
 @media print{
   :root,:root:not([data-theme="light"]){

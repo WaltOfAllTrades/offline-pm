@@ -106,6 +106,11 @@ function accountable(t) { // own A list, or nearest ancestor's (DECISIONS #12)
   for (let x = t; x; x = x.parent) { const a = rolesOf(x.id, "A"); if (a.length) return { list: a, inherited: x !== t, from: x }; }
   return { list: [], inherited: false, from: null };
 }
+// Effective Responsible: own R list, or the effective Accountable when the task's "same as Accountable" switch is on.
+function responsible(t) {
+  if (t.r_is_a) { const a = accountable(t); return { list: a.list, same: true, inherited: a.inherited, from: a.from }; }
+  return { list: rolesOf(t.id, "R"), same: false };
+}
 function isAncestor(a, b) { for (let x = b?.parent; x; x = x.parent) if (x === a) return true; return false; }
 // Parties a person is "in": themselves plus their teams.
 const partySetFor = personId => new Set([personId, ...(M.teamsOf.get(personId) || [])]);
@@ -139,7 +144,7 @@ function computeIssues() {
     const ownA = rolesOf(t.id, "A");
     if (ownA.length > 1) add("warn", t, `${ownA.length} Accountables (should be exactly one)`, "raci");
     for (const a of ownA) if (M.parties.get(a.party_id)?.kind === "team") add("info", t, `Accountable is a team (${partyName(a.party_id)}). One person is recommended`, "raci");
-    if (!t.isSummary && !t.isMilestone && !rolesOf(t.id, "R").length) add("info", t, "No Responsible assigned", "raci");
+    if (!t.isSummary && !t.isMilestone && !responsible(t).list.length) add("info", t, t.r_is_a ? "Responsible is set to the Accountable, but there is no Accountable" : "No Responsible assigned", "raci");
     for (const r of rolesOf(t.id)) {
       const p = M.parties.get(r.party_id);
       if (p && !p.active) add("warn", t, `${p.name} is inactive but assigned as ${ROLE_NAMES[r.role]}`, "raci");
@@ -339,11 +344,19 @@ function opSetPredText(succId, text) {
 }
 
 function opSetRole(taskId, partyId, role) {
+  if (role === "R") run("UPDATE task SET r_is_a=0 WHERE id=?", [taskId]); // naming a Responsible ends "same as Accountable"
   if (!role) run("DELETE FROM raci WHERE task_id=? AND party_id=?", [taskId, partyId]);
   else run("INSERT INTO raci(task_id, party_id, role) VALUES (?,?,?) ON CONFLICT(task_id, party_id) DO UPDATE SET role=excluded.role", [taskId, partyId, role]);
 }
+// "Responsible = Accountable" switch: on clears any separate R entries (one letter per party per task).
+function opSetRIsA(taskId, on) {
+  taskRow(taskId);
+  run("UPDATE task SET r_is_a=? WHERE id=?", [on ? 1 : 0, taskId]);
+  if (on) run("DELETE FROM raci WHERE task_id=? AND role='R'", [taskId]);
+}
 // Make exactly this set of parties hold `role` on a task (others with that role are cleared).
 function opSetRoleParties(taskId, role, partyIds) {
+  if (role === "R") run("UPDATE task SET r_is_a=0 WHERE id=?", [taskId]);
   run("DELETE FROM raci WHERE task_id=? AND role=?", [taskId, role]);
   for (const pid of partyIds) opSetRole(taskId, pid, role);
 }

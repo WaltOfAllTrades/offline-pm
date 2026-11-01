@@ -1,5 +1,5 @@
 // ---------- SQLite, schema, revisions, undo, live save ----------
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const IDB_NAME = "offline-pm";
 let SQL, db;
 let rev = 0, mirrorRev = null, diskRev = null, lastDiskAt = null, lastSize = 0;
@@ -84,6 +84,11 @@ CREATE TABLE IF NOT EXISTS note(
 CREATE INDEX IF NOT EXISTS note_task ON note(task_id, created_at);
 `;
 const SCHEMA_ALL = SCHEMA_V1 + SCHEMA_V2;
+// v3: "Responsible is the same as Accountable" switch per task (DECISIONS #48). Columns can't be added with IF NOT EXISTS.
+function ensureColumns(d) {
+  const cols = d.exec("PRAGMA table_info(task)")[0].values.map(r => r[1]);
+  if (!cols.includes("r_is_a")) d.run("ALTER TABLE task ADD COLUMN r_is_a INTEGER NOT NULL DEFAULT 0");
+}
 
 const tableExists = (d, name) => !!d.exec("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", [name])[0];
 
@@ -91,14 +96,14 @@ const tableExists = (d, name) => !!d.exec("SELECT 1 FROM sqlite_master WHERE typ
 function migrate(d) {
   const ver = d.exec("PRAGMA user_version")[0].values[0][0];
   if (ver > SCHEMA_VERSION) throw new Error(`This file was made by a newer version of the app (schema ${ver}). Please use the newer app.`);
-  if (ver === SCHEMA_VERSION) { d.run(SCHEMA_ALL); return ""; }
+  if (ver === SCHEMA_VERSION) { d.run(SCHEMA_ALL); ensureColumns(d); return ""; }
   let note = "";
   d.run("BEGIN");
   try {
     const legacy = tableExists(d, "tasks"); // proof-of-concept layout
     const oldRev = legacy && tableExists(d, "meta") ? +(d.exec("SELECT value FROM meta WHERE key='rev'")[0]?.values[0][0] ?? 0) : 0;
     if (legacy && tableExists(d, "meta")) d.run("ALTER TABLE meta RENAME TO meta_v0");
-    d.run(SCHEMA_ALL);
+    d.run(SCHEMA_ALL); ensureColumns(d);
     if (legacy) {
       d.run("INSERT INTO project(name, created_at) VALUES ('Imported plan', ?)", [nowIso()]);
       const pid = d.exec("SELECT last_insert_rowid()")[0].values[0][0];

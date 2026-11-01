@@ -267,10 +267,17 @@ kbd{font:11.5px ui-monospace,Consolas,monospace;background:var(--line2);border:1
 .f-crumbs a:hover,.f-field a:hover,.n-on a:hover,.rel-list a:hover{text-decoration:underline}
 .f-crumbs .sep{opacity:.6}
 .f-acts{display:flex;gap:4px}
-.f-fields{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
-.f-field{display:grid;grid-template-columns:104px 1fr;align-items:center;gap:8px;min-width:0}
+.f-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.f-field{display:flex;flex-direction:column;gap:3px;min-width:0}
 .f-field.wide{grid-column:1/-1}
-.f-field>label{color:var(--muted);font-size:12.5px;text-align:right}
+.f-field>label{color:var(--muted);font-size:12px}
+.f-rbox{display:flex;flex-direction:column;gap:4px}
+.f-sw{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer}
+.f-field input.sw{appearance:none;width:28px;height:16px;border-radius:9px;background:var(--muted);position:relative;cursor:pointer;margin:0;padding:0;border:0;flex:none;transition:background .15s}
+.f-field input.sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:left .15s}
+.f-field input.sw:checked{background:var(--accent)}
+.f-field input.sw:checked::after{left:14px}
+.f-party:disabled{opacity:.85;cursor:default}
 .f-field input,.f-field select,.f-field textarea{width:100%}
 .f-field textarea{resize:vertical;min-height:54px}
 .f-field input:disabled,.f-field select:disabled{opacity:.75;background:var(--panel2)}
@@ -334,7 +341,7 @@ table.rel-list{width:100%;border-collapse:collapse;font-size:12.5px}
 .gc .nc{margin-left:6px;font-size:11px;color:var(--muted);flex:none}
 .gc .open-rec{margin-left:auto;padding:0 4px;color:var(--accent);opacity:0;cursor:pointer;flex:none;font-weight:700}
 .grow:hover .open-rec,.grow.sel .open-rec{opacity:1}
-@container (max-width:620px){.f-fields{grid-template-columns:1fr}}
+@container (max-width:330px){.f-fields{grid-template-columns:1fr}}
 .print-root{display:none}
 @media print{
   :root,:root:not([data-theme="light"]){
@@ -837,7 +844,7 @@ function excelSerialToDay(v, date1904) {
 
 // ===== 10-db.js =====
 // ---------- SQLite, schema, revisions, undo, live save ----------
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const IDB_NAME = "offline-pm";
 let SQL, db;
 let rev = 0, mirrorRev = null, diskRev = null, lastDiskAt = null, lastSize = 0;
@@ -922,6 +929,11 @@ CREATE TABLE IF NOT EXISTS note(
 CREATE INDEX IF NOT EXISTS note_task ON note(task_id, created_at);
 `;
 const SCHEMA_ALL = SCHEMA_V1 + SCHEMA_V2;
+// v3: "Responsible is the same as Accountable" switch per task (DECISIONS #48). Columns can't be added with IF NOT EXISTS.
+function ensureColumns(d) {
+  const cols = d.exec("PRAGMA table_info(task)")[0].values.map(r => r[1]);
+  if (!cols.includes("r_is_a")) d.run("ALTER TABLE task ADD COLUMN r_is_a INTEGER NOT NULL DEFAULT 0");
+}
 
 const tableExists = (d, name) => !!d.exec("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", [name])[0];
 
@@ -929,14 +941,14 @@ const tableExists = (d, name) => !!d.exec("SELECT 1 FROM sqlite_master WHERE typ
 function migrate(d) {
   const ver = d.exec("PRAGMA user_version")[0].values[0][0];
   if (ver > SCHEMA_VERSION) throw new Error(`This file was made by a newer version of the app (schema ${ver}). Please use the newer app.`);
-  if (ver === SCHEMA_VERSION) { d.run(SCHEMA_ALL); return ""; }
+  if (ver === SCHEMA_VERSION) { d.run(SCHEMA_ALL); ensureColumns(d); return ""; }
   let note = "";
   d.run("BEGIN");
   try {
     const legacy = tableExists(d, "tasks"); // proof-of-concept layout
     const oldRev = legacy && tableExists(d, "meta") ? +(d.exec("SELECT value FROM meta WHERE key='rev'")[0]?.values[0][0] ?? 0) : 0;
     if (legacy && tableExists(d, "meta")) d.run("ALTER TABLE meta RENAME TO meta_v0");
-    d.run(SCHEMA_ALL);
+    d.run(SCHEMA_ALL); ensureColumns(d);
     if (legacy) {
       d.run("INSERT INTO project(name, created_at) VALUES ('Imported plan', ?)", [nowIso()]);
       const pid = d.exec("SELECT last_insert_rowid()")[0].values[0][0];
@@ -1298,6 +1310,11 @@ function accountable(t) { // own A list, or nearest ancestor's (DECISIONS #12)
   for (let x = t; x; x = x.parent) { const a = rolesOf(x.id, "A"); if (a.length) return { list: a, inherited: x !== t, from: x }; }
   return { list: [], inherited: false, from: null };
 }
+// Effective Responsible: own R list, or the effective Accountable when the task's "same as Accountable" switch is on.
+function responsible(t) {
+  if (t.r_is_a) { const a = accountable(t); return { list: a.list, same: true, inherited: a.inherited, from: a.from }; }
+  return { list: rolesOf(t.id, "R"), same: false };
+}
 function isAncestor(a, b) { for (let x = b?.parent; x; x = x.parent) if (x === a) return true; return false; }
 // Parties a person is "in": themselves plus their teams.
 const partySetFor = personId => new Set([personId, ...(M.teamsOf.get(personId) || [])]);
@@ -1331,7 +1348,7 @@ function computeIssues() {
     const ownA = rolesOf(t.id, "A");
     if (ownA.length > 1) add("warn", t, `${ownA.length} Accountables (should be exactly one)`, "raci");
     for (const a of ownA) if (M.parties.get(a.party_id)?.kind === "team") add("info", t, `Accountable is a team (${partyName(a.party_id)}). One person is recommended`, "raci");
-    if (!t.isSummary && !t.isMilestone && !rolesOf(t.id, "R").length) add("info", t, "No Responsible assigned", "raci");
+    if (!t.isSummary && !t.isMilestone && !responsible(t).list.length) add("info", t, t.r_is_a ? "Responsible is set to the Accountable, but there is no Accountable" : "No Responsible assigned", "raci");
     for (const r of rolesOf(t.id)) {
       const p = M.parties.get(r.party_id);
       if (p && !p.active) add("warn", t, `${p.name} is inactive but assigned as ${ROLE_NAMES[r.role]}`, "raci");
@@ -1531,11 +1548,19 @@ function opSetPredText(succId, text) {
 }
 
 function opSetRole(taskId, partyId, role) {
+  if (role === "R") run("UPDATE task SET r_is_a=0 WHERE id=?", [taskId]); // naming a Responsible ends "same as Accountable"
   if (!role) run("DELETE FROM raci WHERE task_id=? AND party_id=?", [taskId, partyId]);
   else run("INSERT INTO raci(task_id, party_id, role) VALUES (?,?,?) ON CONFLICT(task_id, party_id) DO UPDATE SET role=excluded.role", [taskId, partyId, role]);
 }
+// "Responsible = Accountable" switch: on clears any separate R entries (one letter per party per task).
+function opSetRIsA(taskId, on) {
+  taskRow(taskId);
+  run("UPDATE task SET r_is_a=? WHERE id=?", [on ? 1 : 0, taskId]);
+  if (on) run("DELETE FROM raci WHERE task_id=? AND role='R'", [taskId]);
+}
 // Make exactly this set of parties hold `role` on a task (others with that role are cleared).
 function opSetRoleParties(taskId, role, partyIds) {
+  if (role === "R") run("UPDATE task SET r_is_a=0 WHERE id=?", [taskId]);
   run("DELETE FROM raci WHERE task_id=? AND role=?", [taskId, role]);
   for (const pid of partyIds) opSetRole(taskId, pid, role);
 }
@@ -1658,6 +1683,7 @@ const gridWidth = () => COLS.reduce((s, c) => s + c.w, 0);
 const ROLLED = new Set(["start", "finish", "duration", "percent", "status"]);
 const stClass = s => ({ "Not started": "st-ns", "In progress": "st-ip", "Blocked": "st-bl", "Done": "st-dn" }[s] || "st-ns");
 
+const gridFullWidth = () => lsGet("pm.split", null) ?? Math.round(($("split").clientWidth || innerWidth) * 2 / 3);
 function loadCollapsed() { UI.collapsed = new Set(lsGet("pm.collapsed." + M.projectId, [])); }
 function saveCollapsed() { lsSet("pm.collapsed." + M.projectId, [...UI.collapsed]); }
 
@@ -1701,10 +1727,11 @@ function renderGrid() {
 const warnTasks = () => { const s = new Set(); for (const i of M.issues) if (i.level === "warn") s.add(i.task.id); return s; };
 let _warnSet = new Set();
 
-function chipFor(r, inherited) {
+function chipFor(r, inherited, note = inherited ? " (inherited)" : "") {
   const p = M.parties.get(r.party_id); if (!p) return "";
-  return `<span class="chip ${p.kind === "team" ? "team" : ""} ${inherited ? "inh" : ""} ${p.active ? "" : "inactive"}" title="${esc(p.name)}${p.kind === "team" ? " (team)" : ""}${inherited ? " (inherited)" : ""}">${p.kind === "team" ? "👥 " : ""}${esc(p.name)}</span>`;
+  return `<span class="chip ${p.kind === "team" ? "team" : ""} ${inherited ? "inh" : ""} ${p.active ? "" : "inactive"}" title="${esc(p.name)}${p.kind === "team" ? " (team)" : ""}${esc(note)}">${p.kind === "team" ? "👥 " : ""}${esc(p.name)}</span>`;
 }
+const rChips = t => { const r = responsible(t); return r.list.map(x => chipFor(x, r.same, r.same ? " (same as Accountable)" : "")).join(""); };
 function cellHtml(t, c) {
   switch (c.key) {
     case "wbs": return esc(t.wbs);
@@ -1718,7 +1745,7 @@ function cellHtml(t, c) {
     case "percent": return t.P + "%";
     case "status": return `<span class="st ${stClass(t.ST)}">${esc(t.ST)}</span>`;
     case "pred": return esc(predText(t));
-    case "R": return `<span class="chips">${rolesOf(t.id, "R").map(r => chipFor(r)).join("")}</span>`;
+    case "R": return `<span class="chips">${rChips(t)}</span>`;
     case "A": { const a = accountable(t); return `<span class="chips">${a.list.map(r => chipFor(r, a.inherited)).join("")}</span>`; }
   }
   return "";
@@ -2318,7 +2345,7 @@ function openRecord(id) {
 // so the outline's right-hand columns slide under it (DECISIONS #38).
 const formWidth = () => { const split = $("split").clientWidth || innerWidth; return Math.round(clamp(split / 3, Math.min(420, split - 160), split - 160)); };
 function sizeForm() {
-  const w = UI.form ? formWidth() : 0, full = lsGet("pm.split", 760);
+  const w = UI.form ? formWidth() : 0, full = gridFullWidth();
   $("formPane").style.width = w + "px";
   $("gridPane").style.width = Math.max(UI.form ? 0 : 240, full - w) + "px";
 }
@@ -2427,22 +2454,27 @@ function formFields(t) {
   const desc = h("textarea", { placeholder: "What this task covers, scope, links…", "data-f": "notes", rows: 3 }, t.notes || "");
   commitOnce("notes", desc);
   const party = role => {
-    const own = rolesOf(t.id, role), acc = role === "A" ? accountable(t) : null;
-    const list = role === "A" ? acc.list : own, inh = role === "A" && acc.inherited;
-    const btn = h("button", { class: "f-party", title: `Choose ${ROLE_NAMES[role]}`, html: (list.length ? list.map(r => chipFor(r, inh)).join("") : `<span class="hint">None</span>`) + (inh && list.length ? `<span class="hint"> from ${esc(acc.from.wbs)}</span>` : "") });
+    const eff = role === "A" ? accountable(t) : responsible(t);
+    const inh = !!eff.inherited, same = role === "R" && eff.same;
+    const html = (eff.list.length ? eff.list.map(r => chipFor(r, inh || same)).join("") : `<span class="hint">None</span>`)
+      + (inh && eff.list.length ? `<span class="hint"> from ${esc(eff.from.wbs)}</span>` : "");
+    const btn = h("button", { class: "f-party", disabled: same, title: same ? "Same as Accountable. Turn the switch off to choose someone else" : `Choose ${ROLE_NAMES[role]}`, html });
     btn.addEventListener("click", () => openPartyPicker(btn.getBoundingClientRect(), t.id, role));
-    return btn;
+    if (role !== "R") return btn;
+    const sw = h("input", { type: "checkbox", role: "switch", class: "sw", checked: !!t.r_is_a, "data-f": "r_is_a" });
+    sw.addEventListener("change", () => mutate(`Task ${t.wbs}: Responsible ${sw.checked ? "= Accountable" : "chosen separately"}`, () => opSetRIsA(t.id, sw.checked)));
+    return h("div", { class: "f-rbox" }, btn, h("label", { class: "f-sw" }, sw, " Same as Accountable"));
   };
   const parent = t.parent ? h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(t.parent.id); } }, `${t.parent.wbs} ${t.parent.name}`) : h("span", { class: "hint" }, "Top level");
   const F = (label, el, cls = "") => h("div", { class: "f-field " + cls }, h("label", {}, label), el);
   if (UI.secClosed.has("details")) return h("section", { class: "f-sec det" }, secHead("details", "Details", h("span", { class: "hint" }, `${t.ST} · ${fmtShort(t.S)} → ${fmtShort(t.F)} · ${t.P}%`)));
+  // Two columns, paired so each row reads as one idea: what/state, when, how long/how far, who, where (DECISIONS #49).
   return h("section", { class: "f-sec det" }, secHead("details", "Details"), h("div", { class: "f-fields" },
     F("Name", inp("name", t.name), "wide"),
-    F("Type", kind), F("Start", inp("start", fmtYMD(t.S), { type: "date", disabled: ro, title: rollHint })),
-    F("Status", status), F("Finish", inp("finish", fmtYMD(t.F), { type: "date", disabled: ro || t.isMilestone, title: rollHint })),
-    F("% complete", inp("percent", t.P, { type: "number", min: 0, max: 100, disabled: ro, title: rollHint })),
-    F("Duration", inp("duration", t.dur == null ? "" : t.dur + "d", { disabled: ro, title: ro ? rollHint : "Working days, e.g. 5, 5d, 2w. 0 makes a milestone" })),
-    F("Responsible", party("R")), F("Accountable", party("A")),
+    F("Type", kind), F("Status", status),
+    F("Start", inp("start", fmtYMD(t.S), { type: "date", disabled: ro, title: rollHint })), F("Finish", inp("finish", fmtYMD(t.F), { type: "date", disabled: ro || t.isMilestone, title: rollHint })),
+    F("Duration", inp("duration", t.dur == null ? "" : t.dur + "d", { disabled: ro, title: ro ? rollHint : "Working days, e.g. 5, 5d, 2w. 0 makes a milestone" })), F("% complete", inp("percent", t.P, { type: "number", min: 0, max: 100, disabled: ro, title: rollHint })),
+    F("Accountable", party("A")), F("Responsible", party("R")),
     F("Parent", parent), F("WBS code", inp("code", t.code, { placeholder: "Optional stable code" })),
     F("Description", desc, "wide")));
 }
@@ -2589,7 +2621,7 @@ function relChildren(t) {
   const rows = t.children.map(c => h("tr", { class: "click" + (c.isSummary ? " summary" : ""), onclick: () => openRecord(c.id) },
     h("td", {}, c.wbs), h("td", {}, (c.isMilestone ? "◆ " : "") + c.name), h("td", {}, fmtShort(c.S)), h("td", {}, fmtShort(c.F)),
     h("td", {}, c.P + "%"), h("td", { html: `<span class="st ${stClass(c.ST)}">${esc(c.ST)}</span>` }),
-    h("td", { html: `<span class="chips">${rolesOf(c.id, "R").map(r => chipFor(r)).join("")}</span>` }),
+    h("td", { html: `<span class="chips">${rChips(c)}</span>` }),
     h("td", { class: "num" }, M.noteCount.get(c.id) ? "💬 " + M.noteCount.get(c.id) : "")));
   return h("div", {}, h("div", { class: "rel-bar" }, add),
     relTable(["WBS", "Name", "Start", "Finish", "%", "Status", "Responsible", "Notes"], rows, t.isMilestone ? "Milestones normally have no subtasks." : "No subtasks. Adding one turns this into a summary task whose dates roll up."));
@@ -2632,6 +2664,7 @@ function relRaci(t) {
   addSel.addEventListener("change", () => { const pid = +addSel.value; if (pid) mutate(`Task ${t.wbs}: ${partyName(pid)} → ${addRole.value}`, () => opSetRole(t.id, pid, addRole.value)); });
   const acc = accountable(t);
   return h("div", {}, h("div", { class: "rel-bar" }, addRole, addSel),
+    t.r_is_a ? h("div", { class: "hint", style: { margin: "0 0 6px" } }, "Responsible is the same as Accountable (switch on the Details section).") : null,
     acc.inherited && acc.list.length ? h("div", { class: "hint", style: { margin: "0 0 6px" } }, `Accountable inherited from ${acc.from.wbs}: ${acc.list.map(r => partyName(r.party_id)).join(", ")}`) : null,
     relTable(["Person or team", "Kind / title", "Role", ""], rows, "Nobody is assigned to this task yet."));
 }
@@ -2758,7 +2791,8 @@ function renderRaci() {
     for (const p of cols) {
       const r = map.get(p.id) || "";
       const ghost = !r && inh.inherited && inh.list.some(a => a.party_id === p.id);
-      html += `<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" title="${esc(p.name)}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}">${r || (ghost ? '<span style="opacity:.35">a</span>' : "")}</td>`;
+      const ar = t.r_is_a && (r === "A" || ghost); // Responsible = Accountable
+      html += `<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" title="${esc(p.name)}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? r + (ar ? "/R" : "") : ghost ? `<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
     }
     html += `<td class="flag">${(issuesBy.get(t.id) || []).map(esc).join("; ")}</td></tr>`;
   }
@@ -3488,7 +3522,7 @@ function exportWorkbook() {
   const aoa = [EXPORT_COLS];
   const dateCells = [];
   for (const t of M.order) {
-    const names = role => rolesOf(t.id, role).map(r => partyLabel(r.party_id)).join("; ");
+    const names = role => (role === "R" ? responsible(t).list : rolesOf(t.id, role)).map(r => partyLabel(r.party_id)).join("; ");
     const r = aoa.length;
     aoa.push([t.id, t.wbs, t.depth + 1, t.name, t.isSummary ? "Summary" : t.isMilestone ? "Milestone" : "Task", "", "", t.dur == null ? "" : t.dur + "d", t.P / 100, t.ST, predText(t), names("R"), names("A"), names("C"), names("I"), t.code || "", t.notes || ""]);
     if (t.S != null) dateCells.push([r, 5, t.S]); if (t.F != null) dateCells.push([r, 6, t.F]);
@@ -3652,7 +3686,7 @@ function initToolbar() {
 
   // splitter
   const sp = $("splitter"), pane = $("gridPane");
-  pane.style.width = lsGet("pm.split", 760) + "px";
+  pane.style.width = gridFullWidth() + "px";
   sp.addEventListener("pointerdown", e => {
     sp.setPointerCapture(e.pointerId); sp.classList.add("drag");
     const x0 = e.clientX, w0 = pane.offsetWidth;
@@ -3660,7 +3694,7 @@ function initToolbar() {
     const up = () => { sp.classList.remove("drag"); sp.removeEventListener("pointermove", mv); sp.removeEventListener("pointerup", up); lsSet("pm.split", pane.offsetWidth + (UI.form ? formWidth() : 0)); renderGridRows(); renderGantt(); if (UI.form) relayoutForm(); };
     sp.addEventListener("pointermove", mv); sp.addEventListener("pointerup", up);
   });
-  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "plan") { renderGridRows(); renderGantt(); if (UI.form) relayoutForm(); } }, 120); });
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "plan") { if (UI.form) relayoutForm(); else if (lsGet("pm.split", null) == null) pane.style.width = gridFullWidth() + "px"; renderGridRows(); renderGantt(); } }, 120); });
 
   document.addEventListener("keydown", e => {
     const ctrl = e.ctrlKey || e.metaKey;
@@ -3699,7 +3733,7 @@ setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
   if (!fsSupported) toast("This browser can't save to files. Use Chrome or Edge for live saving; Excel export still works.", "err");
   window.PM = {
     M, UI, q, run, one, scalar, mutate, undo, redo, flushSaves, refresh, renderAll, selectTask, switchView, switchProject, openRecord, toggleForm, renderForm, notesFor,
-    op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote },
+    op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote, opSetRIsA },
     util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum },
     io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, autoMap, get W() { return W; } },
     db: { installDb, exportBytes, migrate, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; } },

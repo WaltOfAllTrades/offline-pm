@@ -528,7 +528,7 @@ function exportWorkbook() {
   const aoa = [EXPORT_COLS];
   const dateCells = [];
   for (const t of M.order) {
-    const names = role => rolesOf(t.id, role).map(r => partyLabel(r.party_id)).join("; ");
+    const names = role => (role === "R" ? responsible(t).list : rolesOf(t.id, role)).map(r => partyLabel(r.party_id)).join("; ");
     const r = aoa.length;
     aoa.push([t.id, t.wbs, t.depth + 1, t.name, t.isSummary ? "Summary" : t.isMilestone ? "Milestone" : "Task", "", "", t.dur == null ? "" : t.dur + "d", t.P / 100, t.ST, predText(t), names("R"), names("A"), names("C"), names("I"), t.code || "", t.notes || ""]);
     if (t.S != null) dateCells.push([r, 5, t.S]); if (t.F != null) dateCells.push([r, 6, t.F]);

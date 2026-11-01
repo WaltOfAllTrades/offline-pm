@@ -22,6 +22,7 @@ const gridWidth = () => COLS.reduce((s, c) => s + c.w, 0);
 const ROLLED = new Set(["start", "finish", "duration", "percent", "status"]);
 const stClass = s => ({ "Not started": "st-ns", "In progress": "st-ip", "Blocked": "st-bl", "Done": "st-dn" }[s] || "st-ns");
 
+const gridFullWidth = () => lsGet("pm.split", null) ?? Math.round(($("split").clientWidth || innerWidth) * 2 / 3);
 function loadCollapsed() { UI.collapsed = new Set(lsGet("pm.collapsed." + M.projectId, [])); }
 function saveCollapsed() { lsSet("pm.collapsed." + M.projectId, [...UI.collapsed]); }
 
@@ -65,10 +66,11 @@ function renderGrid() {
 const warnTasks = () => { const s = new Set(); for (const i of M.issues) if (i.level === "warn") s.add(i.task.id); return s; };
 let _warnSet = new Set();
 
-function chipFor(r, inherited) {
+function chipFor(r, inherited, note = inherited ? " (inherited)" : "") {
   const p = M.parties.get(r.party_id); if (!p) return "";
-  return `<span class="chip ${p.kind === "team" ? "team" : ""} ${inherited ? "inh" : ""} ${p.active ? "" : "inactive"}" title="${esc(p.name)}${p.kind === "team" ? " (team)" : ""}${inherited ? " (inherited)" : ""}">${p.kind === "team" ? "👥 " : ""}${esc(p.name)}</span>`;
+  return `<span class="chip ${p.kind === "team" ? "team" : ""} ${inherited ? "inh" : ""} ${p.active ? "" : "inactive"}" title="${esc(p.name)}${p.kind === "team" ? " (team)" : ""}${esc(note)}">${p.kind === "team" ? "👥 " : ""}${esc(p.name)}</span>`;
 }
+const rChips = t => { const r = responsible(t); return r.list.map(x => chipFor(x, r.same, r.same ? " (same as Accountable)" : "")).join(""); };
 function cellHtml(t, c) {
   switch (c.key) {
     case "wbs": return esc(t.wbs);
@@ -82,7 +84,7 @@ function cellHtml(t, c) {
     case "percent": return t.P + "%";
     case "status": return `<span class="st ${stClass(t.ST)}">${esc(t.ST)}</span>`;
     case "pred": return esc(predText(t));
-    case "R": return `<span class="chips">${rolesOf(t.id, "R").map(r => chipFor(r)).join("")}</span>`;
+    case "R": return `<span class="chips">${rChips(t)}</span>`;
     case "A": { const a = accountable(t); return `<span class="chips">${a.list.map(r => chipFor(r, a.inherited)).join("")}</span>`; }
   }
   return "";

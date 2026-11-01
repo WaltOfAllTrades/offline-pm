@@ -32,7 +32,7 @@ function openRecord(id) {
 // so the outline's right-hand columns slide under it (DECISIONS #38).
 const formWidth = () => { const split = $("split").clientWidth || innerWidth; return Math.round(clamp(split / 3, Math.min(420, split - 160), split - 160)); };
 function sizeForm() {
-  const w = UI.form ? formWidth() : 0, full = lsGet("pm.split", 760);
+  const w = UI.form ? formWidth() : 0, full = gridFullWidth();
   $("formPane").style.width = w + "px";
   $("gridPane").style.width = Math.max(UI.form ? 0 : 240, full - w) + "px";
 }
@@ -141,22 +141,27 @@ function formFields(t) {
   const desc = h("textarea", { placeholder: "What this task covers, scope, links…", "data-f": "notes", rows: 3 }, t.notes || "");
   commitOnce("notes", desc);
   const party = role => {
-    const own = rolesOf(t.id, role), acc = role === "A" ? accountable(t) : null;
-    const list = role === "A" ? acc.list : own, inh = role === "A" && acc.inherited;
-    const btn = h("button", { class: "f-party", title: `Choose ${ROLE_NAMES[role]}`, html: (list.length ? list.map(r => chipFor(r, inh)).join("") : `<span class="hint">None</span>`) + (inh && list.length ? `<span class="hint"> from ${esc(acc.from.wbs)}</span>` : "") });
+    const eff = role === "A" ? accountable(t) : responsible(t);
+    const inh = !!eff.inherited, same = role === "R" && eff.same;
+    const html = (eff.list.length ? eff.list.map(r => chipFor(r, inh || same)).join("") : `<span class="hint">None</span>`)
+      + (inh && eff.list.length ? `<span class="hint"> from ${esc(eff.from.wbs)}</span>` : "");
+    const btn = h("button", { class: "f-party", disabled: same, title: same ? "Same as Accountable. Turn the switch off to choose someone else" : `Choose ${ROLE_NAMES[role]}`, html });
     btn.addEventListener("click", () => openPartyPicker(btn.getBoundingClientRect(), t.id, role));
-    return btn;
+    if (role !== "R") return btn;
+    const sw = h("input", { type: "checkbox", role: "switch", class: "sw", checked: !!t.r_is_a, "data-f": "r_is_a" });
+    sw.addEventListener("change", () => mutate(`Task ${t.wbs}: Responsible ${sw.checked ? "= Accountable" : "chosen separately"}`, () => opSetRIsA(t.id, sw.checked)));
+    return h("div", { class: "f-rbox" }, btn, h("label", { class: "f-sw" }, sw, " Same as Accountable"));
   };
   const parent = t.parent ? h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(t.parent.id); } }, `${t.parent.wbs} ${t.parent.name}`) : h("span", { class: "hint" }, "Top level");
   const F = (label, el, cls = "") => h("div", { class: "f-field " + cls }, h("label", {}, label), el);
   if (UI.secClosed.has("details")) return h("section", { class: "f-sec det" }, secHead("details", "Details", h("span", { class: "hint" }, `${t.ST} · ${fmtShort(t.S)} → ${fmtShort(t.F)} · ${t.P}%`)));
+  // Two columns, paired so each row reads as one idea: what/state, when, how long/how far, who, where (DECISIONS #49).
   return h("section", { class: "f-sec det" }, secHead("details", "Details"), h("div", { class: "f-fields" },
     F("Name", inp("name", t.name), "wide"),
-    F("Type", kind), F("Start", inp("start", fmtYMD(t.S), { type: "date", disabled: ro, title: rollHint })),
-    F("Status", status), F("Finish", inp("finish", fmtYMD(t.F), { type: "date", disabled: ro || t.isMilestone, title: rollHint })),
-    F("% complete", inp("percent", t.P, { type: "number", min: 0, max: 100, disabled: ro, title: rollHint })),
-    F("Duration", inp("duration", t.dur == null ? "" : t.dur + "d", { disabled: ro, title: ro ? rollHint : "Working days, e.g. 5, 5d, 2w. 0 makes a milestone" })),
-    F("Responsible", party("R")), F("Accountable", party("A")),
+    F("Type", kind), F("Status", status),
+    F("Start", inp("start", fmtYMD(t.S), { type: "date", disabled: ro, title: rollHint })), F("Finish", inp("finish", fmtYMD(t.F), { type: "date", disabled: ro || t.isMilestone, title: rollHint })),
+    F("Duration", inp("duration", t.dur == null ? "" : t.dur + "d", { disabled: ro, title: ro ? rollHint : "Working days, e.g. 5, 5d, 2w. 0 makes a milestone" })), F("% complete", inp("percent", t.P, { type: "number", min: 0, max: 100, disabled: ro, title: rollHint })),
+    F("Accountable", party("A")), F("Responsible", party("R")),
     F("Parent", parent), F("WBS code", inp("code", t.code, { placeholder: "Optional stable code" })),
     F("Description", desc, "wide")));
 }
@@ -303,7 +308,7 @@ function relChildren(t) {
   const rows = t.children.map(c => h("tr", { class: "click" + (c.isSummary ? " summary" : ""), onclick: () => openRecord(c.id) },
     h("td", {}, c.wbs), h("td", {}, (c.isMilestone ? "◆ " : "") + c.name), h("td", {}, fmtShort(c.S)), h("td", {}, fmtShort(c.F)),
     h("td", {}, c.P + "%"), h("td", { html: `<span class="st ${stClass(c.ST)}">${esc(c.ST)}</span>` }),
-    h("td", { html: `<span class="chips">${rolesOf(c.id, "R").map(r => chipFor(r)).join("")}</span>` }),
+    h("td", { html: `<span class="chips">${rChips(c)}</span>` }),
     h("td", { class: "num" }, M.noteCount.get(c.id) ? "💬 " + M.noteCount.get(c.id) : "")));
   return h("div", {}, h("div", { class: "rel-bar" }, add),
     relTable(["WBS", "Name", "Start", "Finish", "%", "Status", "Responsible", "Notes"], rows, t.isMilestone ? "Milestones normally have no subtasks." : "No subtasks. Adding one turns this into a summary task whose dates roll up."));
@@ -346,6 +351,7 @@ function relRaci(t) {
   addSel.addEventListener("change", () => { const pid = +addSel.value; if (pid) mutate(`Task ${t.wbs}: ${partyName(pid)} → ${addRole.value}`, () => opSetRole(t.id, pid, addRole.value)); });
   const acc = accountable(t);
   return h("div", {}, h("div", { class: "rel-bar" }, addRole, addSel),
+    t.r_is_a ? h("div", { class: "hint", style: { margin: "0 0 6px" } }, "Responsible is the same as Accountable (switch on the Details section).") : null,
     acc.inherited && acc.list.length ? h("div", { class: "hint", style: { margin: "0 0 6px" } }, `Accountable inherited from ${acc.from.wbs}: ${acc.list.map(r => partyName(r.party_id)).join(", ")}`) : null,
     relTable(["Person or team", "Kind / title", "Role", ""], rows, "Nobody is assigned to this task yet."));
 }

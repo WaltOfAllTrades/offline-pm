@@ -199,7 +199,7 @@ window.runPmTests = async function () {
       "INSERT INTO deps VALUES (2,1),(3,2);");
     const bytes = d.export(); d.close();
     P.db.installDb(bytes); P.M.projectId = null; P.refresh();
-    eq(P.scalar("PRAGMA user_version"), 2); eq(P.db.rev, 7, "rev kept");
+    eq(P.scalar("PRAGMA user_version"), 3); eq(P.db.rev, 7, "rev kept");
     eq(P.M.order.map(t => [t.name, t.ST]), [["One", "Done"], ["Two", "In progress"], ["Three", "Not started"]]);
     eq(P.M.deps.length, 2); ok(!P.scalar("select count(*) from sqlite_master where name='tasks'"), "old table dropped");
   });
@@ -378,7 +378,7 @@ window.runPmTests = async function () {
     const d = new P.SQL.Database(P.db.exportBytes()); d.run("DROP TABLE note; PRAGMA user_version = 1;");
     const bytes = d.export(); d.close();
     P.db.installDb(bytes); P.M.projectId = null; P.refresh();
-    eq(P.scalar("PRAGMA user_version"), 2); ok(P.scalar("select count(*) from sqlite_master where name='note'"), "note table created");
+    eq(P.scalar("PRAGMA user_version"), 3); ok(P.scalar("select count(*) from sqlite_master where name='note'"), "note table created");
     eq(P.M.order.map(t => t.name), ["Keep me"]);
     m(() => O.opAddNote(P.M.order[0].id, "works after upgrade")); eq(P.notesFor(P.M.order[0].id).length, 1);
   });
@@ -557,6 +557,42 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     ok(document.querySelector(`#gBars .bar[data-id="${b}"].sel`), "gantt shows the selection while the form is open");
     document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     ok(!fp().classList.contains("open"), "Esc closes");
+  });
+  await test("raci-ra", "Responsible = Accountable switch: mirrors A, clears R, shows A/R, exports, ends on picking an R", () => {
+    fresh(); const par = T("Phase"), a = T("Build", par); let ana, ben;
+    m(() => { ana = O.opAddParty("person", "Ana"); ben = O.opAddParty("person", "Ben"); O.opSetRole(par, ana, "A"); O.opSetRole(a, ben, "R"); });
+    m(() => O.opSetRIsA(a, true));
+    eq(P.scalar(`select count(*) from raci where task_id=${a} and role='R'`), 0, "separate R cleared");
+    ok(!P.M.issues.some(i => i.task.id === a && /Responsible/.test(i.text)), "no 'No Responsible' warning (inherited A counts)");
+    const wb = P.io.exportWorkbook(), rows = XL.utils.sheet_to_json(wb.Sheets.Tasks);
+    eq(rows.find(r => r.Name === "Build" || r["Task Name"] === "Build" || Object.values(r).includes("Build"))?.Responsible, "Ana", "export writes the Accountable as Responsible");
+    P.switchView("raci"); document.getElementById("raciOnlyUsed").checked = true; P.renderAll();
+    ok([...document.querySelectorAll("#raciWrap td.cell")].some(td => td.textContent === "a/r"), "matrix shows inherited a/r");
+    P.switchView("plan");
+    P.openRecord(a);
+    const sw = inForm("input.sw"); ok(sw.checked, "switch on"); ok(inForm(".f-party:not([disabled])") && allInForm(".f-party")[1].disabled, "Responsible picker disabled");
+    sw.checked = false; sw.dispatchEvent(new Event("change", { bubbles: true }));
+    ok(!task(a).r_is_a, "switch off from the form");
+    m(() => O.opSetRIsA(a, true)); m(() => O.opSetRole(a, ben, "R"));
+    ok(!task(a).r_is_a, "choosing a Responsible turns the switch off");
+    P.toggleForm(false);
+  });
+
+  await test("form", "fields are two columns in a sensible order", () => {
+    fresh(); const a = T("A"); P.openRecord(a);
+    fp().style.transition = "none"; void fp().offsetWidth; // jump to the end of the slide-in
+    eq(getComputedStyle(inForm(".f-fields")).gridTemplateColumns.split(" ").length, 2, "two columns at a third of the width");
+    eq(allInForm(".f-field > label").map(l => l.textContent), ["Name", "Type", "Status", "Start", "Finish", "Duration", "% complete", "Accountable", "Responsible", "Parent", "WBS code", "Description"]);
+    P.toggleForm(false);
+  });
+
+  await test("migrate", "schema v2 file gains the Responsible = Accountable column", () => {
+    fresh(); T("Keep");
+    const d = new P.SQL.Database(P.db.exportBytes()); d.run("ALTER TABLE task DROP COLUMN r_is_a; PRAGMA user_version = 2;");
+    const bytes = d.export(); d.close();
+    P.db.installDb(bytes); P.M.projectId = null; P.refresh();
+    eq(P.scalar("PRAGMA user_version"), 3); eq(P.M.order[0].r_is_a, 0);
+    m(() => O.opSetRIsA(P.M.order[0].id, true)); eq(P.M.order[0].r_is_a, 1);
   });
   P.reset();
   const failed = results.filter(r => !r.pass);
