@@ -147,7 +147,7 @@ function depPath(sc, d, rowOf, pfx = "") {
     path = `M${a.x} ${a.y}H${p1x}V${ym}H${p2x}V${b.y}H${b.x}`;
   }
   const cls = `dep${d.violated ? " bad" : ""}${UI.selDep === d.id ? " sel" : ""}`;
-  return `<g class="${cls}" data-dep="${d.id}"><path class="ln" d="${path}" marker-end="url(#${pfx}${d.violated ? "arrBad" : "arr"})"/><path class="hit" d="${path}"/><title>${esc(p.wbs)} → ${esc(s.wbs)}: ${DEP_NAMES[d.type]}${d.lag ? `, lag ${d.lag}d` : ""}${d.violated ? " (dates conflict)" : ""}</title></g>`;
+  return `<g class="${cls}" data-dep="${d.id}"><path class="ln" d="${path}" marker-end="url(#${pfx}${d.violated ? "arrBad" : "arr"})"/><path class="hit" d="${path}"/><title>${esc(p.wbs)} → ${esc(s.wbs)}: ${esc(DEP_NAMES[d.type] ?? d.type)}${d.lag ? `, lag ${esc(d.lag)}d` : ""}${d.violated ? " (dates conflict)" : ""}</title></g>`;
 }
 const defs = (p = "") => `<defs><marker id="${p}arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L8 4L0 8Z" style="fill:var(--link)"/></marker><marker id="${p}arrBad" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L8 4L0 8Z" style="fill:var(--link-bad)"/></marker></defs>`;
 const DEFS = defs();

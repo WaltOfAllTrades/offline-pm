@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-yVBhl8r4CaB1tt7h2g02+xnacVj/6KiOewyWxdhiPJk=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-xGGNmpIiLsZd/uU6tNfsJguLRUk8CR8FEzYQctxVEuc='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
 <title>Offline PM</title>
 <style>:root{
   --bg:#f5f6f8; --panel:#fff; --panel2:#fafbfc; --ink:#1b1f24; --muted:#667085; --line:#e4e7ec; --line2:#eef0f3;
@@ -56,6 +57,10 @@ hr{border:0;border-top:1px solid var(--line);margin:4px 0}
 .pill.warn{background:var(--warn-bg);color:var(--warn);border-color:transparent}
 .pill.busy{background:var(--accent-soft);color:var(--accent);border-color:transparent}
 .pill.err{background:var(--err-bg);color:var(--err);border-color:transparent}
+.ro-banner{display:flex;align-items:center;gap:10px;padding:6px 12px;background:var(--warn-bg);color:var(--warn);border-bottom:1px solid var(--line);font-weight:600}
+.ro-banner[hidden]{display:none}
+.bk-list{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
+.bk-list li{display:flex;align-items:center;gap:10px;justify-content:space-between;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 .menuwrap{position:relative}
 .menu{position:absolute;top:calc(100% + 4px);left:0;z-index:50;min-width:220px;background:var(--panel);border:1px solid var(--line);border-radius:9px;box-shadow:0 10px 30px rgba(0,0,0,.15);padding:5px;display:flex;flex-direction:column}
 .menu.right{left:auto;right:0}
@@ -467,6 +472,7 @@ table.raci tr.sel td{outline:1px solid var(--accent);outline-offset:-1px}
       <button data-act="new">New plan file…</button>
       <button data-act="open">Open plan file…</button>
       <button data-act="copy">Save a copy as…</button>
+      <button data-act="backups">Recover replaced copies…</button>
       <button data-act="reconnect" id="mReconnect" hidden>Reconnect to file</button>
       <hr>
       <button data-act="import">Import from Excel / CSV…</button>
@@ -479,6 +485,7 @@ table.raci tr.sel td{outline:1px solid var(--accent);outline-offset:-1px}
     </div>
   </div>
 </header>
+<div id="roBanner" class="ro-banner" hidden role="status"><span id="roText"></span> <button id="roTake">Take over editing here</button></div>
 
 <main id="views">
   <section id="view-plan" class="view">
@@ -949,7 +956,7 @@ let saving = false, pending = false, pendingReasons = [], lastErr = null;
 const saveLog = [];
 const undoStack = [], redoStack = [];
 const UNDO_LIMIT = 40;
-const hooks = { onChange() { }, onSaveState() { }, onReplace() { } };
+const hooks = { onChange() { }, onSaveState() { }, onReplace() { }, onReadOnly() { } };
 let slowSaves = false; // test/demo aid
 
 function q(sql, params = []) {
@@ -1112,14 +1119,81 @@ function migrate(d) {
   return note;
 }
 
-const readRev = d => +(d.exec("SELECT value FROM meta WHERE key='rev'")[0]?.values[0][0] ?? 0);
+const readRev = d => { const n = +(d.exec("SELECT value FROM meta WHERE key='rev'")[0]?.values[0][0] ?? 0); return Number.isSafeInteger(n) && n >= 0 ? n : 0; };
+const readFileId = d => { try { return d.exec("SELECT value FROM meta WHERE key='file_id'")[0]?.values[0][0] ?? null; } catch { return null; } };
 const isSqlite = b => b.length >= 16 && String.fromCharCode(...b.slice(0, 15)) === "SQLite format 3";
+
+// ---------- Trust boundary: a shared .db is untrusted input (DECISIONS #62) ----------
+// Only empty databases, our own plans and proof-of-concept files are opened. Anything else is refused
+// before migrate() touches it, so another app's database is never rewritten.
+function assertPlanFile(d) {
+  const tables = d.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")[0]?.values.map(r => r[0]) || [];
+  if (!tables.length) return;
+  if (tables.includes("tasks") && d.exec("PRAGMA table_info(tasks)")[0].values.some(r => r[1] === "title")) return; // PoC layout
+  const app = tables.includes("meta") ? d.exec("SELECT value FROM meta WHERE key='app'")[0]?.values[0][0] : null;
+  if (app !== "offline-pm") throw new Error("That file is a SQLite database, but not an Offline PM plan. It was not opened or changed.");
+}
+// Column name/type/pk per table, as a fresh database has them after SCHEMA_ALL + upgradeTables.
+const layoutOf = (d, tables) => Object.fromEntries(tables.map(t => [t, (d.exec(`PRAGMA table_info(${t})`)[0]?.values || []).map(r => `${r[1]}:${String(r[2]).toUpperCase()}:${r[5]}`).sort().join(",")]));
+let expectedLayout = null;
+function getExpectedLayout() {
+  if (expectedLayout) return expectedLayout;
+  const f = new SQL.Database(); f.run(SCHEMA_ALL); upgradeTables(f);
+  const tables = f.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")[0].values.map(r => r[0]);
+  expectedLayout = layoutOf(f, tables); f.close();
+  return expectedLayout;
+}
+// Values the UI trusts to be numbers or fixed words. CHECK constraints don't protect them: a file can be
+// written with them switched off. [table, column, allowed, replacement (null = delete the row)]
+const ENUM_COLS = [
+  ["task", "kind", ["task", "milestone"], "task"], ["task", "status", ["Not started", "In progress", "Blocked", "Done"], "Not started"],
+  ["party", "kind", ["person", "team"], null], ["raci", "role", ["R", "A", "C", "I"], null], ["dep", "type", ["FS", "SS", "FF", "SF"], "FS"],
+  ["risk", "response", ["mitigate", "accept"], "mitigate"], ["risk", "probability", ["", "L", "M", "H"], ""], ["risk", "impact", ["", "L", "M", "H"], ""],
+  ["mitigant", "status", ["", "Not started", "Planned", "Implemented", "Tested"], ""],
+  ["risk_party", "role", ["R", "A"], null], ["mitigant_party", "role", ["R", "A"], null],
+];
+// Check the layout, drop foreign triggers/views, and repair values. Returns how many rows were changed.
+function sanitizePlan(d) {
+  const exp = getExpectedLayout(), got = layoutOf(d, Object.keys(exp));
+  for (const t in exp) if (exp[t] !== got[t]) throw new Error(`That file's “${t}” table doesn't have the layout this app expects, so it wasn't opened.`);
+  let fixed = 0; const exec = (sql, p) => { d.run(sql, p); fixed += d.getRowsModified(); };
+  d.run("BEGIN");
+  try {
+    // Triggers and views can only come from another tool; ours are recreated by SCHEMA_ALL.
+    for (const [type, name] of d.exec("SELECT type, name FROM sqlite_master WHERE type IN ('trigger','view')")[0]?.values || [])
+      d.run(`DROP ${type === "view" ? "VIEW" : "TRIGGER"} "${String(name).replace(/"/g, '""')}"`);
+    d.run(SCHEMA_ALL);
+    for (const t in exp) for (const [, c, type] of d.exec(`PRAGMA table_info(${t})`)[0].values) {
+      if (String(type).toUpperCase() !== "INTEGER") continue;
+      if (c === "id" || c.endsWith("_id")) exec(`DELETE FROM ${t} WHERE typeof(${c}) NOT IN ('integer','null')`);
+      else exec(`UPDATE ${t} SET ${c} = COALESCE(CAST(${c} AS INTEGER), 0) WHERE typeof(${c}) <> 'integer'`);
+    }
+    exec("UPDATE task SET percent = MAX(0, MIN(100, percent)) WHERE percent NOT BETWEEN 0 AND 100");
+    for (const [t, c, allowed, repl] of ENUM_COLS) {
+      const where = `WHERE ${c} IS NULL OR typeof(${c}) <> 'text' OR ${c} NOT IN (${allowed.map(() => "?").join(",")})`;
+      if (repl == null) exec(`DELETE FROM ${t} ${where}`, allowed); else exec(`UPDATE ${t} SET ${c} = ? ${where}`, [repl, ...allowed]);
+    }
+    // Rows pointing at rows that don't exist (cascades never ran with foreign keys off).
+    for (let i = 0; i < 20; i++) {
+      const bad = d.exec("PRAGMA foreign_key_check")[0]?.values || [];
+      if (!bad.length) break;
+      for (const [t, rowid] of bad) { if (rowid == null) throw new Error(`That file's “${t}” table can't be checked, so it wasn't opened.`); exec(`DELETE FROM "${String(t).replace(/"/g, '""')}" WHERE rowid = ?`, [rowid]); }
+    }
+    d.run("COMMIT");
+  } catch (e) { try { d.run("ROLLBACK"); } catch { } throw e; }
+  return fixed;
+}
 
 // Replace the live database. bytes=null → brand new empty plan.
 function installDb(bytes) {
   const d = bytes && bytes.length ? new SQL.Database(bytes) : new SQL.Database();
   let note;
-  try { note = migrate(d); } catch (e) { d.close(); throw e; }
+  try {
+    assertPlanFile(d);
+    note = migrate(d);
+    const fixed = sanitizePlan(d);
+    if (fixed) note = (note ? note + " " : "") + `Repaired ${fixed} invalid ${fixed === 1 ? "row" : "rows"} in the file.`;
+  } catch (e) { d.close(); throw e; }
   if (db) db.close();
   db = d;
   db.run("PRAGMA foreign_keys = ON");
@@ -1133,14 +1207,15 @@ function installDb(bytes) {
 // Every change goes through mutate(): one transaction, one revision, one save.
 const opNotes = []; // messages ops want shown after a successful change
 function mutate(desc, fn) {
+  if (readOnly) { toast(readOnlyWhy || "This tab is read-only.", "err"); return false; }
   const snap = exportBytes();
   opNotes.length = 0;
   try {
     run("BEGIN");
     fn();
-    rev++;
-    run("UPDATE meta SET value=? WHERE key='rev'", [String(rev)]);
+    run("UPDATE meta SET value=? WHERE key='rev'", [String(rev + 1)]);
     run("COMMIT");
+    rev++;
   } catch (e) {
     try { run("ROLLBACK"); } catch { }
     toast(e.message, "err");
@@ -1155,68 +1230,124 @@ function mutate(desc, fn) {
 }
 function afterChange(desc) { hooks.onChange(); queueSave(desc); }
 
+
+// Undo/redo bring back an earlier state of the plan, but never an earlier file id (DECISIONS #63).
 function restoreSnapshot(bytes, desc) {
-  const next = rev + 1;
+  const next = rev + 1, fid = readFileId(db);
   db.close(); db = new SQL.Database(bytes); db.run("PRAGMA foreign_keys = ON");
+  if (fid) run("UPDATE meta SET value=? WHERE key='file_id'", [fid]);
   rev = next; run("UPDATE meta SET value=? WHERE key='rev'", [String(rev)]);
   afterChange(desc);
 }
 function undo() {
+  if (readOnly) return toast(readOnlyWhy, "err");
   if (!undoStack.length) return toast("Nothing to undo");
   redoStack.push(exportBytes()); restoreSnapshot(undoStack.pop(), "Undo");
 }
 function redo() {
+  if (readOnly) return toast(readOnlyWhy, "err");
   if (!redoStack.length) return toast("Nothing to redo");
   undoStack.push(exportBytes()); restoreSnapshot(redoStack.pop(), "Redo");
 }
 
-// ---------- IndexedDB: crash buffer + remembered file handle ----------
+// ---------- One writer at a time (DECISIONS #29) ----------
+// The first tab holds a Web Lock until it closes; any other tab opens read-only and can take over.
+let readOnly = false, readOnlyWhy = "";
+function setReadOnly(why) { readOnly = true; readOnlyWhy = why; hooks.onReadOnly(); hooks.onSaveState(); }
+function acquireWriterLock(steal = false) {
+  if (!navigator.locks) return Promise.resolve(true);
+  return new Promise(res => {
+    navigator.locks.request("offline-pm-writer", steal ? { steal: true } : { ifAvailable: true }, lock => {
+      res(!!lock);
+      return lock ? new Promise(() => { }) : null; // held for the life of the tab
+    }).catch(() => setReadOnly("Another tab took over editing. This tab is now read-only: close it, or reload it to see the latest plan."));
+  });
+}
+async function takeOverEditing() { await acquireWriterLock(true); await sleep(400); location.reload(); }
+function needWriter() { if (readOnly) { toast(readOnlyWhy, "err"); return false; } return true; }
+
+// ---------- IndexedDB: crash buffer, remembered file handle, backups ----------
+const IDB_TIMEOUT = 20000;
 const idb = (() => {
   let p;
   const open = () => p ||= new Promise((res, rej) => {
     const r = indexedDB.open(IDB_NAME, 1);
     r.onupgradeneeded = () => r.result.createObjectStore("kv");
-    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    r.onsuccess = () => res(r.result); r.onerror = () => { p = null; rej(r.error); };
   });
+  // A failed commit (QuotaExceededError, for one) fires only "abort", so listen for it, and never wait forever.
   const tx = async (mode, fn) => { const d = await open(); return new Promise((res, rej) => {
     const t = d.transaction("kv", mode); const req = fn(t.objectStore("kv"));
-    t.oncomplete = () => res(req && req.result); t.onerror = () => rej(t.error);
+    const timer = setTimeout(() => { try { t.abort(); } catch { } rej(new Error("Browser storage didn't respond")); }, IDB_TIMEOUT);
+    t.oncomplete = () => { clearTimeout(timer); res(req && req.result); };
+    t.onerror = t.onabort = () => { clearTimeout(timer); rej(t.error || new Error("Browser storage write was cancelled")); };
   }); };
-  return { get: k => tx("readonly", s => s.get(k)), set: (k, v) => tx("readwrite", s => s.put(v, k)), del: k => tx("readwrite", s => s.delete(k)) };
+  return { tx, get: k => tx("readonly", s => s.get(k)), set: (k, v) => tx("readwrite", s => s.put(v, k)), del: k => tx("readwrite", s => s.delete(k)) };
 })();
 
-// ---------- Save queue: serialized, coalesced, buffer first then disk ----------
+// Before the app replaces the only copy of some work, it keeps that copy so File → Recover replaced copies
+// can hand it back (DECISIONS #64). The newest few are kept.
+const BACKUP_LIMIT = 3;
+async function keepBackup(bytes, reason, file = null) {
+  if (readOnly) return false;
+  try {
+    const list = (await idb.get("backups")) || [];
+    list.unshift({ ts: Date.now(), reason, file, size: bytes.length, bytes });
+    await idb.set("backups", list.slice(0, BACKUP_LIMIT));
+    logInfo(`Kept a backup of the ${reason}. File → Recover replaced copies.`);
+    return true;
+  } catch (e) { logInfo(`Couldn't keep a backup of the ${reason}: ${e.message}`); return false; }
+}
+const hasWork = () => !!scalar("SELECT (SELECT COUNT(*) FROM task) + (SELECT COUNT(*) FROM risk) + (SELECT COUNT(*) FROM party) + (SELECT COUNT(*) FROM note)");
+
+// ---------- Save queue: serialized, coalesced, disk first then buffer ----------
+let syncing = false; // comparing the file with the buffer: no disk writes until that's decided
 function queueSave(desc) {
   pendingReasons.push(desc); pending = true; hooks.onSaveState();
   if (!saving) drain();
 }
 async function drain() {
   saving = true; hooks.onSaveState();
-  while (pending) {
-    pending = false;
-    const reasons = pendingReasons.splice(0), r = rev, target = fileHandle; // the file these bytes belong to
-    const bytes = exportBytes(); lastSize = bytes.length;
-    if (slowSaves) await sleep(1500);
-    const entry = { r, reasons, size: bytes.length, mirrorOk: false, disk: "none", diskMs: 0, err: null, at: Date.now() };
-    try { await idb.set("mirror", { rev: r, bytes, ts: Date.now(), file: fileHandle?.name ?? null }); entry.mirrorOk = true; mirrorRev = r; }
-    catch (e) { entry.err = "Buffer: " + e.message; }
-    if (fileHandle && filePerm && fileHandle === target) { // never write one plan's bytes into a file opened meanwhile
+  try {
+    while (pending) {
+      pending = false;
+      const reasons = pendingReasons.splice(0), r = rev, target = fileHandle; // the file these bytes belong to
+      const entry = { r, reasons, size: 0, mirrorOk: false, disk: "none", diskMs: 0, err: null, at: Date.now() };
       try {
-        const t0 = performance.now();
-        const w = await fileHandle.createWritable(); // temp file swapped in on close() → atomic
-        await w.write(bytes); await w.close();
-        entry.disk = "ok"; entry.diskMs = Math.round(performance.now() - t0);
-        diskRev = r; lastDiskAt = Date.now();
+        if (readOnly) { entry.err = "Read-only tab: nothing written"; continue; }
+        const bytes = exportBytes(), fileId = readFileId(db); entry.size = lastSize = bytes.length;
+        if (slowSaves) await sleep(1500);
+        const errs = [];
+        // Disk first: if the tab dies between the two writes, the buffer is behind the file, which loads cleanly.
+        if (target && filePerm && !syncing && fileHandle === target) { // never write one plan's bytes into a file opened meanwhile
+          try {
+            const t0 = performance.now();
+            const w = await target.createWritable(); // temp file swapped in on close() → atomic
+            await w.write(bytes); await w.close();
+            entry.disk = "ok"; entry.diskMs = Math.round(performance.now() - t0);
+            if (fileHandle === target) { diskRev = r; lastDiskAt = Date.now(); }
+          } catch (e) {
+            entry.disk = "fail"; errs.push("Disk: " + e.message);
+            if (e.name === "NotAllowedError") filePerm = false;
+          }
+        }
+        if (!readOnly) {
+          // disk = the revision the file is known to hold, so the next start can tell whose edits are whose.
+          try { await idb.set("mirror", { rev: r, bytes, ts: Date.now(), file: target?.name ?? null, fileId, disk: target && fileHandle === target ? diskRev : null }); entry.mirrorOk = true; mirrorRev = r; }
+          catch (e) { errs.push("Buffer: " + e.message); }
+        }
+        entry.err = errs.join(" · ") || null;
       } catch (e) {
-        entry.disk = "fail"; entry.err = "Disk: " + e.message;
-        if (e.name === "NotAllowedError") filePerm = false;
+        entry.err = "Save failed: " + e.message;
+      } finally {
+        lastErr = entry.err;
+        saveLog.unshift(entry); if (saveLog.length > 80) saveLog.pop();
+        try { hooks.onSaveState(); } catch (e) { console.error(e); }
       }
     }
-    lastErr = entry.err;
-    saveLog.unshift(entry); if (saveLog.length > 80) saveLog.pop();
-    hooks.onSaveState();
+  } finally {
+    saving = false; hooks.onSaveState();
   }
-  saving = false; hooks.onSaveState();
 }
 async function flushSaves() { while (saving || pending) await sleep(20); }
 window.addEventListener("beforeunload", e => { if (saving || pending) { e.preventDefault(); e.returnValue = ""; } });
@@ -1226,59 +1357,78 @@ function logInfo(text) { saveLog.unshift({ info: text, at: Date.now() }); if (sa
 // ---------- File handling (File System Access API) ----------
 const pickerOpts = { types: [{ description: "Plan database", accept: { "application/x-sqlite3": [".db"] } }] };
 const fsSupported = "showSaveFilePicker" in window;
-const unsavedWork = () => (!fileHandle || diskRev !== rev) && scalar("SELECT COUNT(*) FROM task") > 0;
+const unsavedWork = () => (!fileHandle || diskRev !== rev) && hasWork();
 
 async function readHandle(h) { return new Uint8Array(await (await h.getFile()).arrayBuffer()); }
-function fileRevOf(buf) {
-  if (!buf.length) return 0;
+// { rev, fileId } of a file's bytes, or null when it isn't a database.
+function fileInfoOf(buf) {
+  if (!buf.length) return { rev: 0, fileId: null };
   if (!isSqlite(buf)) return null;
-  try { const t = new SQL.Database(buf); const r = tableExists(t, "meta") ? readRev(t) : 0; t.close(); return r; } catch { return null; }
+  try {
+    const t = new SQL.Database(buf);
+    const out = tableExists(t, "meta") ? { rev: readRev(t), fileId: readFileId(t) } : { rev: 0, fileId: null };
+    t.close(); return out;
+  } catch { return null; }
 }
 
-// bufferForOtherFile: the crash buffer was written for a different file than the remembered handle,
-// so revision numbers aren't comparable and the file on disk wins.
-let bufferForOtherFile = false;
+// Decide between the file on disk and the browser buffer. The plan's identity is meta.file_id, not the
+// file name. diskRev on entry is the revision the file was last known to hold (null = unknown), so:
+// a different file id → the file wins; edits on one side only → that side wins; edits on both sides →
+// the higher revision wins (the file on a tie) and the other side is kept as a backup (DECISIONS #29, #64).
 async function syncWithFile() {
-  const buf = await readHandle(fileHandle);
-  const fr = fileRevOf(buf);
-  if (fr === null) { toast("That file isn't a valid plan database", "err"); fileHandle = null; filePerm = false; idb.del("handle").catch(() => { }); hooks.onSaveState(); return; }
-  if (bufferForOtherFile && buf.length) {
-    bufferForOtherFile = false;
-    const note = installDb(buf); diskRev = note ? null : rev; hooks.onChange();
-    logInfo(`Loaded “${fileHandle.name}” from disk (the browser buffer belonged to another file).`);
-    queueSave(note ? "Write upgraded file" : "Refresh crash buffer from file");
-  } else if (fr > rev) {
-    const note = installDb(buf); diskRev = rev; hooks.onChange();
-    logInfo(`File is newer (rev ${fr}) than the browser buffer: loaded it from disk.`);
-    if (note) { logInfo(note); queueSave("Write upgraded file"); } else queueSave("Refresh crash buffer from file");
-  } else if (fr < rev) {
-    diskRev = fr;
-    logInfo(`File on disk was behind (rev ${fr}); buffer has rev ${rev}. Writing the missing changes…`);
-    queueSave(`Catch up file: rev ${fr} → ${rev}`);
-  } else {
-    diskRev = fr; lastDiskAt = (await fileHandle.getFile()).lastModified;
-    logInfo(`File and crash buffer agree (rev ${rev}). Nothing lost.`);
-  }
+  syncing = true; let reason = null;
+  try {
+    const name = fileHandle.name, buf = await readHandle(fileHandle), info = fileInfoOf(buf);
+    if (!info) { toast("That file isn't a valid plan database", "err"); fileHandle = null; filePerm = false; idb.del("handle").catch(() => { }); hooks.onSaveState(); return; }
+    const base = diskRev, myId = readFileId(db);
+    const load = async (backupReason) => {
+      const old = backupReason ? exportBytes() : null;
+      const note = installDb(buf); diskRev = note ? null : rev; hooks.onChange();
+      if (old) await keepBackup(old, backupReason);
+      if (note) logInfo(note);
+      reason = note ? "Write upgraded file" : "Refresh crash buffer from file";
+    };
+    if (buf.length && info.fileId && myId && info.fileId !== myId) {
+      await load(hasWork() ? `browser copy of another plan (rev ${rev}), replaced by “${name}”` : null);
+      logInfo(`Loaded “${name}” from disk (the browser buffer belonged to another plan).`);
+    } else if (info.rev > rev || (info.rev === rev && base != null && base < rev)) {
+      const ownEdits = base == null || base < rev, oldRev = rev;
+      await load(ownEdits ? `browser copy at rev ${oldRev}, replaced by “${name}” at rev ${info.rev}` : null);
+      logInfo(info.rev > oldRev ? `File is newer (rev ${info.rev}) than the browser buffer: loaded it from disk.`
+        : `File and browser buffer were both changed (rev ${info.rev} each): loaded the file.`);
+    } else if (info.rev < rev) {
+      if (base != null && info.rev > base) await keepBackup(buf, `“${name}” at rev ${info.rev}, changed elsewhere and replaced by the browser copy at rev ${rev}`, name);
+      diskRev = info.rev;
+      logInfo(`File on disk was behind (rev ${info.rev}); buffer has rev ${rev}. Writing the missing changes…`);
+      reason = `Catch up file: rev ${info.rev} → ${rev}`;
+    } else {
+      diskRev = info.rev; lastDiskAt = (await fileHandle.getFile()).lastModified;
+      logInfo(`File and crash buffer agree (rev ${rev}). Nothing lost.`);
+    }
+  } finally { syncing = false; }
+  if (reason) queueSave(reason);
   hooks.onSaveState();
 }
 
 // Write the buffer for the new file *before* remembering its handle, so a crash in between can't pair
-// an old plan's buffer with the new file (which would make the old plan overwrite it on the next load).
+// an old plan's buffer with the new file.
 async function rememberHandle(h) {
-  try { await idb.set("mirror", { rev, bytes: exportBytes(), ts: Date.now(), file: h.name }); mirrorRev = rev; } catch { }
+  try { await idb.set("mirror", { rev, bytes: exportBytes(), ts: Date.now(), file: h.name, fileId: readFileId(db), disk: diskRev }); mirrorRev = rev; } catch { }
   await idb.set("handle", h);
 }
-function needFs() { if (!fsSupported) { toast("Saving to files needs Chrome or Edge. You can still export to Excel.", "err"); return false; } return true; }
+function needFs() { if (!needWriter()) return false; if (!fsSupported) { toast("Saving to files needs Chrome or Edge. You can still export to Excel.", "err"); return false; } return true; }
 function confirmDiscard(action) {
-  return !unsavedWork() || confirm(`The current plan has changes that aren't saved to a file.\n\n${action} will replace it in this window. Continue?\n(Tip: cancel and use File → Save a copy first.)`);
+  return !unsavedWork() || confirm(`The current plan has changes that aren't saved to a file.\n\n${action} will replace it in this window. Continue?\n(Tip: cancel and use File → Save a copy first. A backup is also kept under File → Recover replaced copies.)`);
 }
 
 async function newPlanFile() {
   if (!needFs() || !confirmDiscard("Creating a new plan")) return;
   try {
     const h = await showSaveFilePicker({ ...pickerOpts, suggestedName: "plan.db" });
+    const old = unsavedWork() ? exportBytes() : null;
     installDb(null);
     fileHandle = h; filePerm = true; diskRev = null; await rememberHandle(h);
+    if (old) await keepBackup(old, "unsaved plan replaced by a new plan file");
     hooks.onChange(); logInfo(`Created new plan file “${h.name}”.`); queueSave("First write to new file");
   } catch (e) { if (e.name !== "AbortError") toast(e.message, "err"); }
 }
@@ -1293,9 +1443,11 @@ async function openPlanFile() {
 async function openHandle(h) {
   const buf = await readHandle(h);
   if (buf.length && !isSqlite(buf)) return toast("That file isn't a plan database (.db)", "err");
-  const note = installDb(buf);
-  fileHandle = h; filePerm = true; await rememberHandle(h);
-  diskRev = buf.length && !note ? rev : null; lastDiskAt = (await h.getFile()).lastModified;
+  const old = unsavedWork() ? exportBytes() : null;
+  const note = installDb(buf); // throws, before anything changes, for files that aren't plans
+  fileHandle = h; filePerm = true; diskRev = buf.length && !note ? rev : null; await rememberHandle(h);
+  lastDiskAt = (await h.getFile()).lastModified;
+  if (old) await keepBackup(old, `unsaved plan replaced by opening “${h.name}”`);
   hooks.onChange();
   logInfo(buf.length ? `Opened “${h.name}” at rev ${rev}.` : `“${h.name}” was empty: started a new plan in it.`);
   if (note) logInfo(note);
@@ -1305,11 +1457,14 @@ async function saveCopy() {
   if (!needFs()) return;
   try {
     const h = await showSaveFilePicker({ ...pickerOpts, suggestedName: fileHandle ? fileHandle.name.replace(/\.db$/i, "") + " copy.db" : "plan.db" });
+    // The copy is a new plan from here on: a new file id keeps the two apart (DECISIONS #31, #63).
+    run("UPDATE meta SET value=lower(hex(randomblob(8))) WHERE key='file_id'");
     fileHandle = h; filePerm = true; diskRev = null; await rememberHandle(h);
     logInfo(`Saving to “${h.name}” from now on.`); queueSave("Save a copy");
   } catch (e) { if (e.name !== "AbortError") toast(e.message, "err"); }
 }
 async function reconnect() {
+  if (!needWriter()) return;
   try {
     if (await fileHandle.requestPermission({ mode: "readwrite" }) !== "granted") return toast("Permission not granted", "err");
     filePerm = true; await syncWithFile();
@@ -1325,21 +1480,36 @@ async function bootDb(wasmB64) {
   const b = atob(wasmB64), wasm = new Uint8Array(b.length);
   for (let i = 0; i < b.length; i++) wasm[i] = b.charCodeAt(i);
   SQL = await initSqlJs({ wasmBinary: wasm });
-  const [mirror, handle] = await Promise.all([idb.get("mirror").catch(() => null), idb.get("handle").catch(() => null)]);
+  let mirrorErr = null;
+  const [mirror, handle] = await Promise.all([idb.get("mirror").catch(e => { mirrorErr = e; return null; }), idb.get("handle").catch(() => null)]);
+  if (mirrorErr) { // unreadable is not the same as empty: never write over it
+    installDb(null);
+    setReadOnly(`Couldn't read this browser's saved copy (${mirrorErr.message}). This tab is read-only so that copy isn't overwritten. Reload to try again.`);
+    return false;
+  }
   let fresh = false;
   if (mirror) {
     try {
-      const note = installDb(mirror.bytes); mirrorRev = mirror.rev; lastSize = mirror.bytes.length;
+      const note = installDb(mirror.bytes); mirrorRev = mirror.rev; lastSize = mirror.bytes.length; diskRev = mirror.disk ?? null;
       logInfo(`Restored rev ${rev} from the browser crash buffer.`); if (note) logInfo(note);
-    } catch (e) { toast("Couldn't restore the browser buffer: " + e.message, "err"); installDb(null); fresh = true; }
+    } catch (e) {
+      // Keep the copy we couldn't open (a newer app's file, say) and don't seed the sample plan over it.
+      installDb(null);
+      if (await keepBackup(mirror.bytes, `browser copy that couldn't be opened (${e.message})`, mirror.file ?? null))
+        toast(`Couldn't open this browser's saved copy: ${e.message} It was kept under File → Recover replaced copies.`, "err");
+      else setReadOnly(`Couldn't open this browser's saved copy (${e.message}) or back it up. This tab is read-only so the copy isn't overwritten.`);
+    }
   } else { installDb(null); fresh = true; }
   if (handle) {
     fileHandle = handle;
-    bufferForOtherFile = !!(mirror && mirror.file && mirror.file !== handle.name);
     try {
       if (await handle.queryPermission({ mode: "readwrite" }) === "granted") { filePerm = true; await syncWithFile(); }
       else logInfo(`Remembered “${handle.name}”. Click Reconnect to resume saving to it.`);
-    } catch { fileHandle = null; }
+    } catch (e) {
+      logInfo(`Couldn't reach “${handle.name}” (${e.message}). It may have been moved or deleted.`);
+      toast(`Couldn't reach the plan file “${handle.name}”. Use File → Open plan file to pick it again.`, "err");
+      fileHandle = null; filePerm = false;
+    }
   }
   return fresh;
 }
@@ -2111,8 +2281,8 @@ function cellHtml(t, c) {
     }
     case "start": return fmtShort(t.S);
     case "finish": return fmtShort(t.F);
-    case "duration": return t.dur == null ? "" : t.dur + "d";
-    case "percent": return t.P + "%";
+    case "duration": return t.dur == null ? "" : esc(t.dur) + "d";
+    case "percent": return esc(t.P) + "%";
     case "status": return `<span class="st ${stClass(t.ST)}">${esc(t.ST)}</span>`;
     case "pred": return esc(predText(t));
     case "R": return `<span class="chips">${rChips(t)}</span>`;
@@ -2525,7 +2695,7 @@ function depPath(sc, d, rowOf, pfx = "") {
     path = `M${a.x} ${a.y}H${p1x}V${ym}H${p2x}V${b.y}H${b.x}`;
   }
   const cls = `dep${d.violated ? " bad" : ""}${UI.selDep === d.id ? " sel" : ""}`;
-  return `<g class="${cls}" data-dep="${d.id}"><path class="ln" d="${path}" marker-end="url(#${pfx}${d.violated ? "arrBad" : "arr"})"/><path class="hit" d="${path}"/><title>${esc(p.wbs)} → ${esc(s.wbs)}: ${DEP_NAMES[d.type]}${d.lag ? `, lag ${d.lag}d` : ""}${d.violated ? " (dates conflict)" : ""}</title></g>`;
+  return `<g class="${cls}" data-dep="${d.id}"><path class="ln" d="${path}" marker-end="url(#${pfx}${d.violated ? "arrBad" : "arr"})"/><path class="hit" d="${path}"/><title>${esc(p.wbs)} → ${esc(s.wbs)}: ${esc(DEP_NAMES[d.type] ?? d.type)}${d.lag ? `, lag ${esc(d.lag)}d` : ""}${d.violated ? " (dates conflict)" : ""}</title></g>`;
 }
 const defs = (p = "") => `<defs><marker id="${p}arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L8 4L0 8Z" style="fill:var(--link)"/></marker><marker id="${p}arrBad" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L8 4L0 8Z" style="fill:var(--link-bad)"/></marker></defs>`;
 const DEFS = defs();
@@ -3792,7 +3962,7 @@ function renderRaci() {
       const r = map.get(p.id) || "";
       const ghost = !r && inh.inherited && inh.list.some(a => a.party_id === p.id);
       const ar = t.r_is_a && (r === "A" || ghost); // Responsible = Accountable
-      html += `<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" title="${esc(p.name)}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? r + (ar ? "/R" : "") : ghost ? `<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
+      html += `<td class="cell ${esc(r)}" data-t="${t.id}" data-p="${p.id}" title="${esc(p.name)}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? esc(r) + (ar ? "/R" : "") : ghost ? `<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
     }
     html += `<td class="flag">${(issuesBy.get(t.id) || []).map(esc).join("; ")}</td></tr>`;
   }
@@ -3819,9 +3989,9 @@ function renderRaciTeams() {
       const ownL = own ? roleLabel(t, own.role) : "";
       const top = ownL || (mem[0] ? roleLabel(t, mem[0].role) : "");
       const tip = [own ? `${c.name} (team): ${ownL}` : "", ...mem.map(r => `${partyName(r.party_id)}: ${roleLabel(t, r.role)}`)].filter(Boolean).join("\n") || `${c.name}: none`;
-      html += `<td class="cell tcell ${top[0] || ""}" data-t="${t.id}" data-team="${c.id}" title="${esc(tip)}">`
-        + (ownL ? `<b>${ownL}</b>` : "")
-        + mem.map(r => `<span class="mr r-${r.role}" data-p="${r.party_id}">${roleLabel(t, r.role)}·${esc(initials(partyName(r.party_id)))}</span>`).join("")
+      html += `<td class="cell tcell ${esc(top[0] || "")}" data-t="${t.id}" data-team="${c.id}" title="${esc(tip)}">`
+        + (ownL ? `<b>${esc(ownL)}</b>` : "")
+        + mem.map(r => `<span class="mr r-${esc(r.role)}" data-p="${r.party_id}">${esc(roleLabel(t, r.role))}·${esc(initials(partyName(r.party_id)))}</span>`).join("")
         + (c.team && (M.members.get(c.id) || []).length ? `<button class="plus" data-plus="${c.id}" title="Give this to a member of ${esc(c.name)}">+</button>` : "")
         + `</td>`;
     }
@@ -4005,7 +4175,8 @@ const fmtAgo = t => { if (!t) return "never"; const s = Math.round((Date.now() -
 function renderSaveState() {
   const pill = $("savePill");
   let cls, text;
-  if (saving || pending) { cls = "busy"; text = "Saving…"; }
+  if (readOnly) { cls = "warn"; text = "Read-only tab"; }
+  else if (saving || pending) { cls = "busy"; text = "Saving…"; }
   else if (lastErr) { cls = "err"; text = "Save problem"; }
   else if (!fileHandle) { cls = "warn"; text = "Not saved to a file"; }
   else if (!filePerm) { cls = "warn"; text = "Reconnect needed"; }
@@ -4032,6 +4203,24 @@ function renderSaveState() {
   }
 }
 
+// ---------- Recover replaced copies (DECISIONS #64) ----------
+async function showBackups() {
+  let list = [];
+  try { list = (await idb.get("backups")) || []; } catch (e) { return toast("Couldn't read the backups: " + e.message, "err"); }
+  const download = b => {
+    const stamp = new Date(b.ts).toISOString().slice(0, 16).replace(/[T:]/g, "-");
+    const a = h("a", { href: URL.createObjectURL(new Blob([b.bytes], { type: "application/x-sqlite3" })), download: `backup ${stamp}.db` });
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  const body = h("div", { class: "modal-b" },
+    h("p", { style: { marginTop: 0 } }, "Copies the app kept because it had to replace them: a browser copy that lost to the plan file, a plan replaced by opening another, or a copy that couldn't be opened. Download one, then use File → Open plan file to look at it."),
+    list.length ? h("ul", { class: "bk-list" }, ...list.map(b => h("li", {},
+      h("div", {}, h("div", {}, new Date(b.ts).toLocaleString()), h("div", { class: "hint" }, `${b.reason} · ${(b.size / 1024).toFixed(1)} KB`)),
+      h("button", { onclick: () => download(b) }, "Download .db"))))
+      : h("p", { class: "hint" }, "No copies have been replaced in this browser."));
+  openModal("Recover replaced copies", body, h("div", { class: "modal-f" }, h("button", { class: "primary", onclick: closeModal }, "Close")));
+}
+
 // ---------- Help ----------
 function showHelp() {
   const rows = [
@@ -4052,7 +4241,7 @@ function showHelp() {
     h("h3", {}, "Predecessors cell"),
     h("p", {}, "Type WBS numbers separated by commas, with an optional type and lag: ", h("kbd", {}, "1.2"), " ", h("kbd", {}, "3FS+2d"), " ", h("kbd", {}, "2.1SS-1d"), " ", h("kbd", {}, "4FF+1w")),
     h("h3", {}, "Saving"),
-    h("p", {}, "Every change is saved immediately: first to a crash buffer inside the browser, then to your .db plan file (if one is connected). After a refresh Chrome may ask you to click ", h("b", {}, "Reconnect"), ". Share the .db file, an Excel export, or a printed PDF with your team."));
+    h("p", {}, "Every change is saved immediately: to your .db plan file (if one is connected) and to a crash buffer inside the browser. If the app ever has to replace work that isn't anywhere else, it keeps a copy under File → ", h("b", {}, "Recover replaced copies"), ". Only one tab can edit at a time; others open read-only. After a refresh Chrome may ask you to click ", h("b", {}, "Reconnect"), ". Share the .db file, an Excel export, or a printed PDF with your team."));
   openModal("Help & shortcuts", body, h("div", { class: "modal-f" }, h("button", { class: "primary", onclick: closeModal }, "Close")));
 }
 
@@ -4739,7 +4928,7 @@ function initToolbar() {
   $("fileMenu").addEventListener("click", e => {
     const act = e.target.closest("button")?.dataset.act; if (!act) return;
     $("fileMenu").hidden = true;
-    ({ new: newPlanFile, open: openPlanFile, copy: saveCopy, reconnect, import: startImport, riskImport: startRiskImport, xlsx: exportXlsx, csv: exportCsv, print: () => { if (UI.view !== "plan") switchView("plan"); printPlan(); }, help: showHelp })[act]?.();
+    ({ new: newPlanFile, open: openPlanFile, copy: saveCopy, reconnect, import: startImport, riskImport: startRiskImport, xlsx: exportXlsx, csv: exportCsv, print: () => { if (UI.view !== "plan") switchView("plan"); printPlan(); }, help: showHelp, backups: showBackups })[act]?.();
   });
   $("addPersonBtn").onclick = () => editParty(null, "person");
   $("addTeamBtn").onclick = () => editParty(null, "team");
@@ -4777,23 +4966,27 @@ function initToolbar() {
 
 hooks.onChange = onDataChanged;
 hooks.onSaveState = () => { if (ready) renderSaveState(); };
+hooks.onReadOnly = () => { $("roText").textContent = readOnlyWhy; $("roBanner").hidden = false; };
 hooks.onReplace = () => { UI.noteDrafts.clear(); UI.editNote = null; UI.riskSel = null; UI.riskForm = false; UI.riskFocus = null; }; // ids from another file mean nothing here
 setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
 
 (async () => {
   initToolbar(); initGrid(); initGantt(); initRaci(); initRisks();
+  $("roTake").onclick = takeOverEditing;
   try {
+    // Before anything is read or written: only one tab may write the buffer and the file.
+    if (!(await acquireWriterLock())) setReadOnly("Offline PM is open in another tab, so this tab is read-only. Edit in the other tab, or take over here.");
     const fresh = await bootDb(WASM_B64);
     loadModel();
-    if (fresh && !fileHandle && !scalar("SELECT COUNT(*) FROM task")) { mutate("Created sample plan", seedSample); undoStack.length = 0; }
+    if (fresh && !readOnly && !fileHandle && !scalar("SELECT COUNT(*) FROM task")) { mutate("Created sample plan", seedSample); undoStack.length = 0; }
   } catch (e) { toast("Startup failed: " + e.message, "err"); console.error(e); return; }
   UI.grain = lsGet("pm.grain", "week");
   $$("#grainSeg button").forEach(b => b.classList.toggle("on", b.dataset.grain === UI.grain));
   ready = true;
   refresh(); loadCollapsed(); computeRows(); renderAll();
   const r = projectRange(); scrollGanttTo(r.lo, 0.05);
-  // Warn when the app is open in two tabs: both would save whole-database copies over each other.
-  try {
+  // Browsers without Web Locks can't make a second tab read-only, so at least warn.
+  if (!navigator.locks) try {
     const bc = new BroadcastChannel("offline-pm"); let warned = false;
     bc.onmessage = e => { if (e.data === "hello") bc.postMessage("here"); if (!warned) { warned = true; toast("Offline PM is open in another tab. Edit in one tab only, or changes may overwrite each other.", "err"); } };
     bc.postMessage("hello");
@@ -4806,7 +4999,10 @@ setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
     risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport, riskImportItems, doRiskImport, openRiskRecord, closeRiskForm, renderRisks, get RI() { return RI; }, recNotes, toLMH },
     util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum },
     io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, autoMap, get W() { return W; } },
-    db: { installDb, exportBytes, migrate, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; } },
+    db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; },
+      get diskRev() { return diskRev; }, get readOnly() { return readOnly; }, get fileId() { return readFileId(db); },
+      // test aid: attach a stand-in file handle without a picker
+      attach(h, base = null) { fileHandle = h; filePerm = !!h; diskRev = base; }, endReadOnly() { readOnly = false; readOnlyWhy = ""; $("roBanner").hidden = true; } },
     gantt: { buildScale, get SC() { return SC; }, setGrain }, cmd: { cmdAdd, cmdStructure, cmdDelete, startEdit, commitEdit, gridKey, toggleCollapse, showLevel, startImport, printPlan },
     reset() { installDb(null); M.projectId = null; UI.selId = null; refresh(); loadCollapsed(); computeRows(); renderAll(); },
     get XLSX() { return XLSX; }, get SQL() { return SQL; },

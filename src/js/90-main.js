@@ -58,7 +58,7 @@ function initToolbar() {
   $("fileMenu").addEventListener("click", e => {
     const act = e.target.closest("button")?.dataset.act; if (!act) return;
     $("fileMenu").hidden = true;
-    ({ new: newPlanFile, open: openPlanFile, copy: saveCopy, reconnect, import: startImport, riskImport: startRiskImport, xlsx: exportXlsx, csv: exportCsv, print: () => { if (UI.view !== "plan") switchView("plan"); printPlan(); }, help: showHelp })[act]?.();
+    ({ new: newPlanFile, open: openPlanFile, copy: saveCopy, reconnect, import: startImport, riskImport: startRiskImport, xlsx: exportXlsx, csv: exportCsv, print: () => { if (UI.view !== "plan") switchView("plan"); printPlan(); }, help: showHelp, backups: showBackups })[act]?.();
   });
   $("addPersonBtn").onclick = () => editParty(null, "person");
   $("addTeamBtn").onclick = () => editParty(null, "team");
@@ -96,23 +96,27 @@ function initToolbar() {
 
 hooks.onChange = onDataChanged;
 hooks.onSaveState = () => { if (ready) renderSaveState(); };
+hooks.onReadOnly = () => { $("roText").textContent = readOnlyWhy; $("roBanner").hidden = false; };
 hooks.onReplace = () => { UI.noteDrafts.clear(); UI.editNote = null; UI.riskSel = null; UI.riskForm = false; UI.riskFocus = null; }; // ids from another file mean nothing here
 setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
 
 (async () => {
   initToolbar(); initGrid(); initGantt(); initRaci(); initRisks();
+  $("roTake").onclick = takeOverEditing;
   try {
+    // Before anything is read or written: only one tab may write the buffer and the file.
+    if (!(await acquireWriterLock())) setReadOnly("Offline PM is open in another tab, so this tab is read-only. Edit in the other tab, or take over here.");
     const fresh = await bootDb(WASM_B64);
     loadModel();
-    if (fresh && !fileHandle && !scalar("SELECT COUNT(*) FROM task")) { mutate("Created sample plan", seedSample); undoStack.length = 0; }
+    if (fresh && !readOnly && !fileHandle && !scalar("SELECT COUNT(*) FROM task")) { mutate("Created sample plan", seedSample); undoStack.length = 0; }
   } catch (e) { toast("Startup failed: " + e.message, "err"); console.error(e); return; }
   UI.grain = lsGet("pm.grain", "week");
   $$("#grainSeg button").forEach(b => b.classList.toggle("on", b.dataset.grain === UI.grain));
   ready = true;
   refresh(); loadCollapsed(); computeRows(); renderAll();
   const r = projectRange(); scrollGanttTo(r.lo, 0.05);
-  // Warn when the app is open in two tabs: both would save whole-database copies over each other.
-  try {
+  // Browsers without Web Locks can't make a second tab read-only, so at least warn.
+  if (!navigator.locks) try {
     const bc = new BroadcastChannel("offline-pm"); let warned = false;
     bc.onmessage = e => { if (e.data === "hello") bc.postMessage("here"); if (!warned) { warned = true; toast("Offline PM is open in another tab. Edit in one tab only, or changes may overwrite each other.", "err"); } };
     bc.postMessage("hello");
@@ -125,7 +129,10 @@ setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
     risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport, riskImportItems, doRiskImport, openRiskRecord, closeRiskForm, renderRisks, get RI() { return RI; }, recNotes, toLMH },
     util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum },
     io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, autoMap, get W() { return W; } },
-    db: { installDb, exportBytes, migrate, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; } },
+    db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; },
+      get diskRev() { return diskRev; }, get readOnly() { return readOnly; }, get fileId() { return readFileId(db); },
+      // test aid: attach a stand-in file handle without a picker
+      attach(h, base = null) { fileHandle = h; filePerm = !!h; diskRev = base; }, endReadOnly() { readOnly = false; readOnlyWhy = ""; $("roBanner").hidden = true; } },
     gantt: { buildScale, get SC() { return SC; }, setGrain }, cmd: { cmdAdd, cmdStructure, cmdDelete, startEdit, commitEdit, gridKey, toggleCollapse, showLevel, startImport, printPlan },
     reset() { installDb(null); M.projectId = null; UI.selId = null; refresh(); loadCollapsed(); computeRows(); renderAll(); },
     get XLSX() { return XLSX; }, get SQL() { return SQL; },

@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="__CSP__">
 <title>Offline PM</title>
 <style>/*__CSS__*/</style>
 </head>
@@ -30,6 +31,7 @@
       <button data-act="new">New plan file…</button>
       <button data-act="open">Open plan file…</button>
       <button data-act="copy">Save a copy as…</button>
+      <button data-act="backups">Recover replaced copies…</button>
       <button data-act="reconnect" id="mReconnect" hidden>Reconnect to file</button>
       <hr>
       <button data-act="import">Import from Excel / CSV…</button>
@@ -42,6 +44,7 @@
     </div>
   </div>
 </header>
+<div id="roBanner" class="ro-banner" hidden role="status"><span id="roText"></span> <button id="roTake">Take over editing here</button></div>
 
 <main id="views">
   <section id="view-plan" class="view">

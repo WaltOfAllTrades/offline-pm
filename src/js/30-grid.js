@@ -80,8 +80,8 @@ function cellHtml(t, c) {
     }
     case "start": return fmtShort(t.S);
     case "finish": return fmtShort(t.F);
-    case "duration": return t.dur == null ? "" : t.dur + "d";
-    case "percent": return t.P + "%";
+    case "duration": return t.dur == null ? "" : esc(t.dur) + "d";
+    case "percent": return esc(t.P) + "%";
     case "status": return `<span class="st ${stClass(t.ST)}">${esc(t.ST)}</span>`;
     case "pred": return esc(predText(t));
     case "R": return `<span class="chips">${rChips(t)}</span>`;

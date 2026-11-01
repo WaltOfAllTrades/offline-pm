@@ -128,7 +128,7 @@ function renderRaci() {
       const r = map.get(p.id) || "";
       const ghost = !r && inh.inherited && inh.list.some(a => a.party_id === p.id);
       const ar = t.r_is_a && (r === "A" || ghost); // Responsible = Accountable
-      html += `<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" title="${esc(p.name)}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? r + (ar ? "/R" : "") : ghost ? `<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
+      html += `<td class="cell ${esc(r)}" data-t="${t.id}" data-p="${p.id}" title="${esc(p.name)}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? esc(r) + (ar ? "/R" : "") : ghost ? `<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
     }
     html += `<td class="flag">${(issuesBy.get(t.id) || []).map(esc).join("; ")}</td></tr>`;
   }
@@ -155,9 +155,9 @@ function renderRaciTeams() {
       const ownL = own ? roleLabel(t, own.role) : "";
       const top = ownL || (mem[0] ? roleLabel(t, mem[0].role) : "");
       const tip = [own ? `${c.name} (team): ${ownL}` : "", ...mem.map(r => `${partyName(r.party_id)}: ${roleLabel(t, r.role)}`)].filter(Boolean).join("\n") || `${c.name}: none`;
-      html += `<td class="cell tcell ${top[0] || ""}" data-t="${t.id}" data-team="${c.id}" title="${esc(tip)}">`
-        + (ownL ? `<b>${ownL}</b>` : "")
-        + mem.map(r => `<span class="mr r-${r.role}" data-p="${r.party_id}">${roleLabel(t, r.role)}·${esc(initials(partyName(r.party_id)))}</span>`).join("")
+      html += `<td class="cell tcell ${esc(top[0] || "")}" data-t="${t.id}" data-team="${c.id}" title="${esc(tip)}">`
+        + (ownL ? `<b>${esc(ownL)}</b>` : "")
+        + mem.map(r => `<span class="mr r-${esc(r.role)}" data-p="${r.party_id}">${esc(roleLabel(t, r.role))}·${esc(initials(partyName(r.party_id)))}</span>`).join("")
         + (c.team && (M.members.get(c.id) || []).length ? `<button class="plus" data-plus="${c.id}" title="Give this to a member of ${esc(c.name)}">+</button>` : "")
         + `</td>`;
     }
@@ -341,7 +341,8 @@ const fmtAgo = t => { if (!t) return "never"; const s = Math.round((Date.now() -
 function renderSaveState() {
   const pill = $("savePill");
   let cls, text;
-  if (saving || pending) { cls = "busy"; text = "Saving…"; }
+  if (readOnly) { cls = "warn"; text = "Read-only tab"; }
+  else if (saving || pending) { cls = "busy"; text = "Saving…"; }
   else if (lastErr) { cls = "err"; text = "Save problem"; }
   else if (!fileHandle) { cls = "warn"; text = "Not saved to a file"; }
   else if (!filePerm) { cls = "warn"; text = "Reconnect needed"; }
@@ -368,6 +369,24 @@ function renderSaveState() {
   }
 }
 
+// ---------- Recover replaced copies (DECISIONS #64) ----------
+async function showBackups() {
+  let list = [];
+  try { list = (await idb.get("backups")) || []; } catch (e) { return toast("Couldn't read the backups: " + e.message, "err"); }
+  const download = b => {
+    const stamp = new Date(b.ts).toISOString().slice(0, 16).replace(/[T:]/g, "-");
+    const a = h("a", { href: URL.createObjectURL(new Blob([b.bytes], { type: "application/x-sqlite3" })), download: `backup ${stamp}.db` });
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  const body = h("div", { class: "modal-b" },
+    h("p", { style: { marginTop: 0 } }, "Copies the app kept because it had to replace them: a browser copy that lost to the plan file, a plan replaced by opening another, or a copy that couldn't be opened. Download one, then use File → Open plan file to look at it."),
+    list.length ? h("ul", { class: "bk-list" }, ...list.map(b => h("li", {},
+      h("div", {}, h("div", {}, new Date(b.ts).toLocaleString()), h("div", { class: "hint" }, `${b.reason} · ${(b.size / 1024).toFixed(1)} KB`)),
+      h("button", { onclick: () => download(b) }, "Download .db"))))
+      : h("p", { class: "hint" }, "No copies have been replaced in this browser."));
+  openModal("Recover replaced copies", body, h("div", { class: "modal-f" }, h("button", { class: "primary", onclick: closeModal }, "Close")));
+}
+
 // ---------- Help ----------
 function showHelp() {
   const rows = [
@@ -388,6 +407,6 @@ function showHelp() {
     h("h3", {}, "Predecessors cell"),
     h("p", {}, "Type WBS numbers separated by commas, with an optional type and lag: ", h("kbd", {}, "1.2"), " ", h("kbd", {}, "3FS+2d"), " ", h("kbd", {}, "2.1SS-1d"), " ", h("kbd", {}, "4FF+1w")),
     h("h3", {}, "Saving"),
-    h("p", {}, "Every change is saved immediately: first to a crash buffer inside the browser, then to your .db plan file (if one is connected). After a refresh Chrome may ask you to click ", h("b", {}, "Reconnect"), ". Share the .db file, an Excel export, or a printed PDF with your team."));
+    h("p", {}, "Every change is saved immediately: to your .db plan file (if one is connected) and to a crash buffer inside the browser. If the app ever has to replace work that isn't anywhere else, it keeps a copy under File → ", h("b", {}, "Recover replaced copies"), ". Only one tab can edit at a time; others open read-only. After a refresh Chrome may ask you to click ", h("b", {}, "Reconnect"), ". Share the .db file, an Excel export, or a printed PDF with your team."));
   openModal("Help & shortcuts", body, h("div", { class: "modal-f" }, h("button", { class: "primary", onclick: closeModal }, "Close")));
 }

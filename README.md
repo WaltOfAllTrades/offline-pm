@@ -7,6 +7,9 @@ A project-planning tool that is **one HTML file** and needs no network. Open `of
 - **Save to a file:** File → *New plan file…* (or *Save a copy as…*) picks a `.db` file. After that, every change is written to it automatically. The pill at the top shows the save status; click it for the save log.
   - Until you pick a file, work is kept only in this browser.
   - After a page refresh Chrome may ask you to click **Reconnect**.
+  - Only one tab can edit at a time. Others open read-only, with a button to take over.
+  - If the app ever has to replace work that exists nowhere else (for example, the file and the browser both changed), it keeps a copy: File → *Recover replaced copies…*.
+  - Only Offline PM plans can be opened. Any other SQLite file is refused and left unchanged.
 - **Share with your team:** send the `.db` file (they open it with File → *Open plan file…*), an Excel export, or a PDF (File → *Print / save as PDF*).
 - **Import:** File → *Import from Excel / CSV…* runs a four-step wizard: choose the file and sheet, map columns, map statuses and people, then preview. It rebuilds the outline from WBS numbers (1.2.3), outline levels, a parent column or name indentation.
   - An exported workbook can be edited in Excel and re-imported in **Update** mode. Rows are matched by the ID column.
@@ -18,7 +21,7 @@ A project-planning tool that is **one HTML file** and needs no network. Open `of
 |---|---|
 | `offline-pm.html` | **The app**, built from `src/` |
 | `src/index.html`, `src/styles.css`, `src/js/*.js` | Source. The JS files are concatenated in name order into one scope |
-| `src/build.ps1` | Build script. It inlines the CSS, the JS, SQLite WASM and SheetJS from `libs/` |
+| `src/build.ps1` | Build script. It inlines the CSS, the JS, SQLite WASM and SheetJS from `libs/`, and writes the Content-Security-Policy with a hash of each inline script |
 | `libs/` | sql.js 1.10.3 (SQLite 3.45.2) and SheetJS 0.18.5 |
 | `tests/tests.js` | Automated test suite, run inside the app page |
 | `STORIES.md` | User stories and acceptance criteria |

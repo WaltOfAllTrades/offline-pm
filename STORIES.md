@@ -12,6 +12,9 @@ Each story lists its acceptance criteria. A tag in brackets after a criterion na
 - **A5 Undo/redo.** Ctrl+Z and Ctrl+Y step back and forth through changes, up to 40 steps. [undo]
 - **A6 Upgrade old files.** A proof-of-concept file (flat `tasks`/`deps` tables) is upgraded automatically to the current schema when opened, and a v1 file gains the work-notes table without losing data. [migrate]
 - **A7 Save status.** A status pill shows Saved / Saving / Not on disk / Reconnect needed. A save log is available.
+- **A8 One editor.** A second tab opens read-only and can take over editing. [save-safety]
+- **A9 Nothing silently lost.** When the file and the browser copy both changed, the loser is kept under File → Recover replaced copies, as is any unsaved plan replaced by New or Open. A plan is identified by its file id, not its name. [save-safety]
+- **A10 Untrusted files.** Opening a file that isn't an Offline PM plan leaves it unchanged. Values a shared file could use to inject markup are repaired on open, and the page runs only its own scripts with no network access. [trust]
 
 ## B. Projects
 - **B1** One `.db` file can hold several projects. You can switch, create, rename and delete them. People and teams are shared across all projects in the file. [projects]

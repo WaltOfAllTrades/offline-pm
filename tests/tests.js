@@ -837,6 +837,84 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     eq(task(a).r_is_a, 1);
     P.switchView("plan");
   });
+
+  // ---------- Trust boundary and save safety (DECISIONS #29, #62–#64) ----------
+  const variant = fn => { const d = new P.SQL.Database(P.db.exportBytes()); fn(d); const b = d.export(); d.close(); return b; };
+  await test("trust", "another app's SQLite file is refused and left unchanged", () => {
+    fresh(); T("keep"); const r0 = P.db.rev;
+    const d = new P.SQL.Database(); d.run("CREATE TABLE contacts(id INTEGER PRIMARY KEY, name TEXT); CREATE TABLE note(id INTEGER PRIMARY KEY, body TEXT, colour TEXT)");
+    const bytes = d.export(); d.close();
+    throws(() => P.db.installDb(bytes), /not an Offline PM plan/);
+    eq([P.db.rev, P.M.order.map(t => t.name)], [r0, ["keep"]], "current plan untouched");
+    throws(() => P.db.installDb(variant(x => x.run("DROP TABLE dep; CREATE TABLE dep(id TEXT PRIMARY KEY, pred_id, succ_id, type, lag)"))), /layout/, "unexpected table layout refused");
+  });
+  await test("trust", "values the UI trusts are repaired on open; foreign triggers and views dropped; nothing runs", async () => {
+    fresh(); const a = T("A"), b = T("B"); let ana;
+    m(() => { O.opAddDep(a, b, "FS", 0); ana = O.opAddParty("person", "Ana"); O.opSetRole(a, ana, "R"); });
+    const pwn = "<img src=x onerror=window.__pmPwn=1>";
+    const bytes = variant(d => {
+      d.run("PRAGMA ignore_check_constraints = ON");
+      d.run("UPDATE dep SET lag=?, type=?", [pwn, pwn]); d.run("UPDATE task SET percent=? WHERE id=?", [pwn, a]);
+      d.run("UPDATE raci SET role=?", [pwn]); d.run("INSERT INTO note(task_id, body, created_at) VALUES (999, 'orphan', '2026-01-01')");
+      d.run("CREATE TRIGGER evil AFTER UPDATE ON task BEGIN UPDATE task SET name='owned'; END; CREATE VIEW v AS SELECT 1");
+    });
+    delete window.__pmPwn;
+    const note = P.db.installDb(bytes); P.M.projectId = null; P.refresh(); P.renderAll();
+    ok(/Repaired \d+ invalid rows/.test(note), "repair reported: " + note);
+    eq(P.q("SELECT typeof(lag) t, lag, type FROM dep"), [{ t: "integer", lag: 0, type: "FS" }], "lag and type repaired");
+    eq([P.scalar("SELECT typeof(percent) FROM task WHERE id=" + a), P.scalar("SELECT COUNT(*) FROM raci"), P.scalar("SELECT COUNT(*) FROM note")], ["integer", 0, 0], "percent fixed, bad role and orphan note removed");
+    eq(P.q("SELECT type, name FROM sqlite_master WHERE type IN ('trigger','view')"), [{ type: "trigger", name: "team_member_kinds" }], "only our trigger left");
+    m(() => O.opSetField(b, "name", "B2")); eq(P.M.tasks.get(a).name, "A", "dropped trigger doesn't fire");
+    await new Promise(r => setTimeout(r, 50)); ok(!window.__pmPwn && !document.querySelector("#gridRows img, #gDeps img"), "no injected markup rendered");
+    ok(document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content.includes("connect-src 'none'"), "CSP present");
+  });
+  await test("trust", "undo never brings back an earlier file id", () => {
+    fresh(); T("x"); P.run("UPDATE meta SET value='copy-id' WHERE key='file_id'"); // what Save a copy does
+    P.undo(); eq(P.db.fileId, "copy-id");
+  });
+  await test("save-safety", "an aborted storage write rejects instead of hanging; read-only tab refuses changes", async () => {
+    let err; try { await P.db.idb.tx("readwrite", s => { const r = s.put(1, "t-abort"); s.transaction.abort(); return r; }); } catch (e) { err = e; }
+    ok(err, "aborted transaction rejected");
+    fresh(); const n = P.M.order.length;
+    P.db.setReadOnly("Test: read-only"); ok(!document.getElementById("roBanner").hidden, "banner shown");
+    ok(!P.mutate("t", () => O.opAddTask({ name: "nope" })), "mutate refused"); P.refresh(); eq(P.M.order.length, n);
+    P.db.endReadOnly(); ok(P.mutate("t", () => O.opAddTask({ name: "yes" })), "writes again");
+  });
+  await test("save-safety", "file vs browser copy: identity by file id; edits on both sides keep the loser as a backup", async () => {
+    const handle = bytes => ({ name: "t.db", store: bytes,
+      async getFile() { return new File([this.store], "t.db"); },
+      async createWritable() { const h = this; let data; return { async write(b) { data = b; }, async close() { h.store = new Uint8Array(data); } }; } });
+    const backups = async () => (await P.db.idb.get("backups")) || [];
+    const newestBackup = async t0 => (await backups()).find(b => b.ts >= t0);
+    const nameIn = bytes => { const d = new P.SQL.Database(bytes); const r = [d.exec("SELECT value FROM meta WHERE key='rev'")[0].values[0][0], d.exec("SELECT name FROM task ORDER BY id")[0]?.values.map(v => v[0])]; d.close(); return r; };
+    const setRev = (d, n) => d.run("UPDATE meta SET value=? WHERE key='rev'", [String(n)]);
+    try {
+      // A: another plan (different file id) wins even with a lower rev; the browser copy is kept.
+      fresh(); const a = T("mine"); await P.flushSaves(); let t0 = Date.now();
+      let h = handle(variant(d => { d.run("UPDATE meta SET value='other-plan' WHERE key='file_id'"); d.run("UPDATE task SET name='theirs'"); setRev(d, 1); }));
+      P.db.attach(h, null); await P.db.syncWithFile(); await P.flushSaves();
+      eq(P.M.order.map(t => t.name), ["theirs"], "file loaded"); ok(await newestBackup(t0), "browser copy kept");
+      // B: both sides edited since the last write; file is ahead → file wins, browser edits kept.
+      fresh(); T("base"); await P.flushSaves(); let base = P.db.rev;
+      h = handle(variant(d => { d.run("UPDATE task SET name='theirs'"); setRev(d, base + 2); }));
+      T("my edit"); t0 = Date.now(); P.db.attach(h, base); await P.db.syncWithFile(); await P.flushSaves();
+      eq(P.M.order.map(t => t.name), ["theirs"]); ok((await newestBackup(t0))?.reason.includes(`rev ${base + 1}`), "browser edits kept");
+      // C: file unchanged since the last write → catch up, no backup.
+      fresh(); T("base"); await P.flushSaves(); base = P.db.rev; h = handle(P.db.exportBytes());
+      T("new"); t0 = Date.now(); P.db.attach(h, base); await P.db.syncWithFile(); await P.flushSaves();
+      eq(nameIn(h.store), [String(base + 1), ["base", "new"]], "file caught up"); ok(!(await newestBackup(t0)), "no backup needed");
+      // D: same rev on both sides but different edits → file wins (tie), browser copy kept. Old logic called this "agree".
+      fresh(); T("base"); await P.flushSaves(); base = P.db.rev;
+      h = handle(variant(d => { d.run("UPDATE task SET name='theirs'"); setRev(d, base + 1); }));
+      T("mine"); t0 = Date.now(); P.db.attach(h, base); await P.db.syncWithFile(); await P.flushSaves();
+      eq(P.M.order.map(t => t.name), ["theirs"]); ok(await newestBackup(t0), "tie keeps the browser copy");
+      // E: file changed elsewhere but the browser is further ahead → browser wins, the file's version is kept.
+      fresh(); T("base"); await P.flushSaves(); base = P.db.rev;
+      h = handle(variant(d => { d.run("UPDATE task SET name='theirs'"); setRev(d, base + 1); }));
+      T("m1"); T("m2"); t0 = Date.now(); P.db.attach(h, base); await P.db.syncWithFile(); await P.flushSaves();
+      eq(nameIn(h.store)[1], ["base", "m1", "m2"], "browser copy written"); ok((await newestBackup(t0))?.file === "t.db", "file's version kept");
+    } finally { P.db.attach(null); await P.db.idb.del("backups"); }
+  });
   P.reset();
   const failed = results.filter(r => !r.pass);
   return { total: results.length, passed: results.length - failed.length, failed };
