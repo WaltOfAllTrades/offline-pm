@@ -1,5 +1,5 @@
 // ---------- Record form (ServiceNow-style: fields, mini Gantt, work notes, related records) ----------
-// Opens in the right-hand pane in place of the Gantt; the outline on the left acts as the record list (DECISIONS #38).
+// Slides in from the left over the WBS outline; the Gantt stays visible and clicking a bar switches records (DECISIONS #38).
 Object.assign(UI, {
   form: false, formTab: lsGet("pm.formTab", "children"), mgAll: lsGet("pm.mgAll", false),
   notesWithSub: lsGet("pm.notesWithSub", true), noteDrafts: new Map(), editNote: null,
@@ -16,12 +16,9 @@ function toggleForm(force) {
   const want = force ?? !UI.form;
   if (want === UI.form) { renderForm(); return; }
   UI.form = want;
-  const gb = $("ganttBody");
   formHold = formHeldRender = false; // closing/opening must not wait for a held render
-  if (want) { UI.ganttLeft = gb.scrollLeft; renderForm(true); return; }
-  UI.editNote = null; renderForm(); renderGantt();
-  // The Gantt was display:none, so it missed the grid's scroll sync while the form was open.
-  gb.scrollLeft = UI.ganttLeft ?? gb.scrollLeft; gb.scrollTop = $("gridBody").scrollTop; renderGanttRows();
+  if (want) { renderForm(true); return; }
+  UI.editNote = null; renderForm();
   $("gridBody").focus();
 }
 function openRecord(id) {
@@ -31,10 +28,16 @@ function openRecord(id) {
   if (UI.selId !== id) { UI.editNote = null; selectTask(id); } // selectTask re-renders the form
   else renderForm(true);
 }
+// The panel covers the outline exactly (at least 460px, always leaving some Gantt visible).
+function sizeForm() {
+  const split = $("split").clientWidth || innerWidth;
+  $("formPane").style.width = clamp($("gridPane").offsetWidth, Math.min(460, split - 160), split - 160) + "px";
+}
 // Window resize / splitter: only the mini Gantt depends on the pane width, so leave fields (and focus) alone.
 function relayoutForm() {
+  sizeForm();
   const old = $("formPane").querySelector(".f-sec.mg"), t = selTask();
-  if (old && t && !$("formPane").hidden) old.replaceWith(miniGanttSection(t));
+  if (old && t && UI.form) old.replaceWith(miniGanttSection(t));
 }
 // 2. A pointerdown inside the form commits a pending field edit, but the re-render waits until the click has landed,
 // so the button (or note box) under the pointer still exists when the click arrives.
@@ -53,9 +56,9 @@ function renderForm(force = false) {
   if (formBusy) return;
   if (formHold) { formHeldRender = true; return; }
   const pane = $("formPane"), show = UI.form && UI.view === "plan";
-  pane.hidden = !show; $("ganttPane").hidden = show; $("split").classList.toggle("form-open", show);
+  if (show && !pane.classList.contains("open")) sizeForm();
+  pane.classList.toggle("open", show); pane.setAttribute("aria-hidden", String(!show));
   $("detailsBtn").classList.toggle("primary", show);
-  $$("#grainSeg button, #todayBtn").forEach(b => b.disabled = show);
   if (!show) { pane.dataset.task = ""; return; }
   const ae = document.activeElement;
   // Don't clobber a field being typed in; when switching records, commit the pending edit first.
@@ -71,7 +74,7 @@ function renderForm(force = false) {
   pane.innerHTML = "";
   if (!t) {
     pane.append(h("div", { class: "f-head" }, h("div", { class: "f-title" }, h("h2", {}, "Record")), h("button", { class: "icon", title: "Close form (Ctrl+I)", onclick: () => toggleForm(false) }, "✕")),
-      h("div", { class: "empty" }, "Select a task or milestone in the outline to open its record."));
+      h("div", { class: "empty" }, "Select a task or milestone (click a Gantt bar) to open its record."));
     return;
   }
   if (UI.editNote && !one("SELECT 1 FROM note WHERE id=? AND created_at=?", [UI.editNote.id, UI.editNote.created])) UI.editNote = null;
@@ -205,7 +208,7 @@ function fmtWhen(iso) {
   const rel = s < 60 ? "just now" : s < 3600 ? Math.floor(s / 60) + " min ago" : s < 86400 ? Math.floor(s / 3600) + " h ago" : s < 172800 ? "yesterday" : s < 14 * 86400 ? Math.floor(s / 86400) + " days ago" : "";
   return { abs, rel };
 }
-const authorColor = name => name ? avatarColor({ name }) : "var(--muted)";
+const PERSON_SVG = `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.6"/><path d="M3.2 17.5c.6-3.6 3.4-5.6 6.8-5.6s6.2 2 6.8 5.6z"/></svg>`;
 function notesSection(t) {
   const withSub = t.isSummary && UI.notesWithSub;
   const list = notesFor(t.id, withSub);
@@ -215,14 +218,7 @@ function notesSection(t) {
   sec.append(h("div", { class: "f-sec-h" }, h("h3", {}, "Work notes"), h("span", { class: "hint" }, list.length ? `${list.length}` : ""), h("span", { class: "spacer" }),
     subCb ? h("label", { class: "hint" }, subCb, " Include subtask notes") : null));
 
-  // Compose box
-  const me = lsGet("pm.me", "");
-  const names = M.people.filter(p => p.active).map(p => p.name);
-  if (me && !names.includes(me)) names.unshift(me);
-  const who = h("select", { "data-keep": "author", title: "Who is writing this note" }, h("option", { value: "" }, "(no name)"), ...names.map(n => h("option", { value: n, selected: n === me }, n)));
-  who.addEventListener("change", () => { lsSet("pm.me", who.value); who.classList.toggle("need", !who.value); nameHint.hidden = !!who.value; });
-  if (!who.value) who.classList.add("need");
-  const nameHint = h("span", { class: "need-hint", hidden: !!who.value }, "Pick your name once so teammates know who wrote it");
+  // Compose box (notes carry a date, not a name: DECISIONS #41)
   const ta = h("textarea", { class: "n-compose", "data-keep": "compose", rows: 3, placeholder: "Add a work note… (Ctrl+Enter to post)" });
   ta.value = UI.noteDrafts.get(t.id) || "";
   ta.addEventListener("input", () => { ta.value ? UI.noteDrafts.set(t.id, ta.value) : UI.noteDrafts.delete(t.id); });
@@ -230,10 +226,10 @@ function notesSection(t) {
     if (!ta.value.trim()) { toast("Write something first"); ta.focus(); return; }
     const body = ta.value;
     UI.noteDrafts.delete(t.id);
-    if (!mutate(`Task ${t.wbs}: added a work note`, () => opAddNote(t.id, body, who.value))) { UI.noteDrafts.set(t.id, body); renderForm(true); }
+    if (!mutate(`Task ${t.wbs}: added a work note`, () => opAddNote(t.id, body))) { UI.noteDrafts.set(t.id, body); renderForm(true); }
   };
   ta.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); post(); } e.stopPropagation(); });
-  sec.append(h("div", { class: "n-composer" }, ta, h("div", { class: "n-cbar" }, h("span", { class: "hint" }, "Posting as "), who, nameHint, h("span", { class: "spacer" }), h("button", { class: "primary", onclick: post }, "Post"))));
+  sec.append(h("div", { class: "n-composer" }, ta, h("div", { class: "n-cbar" }, h("span", { class: "spacer" }), h("button", { class: "primary", onclick: post }, "Post"))));
 
   // Stream, newest first
   const stream = h("div", { class: "n-stream" });
@@ -247,7 +243,7 @@ function noteEntry(t, n) {
   const on = n.task_id !== t.id ? M.tasks.get(n.task_id) : null;
   const editing = UI.editNote?.id === n.id;
   const head = h("div", { class: "n-head" },
-    h("b", {}, n.author || "(no name)"),
+    n.author ? h("b", {}, n.author) : null,
     on ? h("span", { class: "n-on" }, "on ", h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(on.id); } }, `${on.wbs} ${on.name}`)) : null,
     h("time", { title: n.created_at }, c.abs + (c.rel ? ` · ${c.rel}` : "")),
     ed ? h("span", { class: "n-ed", title: `Edited ${ed.abs}` }, "(edited)") : null,
@@ -265,7 +261,7 @@ function noteEntry(t, n) {
     body = h("div", {}, ta, h("div", { class: "n-cbar" }, h("span", { class: "spacer" }), h("button", { onclick: cancel }, "Cancel"), h("button", { class: "primary", onclick: save }, "Save")));
   } else body = h("div", { class: "n-body", html: linkify(esc(n.body)) });
   return h("div", { class: "n-entry", "data-note": n.id },
-    h("div", { class: "avatar", style: { background: authorColor(n.author) } }, n.author ? initials(n.author) : "?"),
+    h("div", { class: "n-av", title: n.author || "", html: PERSON_SVG }),
     h("div", { class: "n-main" }, head, body));
 }
 

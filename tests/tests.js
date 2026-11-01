@@ -386,7 +386,7 @@ window.runPmTests = async function () {
   await test("form", "opens in place of the Gantt, shows fields, closes back", () => {
     fresh(); const a = T("Parent"), c1 = T("Child 1", a, "2026-03-02", "2026-03-04"), c2 = T("Child 2", a, "2026-03-05", "2026-03-10"); T("Grandchild", c2, "2026-03-05", "2026-03-06");
     P.switchView("plan"); P.openRecord(c1);
-    ok(!fp().hidden && document.getElementById("ganttPane").hidden, "form shown, gantt hidden");
+    ok(fp().classList.contains("open") && !document.getElementById("ganttPane").hidden, "form slides over the outline, gantt stays");
     ok(inForm(".f-title h2").textContent.includes("Child 1"), "title");
     eq(inForm("[data-f=name]").value, "Child 1"); eq(inForm("[data-f=start]").value, "2026-03-02");
     ok(!inForm(".mg"), "no mini gantt for a leaf");
@@ -399,7 +399,7 @@ window.runPmTests = async function () {
     eq(allInForm(".mg-l").map(x => x.textContent), ["1.1Child 1", "1.2Child 2", "1.2.1Grandchild"], "all levels in outline order");
     P.UI.mgAll = false; localStorage.removeItem("pm.mgAll");
     document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "i", ctrlKey: true, bubbles: true }));
-    ok(fp().hidden && !document.getElementById("ganttPane").hidden, "Ctrl+I closes");
+    ok(!fp().classList.contains("open"), "Ctrl+I closes");
     ok(document.querySelectorAll("#gBars .bar").length >= 3, "gantt re-rendered after closing");
     P.toggleForm(false);
   });
@@ -420,7 +420,7 @@ window.runPmTests = async function () {
     let ta = inForm(".n-compose"); ta.value = "draft for A"; ta.dispatchEvent(new Event("input"));
     P.openRecord(b); eq(inForm(".n-compose").value, "", "B starts empty");
     P.openRecord(a); eq(inForm(".n-compose").value, "draft for A", "A's draft restored");
-    const who = inForm("select[data-keep=author]"); who.value = ""; who.dispatchEvent(new Event("change"));
+    ok(!inForm("select[data-keep=author]"), "no author picker");
     btnInForm("Post").click();
     eq(P.notesFor(a).map(n => n.body), ["draft for A"]); eq(inForm(".n-compose").value, "", "compose cleared");
     eq(allInForm(".n-entry").length, 1);
@@ -495,8 +495,8 @@ window.runPmTests = async function () {
     const wb = P.io.exportWorkbook();
     ok(wb.SheetNames.includes("Notes"), "Notes sheet");
     const rows = XL.utils.sheet_to_json(wb.Sheets.Notes, { header: 1 });
-    eq(rows[0], ["Task ID", "WBS", "Task", "Author", "Created", "Edited", "Note"]);
-    eq(rows.slice(1).map(r => r[6]), ["n1", "n2"], "oldest first"); ok(/^\d{4}-\d\d-\d\d \d\d:\d\d$/.test(rows[1][4]), "local timestamp");
+    eq(rows[0], ["Task ID", "WBS", "Task", "Created", "Edited", "Note"]);
+    eq(rows.slice(1).map(r => r[5]), ["n1", "n2"], "oldest first"); ok(/^\d{4}-\d\d-\d\d \d\d:\d\d$/.test(rows[1][3]), "local timestamp");
     const bytes = XL.write(wb, { type: "array", bookType: "xlsx" });
     const { W } = await runImport("rt.xlsx", bytes, W => W.mode = "new");
     eq(W.sheetName, "Tasks"); eq(P.M.order.map(t => t.name), ["A"]);
@@ -547,6 +547,15 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     fresh(); const root = T("Root"); let last;
     m(() => { for (let i = 0; i < 1200; i++) P.run("INSERT INTO task(project_id, parent_id, position, name) VALUES (?,?,?,?)", [P.M.projectId, root, i, "c" + i]); last = P.scalar("SELECT MAX(id) FROM task"); O.opAddNote(last, "deep"); });
     eq(P.notesFor(root, true).map(n => n.body), ["deep"]);
+  });
+  await test("form", "slide-over: clicking a Gantt bar switches the record; Esc closes", () => {
+    fresh(); const a = T("A"), b = T("B");
+    P.switchView("plan"); P.openRecord(a);
+    ok(Math.abs(fp().offsetWidth - Math.max(document.getElementById("gridPane").offsetWidth, 460)) < 170, "panel sized to the outline");
+    P.selectTask(b); ok(inForm(".f-title h2").textContent.includes("B"), "follows selection from the Gantt");
+    ok(document.querySelector(`#gBars .bar[data-id="${b}"].sel`), "gantt shows the selection while the form is open");
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    ok(!fp().classList.contains("open"), "Esc closes");
   });
   P.reset();
   const failed = results.filter(r => !r.pass);

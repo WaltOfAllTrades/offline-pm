@@ -433,10 +433,10 @@ function seedSample() {
   R(c, chloe, "R"); R(c, ben, "C"); R(d, chloe, "R"); R(e, chloe, "R"); R(e, mkt, "C");
   R(f, eng, "R"); R(g, eng, "R"); R(g, ben, "A"); R(h2, mkt, "R"); R(h2, dev, "A");
   R(i, ana, "R"); R(i, eng, "C"); R(i, mkt, "C"); R(j, ben, "R"); R(j, mkt, "I"); R(j, dev, "I");
-  opAddNote(a, "Interviewed 8 stakeholders. Main theme: the current site is hard to update without a developer.", "Ana Ruiz");
-  opAddNote(c, "Homepage and product page wireframes reviewed with marketing. Navigation still open.", "Chloe Park");
-  opAddNote(c, "Decision: keep the mega-menu, but limit it to 3 columns.", "Ana Ruiz");
-  opAddNote(g, "Waiting on the final style guide before starting the article template.", "Ben Okafor");
+  opAddNote(a, "Interviewed 8 stakeholders. Main theme: the current site is hard to update without a developer.");
+  opAddNote(c, "Homepage and product page wireframes reviewed with marketing. Navigation still open.");
+  opAddNote(c, "Decision: keep the mega-menu, but limit it to 3 columns.");
+  opAddNote(g, "Waiting on the final style guide before starting the article template.");
   // Spread the sample notes over the past days so the stream looks lived-in.
   q("SELECT id FROM note ORDER BY id").forEach((n, k) => run("UPDATE note SET created_at=? WHERE id=?", [new Date(Date.now() - (8 - k * 2) * 864e5 - 3600e3 * (k + 1)).toISOString(), n.id]));
 }

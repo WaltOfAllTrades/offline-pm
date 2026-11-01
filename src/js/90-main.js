@@ -16,7 +16,7 @@ function renderPersonFilter() {
 }
 function renderAll() {
   renderProjectMenu(); updateIssueBadge(); renderSaveState(); renderPersonFilter();
-  if (UI.view === "plan") { renderGrid(); if (!UI.form) renderGantt(); renderForm(); }
+  if (UI.view === "plan") { renderGrid(); renderGantt(); renderForm(); }
   else if (UI.view === "raci") renderRaci();
   else if (UI.view === "people") renderPeople();
   else if (UI.view === "issues") renderIssues();
@@ -76,15 +76,15 @@ function initToolbar() {
     sp.setPointerCapture(e.pointerId); sp.classList.add("drag");
     const x0 = e.clientX, w0 = pane.offsetWidth;
     const mv = ev => { pane.style.width = clamp(w0 + ev.clientX - x0, 240, innerWidth - 160) + "px"; };
-    const up = () => { sp.classList.remove("drag"); sp.removeEventListener("pointermove", mv); sp.removeEventListener("pointerup", up); lsSet("pm.split", pane.offsetWidth); renderGridRows(); if (UI.form) relayoutForm(); else renderGantt(); };
+    const up = () => { sp.classList.remove("drag"); sp.removeEventListener("pointermove", mv); sp.removeEventListener("pointerup", up); lsSet("pm.split", pane.offsetWidth); renderGridRows(); renderGantt(); if (UI.form) relayoutForm(); };
     sp.addEventListener("pointermove", mv); sp.addEventListener("pointerup", up);
   });
-  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "plan") { renderGridRows(); if (UI.form) relayoutForm(); else renderGantt(); } }, 120); });
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "plan") { renderGridRows(); renderGantt(); if (UI.form) relayoutForm(); } }, 120); });
 
   document.addEventListener("keydown", e => {
     const ctrl = e.ctrlKey || e.metaKey;
     const typing = e.target.matches("input,textarea,select") && !e.target.matches("[type=checkbox]");
-    if (e.key === "Escape") { if (!$("pop").hidden) { closePop(); return; } if (modalOpen()) { closeModal(); return; } $("logPanel").hidden = true; }
+    if (e.key === "Escape") { if (!$("pop").hidden) { closePop(); return; } if (modalOpen()) { closeModal(); return; } $("logPanel").hidden = true; if (UI.form && !typing && !modalOpen()) { toggleForm(false); return; } }
     if (modalOpen() || typing) return;
     if (ctrl && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
     else if (ctrl && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { e.preventDefault(); redo(); }

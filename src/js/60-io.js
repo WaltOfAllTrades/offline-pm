@@ -547,10 +547,10 @@ function exportWorkbook() {
   const pws = XLSX.utils.aoa_to_sheet(people); pws["!cols"] = [24, 8, 26, 20, 7, 40].map(w => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, pws, "People");
   // Work notes travel as a read-only sheet; import ignores it (DECISIONS #42).
-  const notes = [["Task ID", "WBS", "Task", "Author", "Created", "Edited", "Note"]];
+  const notes = [["Task ID", "WBS", "Task", "Created", "Edited", "Note"]];
   const localTs = iso => { if (!iso) return ""; const d = new Date(iso); return isNaN(d) ? iso : `${fmtYMD(Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY))} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
-  for (const t of M.order) for (const n of notesFor(t.id).reverse()) notes.push([t.id, t.wbs, t.name, n.author, localTs(n.created_at), localTs(n.updated_at), n.body]);
-  const nws = XLSX.utils.aoa_to_sheet(notes); nws["!cols"] = [7, 8, 32, 18, 16, 16, 80].map(w => ({ wch: w }));
+  for (const t of M.order) for (const n of notesFor(t.id).reverse()) notes.push([t.id, t.wbs, t.name, localTs(n.created_at), localTs(n.updated_at), n.body]);
+  const nws = XLSX.utils.aoa_to_sheet(notes); nws["!cols"] = [7, 8, 32, 16, 16, 80].map(w => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, nws, "Notes");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(meta), "_meta");
   return wb;

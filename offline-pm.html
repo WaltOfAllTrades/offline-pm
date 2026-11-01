@@ -252,8 +252,9 @@ kbd{font:11.5px ui-monospace,Consolas,monospace;background:var(--line2);border:1
 
 /* print */
 /* record form */
-.split.form-open .grid-pane{max-width:max(240px,calc(100% - 540px))}
-.form-pane{scrollbar-gutter:stable;container-type:inline-size;flex:1;min-width:380px;overflow:auto;background:var(--bg);border-left:1px solid var(--line);padding:0 16px 24px}
+.form-pane{position:absolute;left:0;top:0;bottom:0;z-index:40;width:760px;scrollbar-gutter:stable;container-type:inline-size;overflow:auto;background:var(--bg);border-right:1px solid var(--line);box-shadow:8px 0 24px rgba(0,0,0,.18);padding:0 16px 24px;box-sizing:border-box;transform:translateX(-102%);visibility:hidden;transition:transform .22s ease,visibility 0s linear .22s}
+.form-pane.open{transform:none;visibility:visible;transition:transform .22s ease}
+@media (prefers-reduced-motion:reduce){.form-pane,.form-pane.open{transition:none}}
 .f-head{position:sticky;top:0;z-index:5;display:flex;align-items:flex-start;gap:10px;margin:0 -16px 12px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
 .f-title{flex:1;min-width:0}
 .f-title h2{margin:2px 0 0;font-size:17px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
@@ -279,8 +280,6 @@ kbd{font:11.5px ui-monospace,Consolas,monospace;background:var(--line2);border:1
 .sec-tog .car{font-size:10px;color:var(--muted);width:10px}
 .f-sec.det .f-fields{border:0;padding:4px 0 0;background:none}
 .f-sec.det .f-sec-h:last-child,.f-sec.mg .f-sec-h:last-child{margin-bottom:0}
-select.need{border-color:var(--warn);background:var(--warn-bg);color:var(--warn)}
-.need-hint{font-size:12px;color:var(--warn)}
 .mg-l .nc{margin-left:auto;font-size:11px;color:var(--muted);flex:none}
 .mg-wrap{display:flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden}
 .mg-lbls{flex:none;border-right:1px solid var(--line);background:var(--panel2)}
@@ -302,7 +301,8 @@ select.need{border-color:var(--warn);background:var(--warn-bg);color:var(--warn)
 .n-stream{margin-top:10px;display:flex;flex-direction:column}
 .n-entry{display:flex;gap:10px;padding:10px 4px;border-top:1px solid var(--line2)}
 .n-entry:first-child{border-top:0}
-.n-entry .avatar{width:28px;height:28px;font-size:11px}
+.n-av{width:22px;height:22px;flex:none;border-radius:50%;background:var(--line2);display:grid;place-items:center;margin-top:1px}
+.n-av svg{width:14px;height:14px;fill:var(--muted)}
 .n-main{flex:1;min-width:0;border-left:3px solid var(--note-bar);padding-left:10px}
 .n-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:12.5px}
 .n-head time,.n-ed,.n-on{color:var(--muted)}
@@ -430,6 +430,7 @@ table.rel-list{width:100%;border-collapse:collapse;font-size:12.5px}
       <button id="todayBtn" title="Scroll to today">Today</button>
     </div>
     <div class="split" id="split">
+      <section id="formPane" class="form-pane" aria-hidden="true"></section>
       <div class="grid-pane" id="gridPane">
         <div class="grid-head" id="gridHead"></div>
         <div class="grid-body" id="gridBody" tabindex="0"><div class="grid-canvas" id="gridCanvas"><div id="gridRows"></div></div></div>
@@ -439,7 +440,6 @@ table.rel-list{width:100%;border-collapse:collapse;font-size:12.5px}
         <div class="gantt-head" id="ganttHead"><svg id="ganttHeadSvg"></svg></div>
         <div class="gantt-body" id="ganttBody"><svg id="ganttSvg"></svg></div>
       </div>
-      <section id="formPane" class="form-pane" hidden></section>
     </div>
   </section>
 
@@ -1623,10 +1623,10 @@ function seedSample() {
   R(c, chloe, "R"); R(c, ben, "C"); R(d, chloe, "R"); R(e, chloe, "R"); R(e, mkt, "C");
   R(f, eng, "R"); R(g, eng, "R"); R(g, ben, "A"); R(h2, mkt, "R"); R(h2, dev, "A");
   R(i, ana, "R"); R(i, eng, "C"); R(i, mkt, "C"); R(j, ben, "R"); R(j, mkt, "I"); R(j, dev, "I");
-  opAddNote(a, "Interviewed 8 stakeholders. Main theme: the current site is hard to update without a developer.", "Ana Ruiz");
-  opAddNote(c, "Homepage and product page wireframes reviewed with marketing. Navigation still open.", "Chloe Park");
-  opAddNote(c, "Decision: keep the mega-menu, but limit it to 3 columns.", "Ana Ruiz");
-  opAddNote(g, "Waiting on the final style guide before starting the article template.", "Ben Okafor");
+  opAddNote(a, "Interviewed 8 stakeholders. Main theme: the current site is hard to update without a developer.");
+  opAddNote(c, "Homepage and product page wireframes reviewed with marketing. Navigation still open.");
+  opAddNote(c, "Decision: keep the mega-menu, but limit it to 3 columns.");
+  opAddNote(g, "Waiting on the final style guide before starting the article template.");
   // Spread the sample notes over the past days so the stream looks lived-in.
   q("SELECT id FROM note ORDER BY id").forEach((n, k) => run("UPDATE note SET created_at=? WHERE id=?", [new Date(Date.now() - (8 - k * 2) * 864e5 - 3600e3 * (k + 1)).toISOString(), n.id]));
 }
@@ -2283,7 +2283,7 @@ function beginLink(e, from, side) {
 
 // ===== 45-form.js =====
 // ---------- Record form (ServiceNow-style: fields, mini Gantt, work notes, related records) ----------
-// Opens in the right-hand pane in place of the Gantt; the outline on the left acts as the record list (DECISIONS #38).
+// Slides in from the left over the WBS outline; the Gantt stays visible and clicking a bar switches records (DECISIONS #38).
 Object.assign(UI, {
   form: false, formTab: lsGet("pm.formTab", "children"), mgAll: lsGet("pm.mgAll", false),
   notesWithSub: lsGet("pm.notesWithSub", true), noteDrafts: new Map(), editNote: null,
@@ -2300,12 +2300,9 @@ function toggleForm(force) {
   const want = force ?? !UI.form;
   if (want === UI.form) { renderForm(); return; }
   UI.form = want;
-  const gb = $("ganttBody");
   formHold = formHeldRender = false; // closing/opening must not wait for a held render
-  if (want) { UI.ganttLeft = gb.scrollLeft; renderForm(true); return; }
-  UI.editNote = null; renderForm(); renderGantt();
-  // The Gantt was display:none, so it missed the grid's scroll sync while the form was open.
-  gb.scrollLeft = UI.ganttLeft ?? gb.scrollLeft; gb.scrollTop = $("gridBody").scrollTop; renderGanttRows();
+  if (want) { renderForm(true); return; }
+  UI.editNote = null; renderForm();
   $("gridBody").focus();
 }
 function openRecord(id) {
@@ -2315,10 +2312,16 @@ function openRecord(id) {
   if (UI.selId !== id) { UI.editNote = null; selectTask(id); } // selectTask re-renders the form
   else renderForm(true);
 }
+// The panel covers the outline exactly (at least 460px, always leaving some Gantt visible).
+function sizeForm() {
+  const split = $("split").clientWidth || innerWidth;
+  $("formPane").style.width = clamp($("gridPane").offsetWidth, Math.min(460, split - 160), split - 160) + "px";
+}
 // Window resize / splitter: only the mini Gantt depends on the pane width, so leave fields (and focus) alone.
 function relayoutForm() {
+  sizeForm();
   const old = $("formPane").querySelector(".f-sec.mg"), t = selTask();
-  if (old && t && !$("formPane").hidden) old.replaceWith(miniGanttSection(t));
+  if (old && t && UI.form) old.replaceWith(miniGanttSection(t));
 }
 // 2. A pointerdown inside the form commits a pending field edit, but the re-render waits until the click has landed,
 // so the button (or note box) under the pointer still exists when the click arrives.
@@ -2337,9 +2340,9 @@ function renderForm(force = false) {
   if (formBusy) return;
   if (formHold) { formHeldRender = true; return; }
   const pane = $("formPane"), show = UI.form && UI.view === "plan";
-  pane.hidden = !show; $("ganttPane").hidden = show; $("split").classList.toggle("form-open", show);
+  if (show && !pane.classList.contains("open")) sizeForm();
+  pane.classList.toggle("open", show); pane.setAttribute("aria-hidden", String(!show));
   $("detailsBtn").classList.toggle("primary", show);
-  $$("#grainSeg button, #todayBtn").forEach(b => b.disabled = show);
   if (!show) { pane.dataset.task = ""; return; }
   const ae = document.activeElement;
   // Don't clobber a field being typed in; when switching records, commit the pending edit first.
@@ -2355,7 +2358,7 @@ function renderForm(force = false) {
   pane.innerHTML = "";
   if (!t) {
     pane.append(h("div", { class: "f-head" }, h("div", { class: "f-title" }, h("h2", {}, "Record")), h("button", { class: "icon", title: "Close form (Ctrl+I)", onclick: () => toggleForm(false) }, "✕")),
-      h("div", { class: "empty" }, "Select a task or milestone in the outline to open its record."));
+      h("div", { class: "empty" }, "Select a task or milestone (click a Gantt bar) to open its record."));
     return;
   }
   if (UI.editNote && !one("SELECT 1 FROM note WHERE id=? AND created_at=?", [UI.editNote.id, UI.editNote.created])) UI.editNote = null;
@@ -2489,7 +2492,7 @@ function fmtWhen(iso) {
   const rel = s < 60 ? "just now" : s < 3600 ? Math.floor(s / 60) + " min ago" : s < 86400 ? Math.floor(s / 3600) + " h ago" : s < 172800 ? "yesterday" : s < 14 * 86400 ? Math.floor(s / 86400) + " days ago" : "";
   return { abs, rel };
 }
-const authorColor = name => name ? avatarColor({ name }) : "var(--muted)";
+const PERSON_SVG = `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.6"/><path d="M3.2 17.5c.6-3.6 3.4-5.6 6.8-5.6s6.2 2 6.8 5.6z"/></svg>`;
 function notesSection(t) {
   const withSub = t.isSummary && UI.notesWithSub;
   const list = notesFor(t.id, withSub);
@@ -2499,14 +2502,7 @@ function notesSection(t) {
   sec.append(h("div", { class: "f-sec-h" }, h("h3", {}, "Work notes"), h("span", { class: "hint" }, list.length ? `${list.length}` : ""), h("span", { class: "spacer" }),
     subCb ? h("label", { class: "hint" }, subCb, " Include subtask notes") : null));
 
-  // Compose box
-  const me = lsGet("pm.me", "");
-  const names = M.people.filter(p => p.active).map(p => p.name);
-  if (me && !names.includes(me)) names.unshift(me);
-  const who = h("select", { "data-keep": "author", title: "Who is writing this note" }, h("option", { value: "" }, "(no name)"), ...names.map(n => h("option", { value: n, selected: n === me }, n)));
-  who.addEventListener("change", () => { lsSet("pm.me", who.value); who.classList.toggle("need", !who.value); nameHint.hidden = !!who.value; });
-  if (!who.value) who.classList.add("need");
-  const nameHint = h("span", { class: "need-hint", hidden: !!who.value }, "Pick your name once so teammates know who wrote it");
+  // Compose box (notes carry a date, not a name: DECISIONS #41)
   const ta = h("textarea", { class: "n-compose", "data-keep": "compose", rows: 3, placeholder: "Add a work note… (Ctrl+Enter to post)" });
   ta.value = UI.noteDrafts.get(t.id) || "";
   ta.addEventListener("input", () => { ta.value ? UI.noteDrafts.set(t.id, ta.value) : UI.noteDrafts.delete(t.id); });
@@ -2514,10 +2510,10 @@ function notesSection(t) {
     if (!ta.value.trim()) { toast("Write something first"); ta.focus(); return; }
     const body = ta.value;
     UI.noteDrafts.delete(t.id);
-    if (!mutate(`Task ${t.wbs}: added a work note`, () => opAddNote(t.id, body, who.value))) { UI.noteDrafts.set(t.id, body); renderForm(true); }
+    if (!mutate(`Task ${t.wbs}: added a work note`, () => opAddNote(t.id, body))) { UI.noteDrafts.set(t.id, body); renderForm(true); }
   };
   ta.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); post(); } e.stopPropagation(); });
-  sec.append(h("div", { class: "n-composer" }, ta, h("div", { class: "n-cbar" }, h("span", { class: "hint" }, "Posting as "), who, nameHint, h("span", { class: "spacer" }), h("button", { class: "primary", onclick: post }, "Post"))));
+  sec.append(h("div", { class: "n-composer" }, ta, h("div", { class: "n-cbar" }, h("span", { class: "spacer" }), h("button", { class: "primary", onclick: post }, "Post"))));
 
   // Stream, newest first
   const stream = h("div", { class: "n-stream" });
@@ -2531,7 +2527,7 @@ function noteEntry(t, n) {
   const on = n.task_id !== t.id ? M.tasks.get(n.task_id) : null;
   const editing = UI.editNote?.id === n.id;
   const head = h("div", { class: "n-head" },
-    h("b", {}, n.author || "(no name)"),
+    n.author ? h("b", {}, n.author) : null,
     on ? h("span", { class: "n-on" }, "on ", h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(on.id); } }, `${on.wbs} ${on.name}`)) : null,
     h("time", { title: n.created_at }, c.abs + (c.rel ? ` · ${c.rel}` : "")),
     ed ? h("span", { class: "n-ed", title: `Edited ${ed.abs}` }, "(edited)") : null,
@@ -2549,7 +2545,7 @@ function noteEntry(t, n) {
     body = h("div", {}, ta, h("div", { class: "n-cbar" }, h("span", { class: "spacer" }), h("button", { onclick: cancel }, "Cancel"), h("button", { class: "primary", onclick: save }, "Save")));
   } else body = h("div", { class: "n-body", html: linkify(esc(n.body)) });
   return h("div", { class: "n-entry", "data-note": n.id },
-    h("div", { class: "avatar", style: { background: authorColor(n.author) } }, n.author ? initials(n.author) : "?"),
+    h("div", { class: "n-av", title: n.author || "", html: PERSON_SVG }),
     h("div", { class: "n-main" }, head, body));
 }
 
@@ -2948,7 +2944,7 @@ function showHelp() {
       h("li", {}, "Click an arrow to change its type and lag, or delete it. Red arrows mean the dates conflict with the link; dates are never moved automatically."),
       h("li", {}, "Double-click a bar, or click ↗ next to a task name, to open its record form.")),
     h("h3", {}, "Record form"),
-    h("p", {}, "Shows every field of a task, a mini Gantt of a summary task's subtasks, its work notes (dated, editable) and related records in tabs. The outline stays on the left: click another task to switch records. ", h("kbd", {}, "Ctrl+Enter"), " posts a note."),
+    h("p", {}, "Shows every field of a task, a mini Gantt of a summary task's subtasks, its work notes (dated, editable) and related records in tabs. It slides in over the outline; the Gantt stays visible, and clicking a bar switches records. Esc or ✕ closes it. ", h("kbd", {}, "Ctrl+Enter"), " posts a note."),
     h("h3", {}, "Predecessors cell"),
     h("p", {}, "Type WBS numbers separated by commas, with an optional type and lag: ", h("kbd", {}, "1.2"), " ", h("kbd", {}, "3FS+2d"), " ", h("kbd", {}, "2.1SS-1d"), " ", h("kbd", {}, "4FF+1w")),
     h("h3", {}, "Saving"),
@@ -3506,10 +3502,10 @@ function exportWorkbook() {
   const pws = XLSX.utils.aoa_to_sheet(people); pws["!cols"] = [24, 8, 26, 20, 7, 40].map(w => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, pws, "People");
   // Work notes travel as a read-only sheet; import ignores it (DECISIONS #42).
-  const notes = [["Task ID", "WBS", "Task", "Author", "Created", "Edited", "Note"]];
+  const notes = [["Task ID", "WBS", "Task", "Created", "Edited", "Note"]];
   const localTs = iso => { if (!iso) return ""; const d = new Date(iso); return isNaN(d) ? iso : `${fmtYMD(Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY))} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
-  for (const t of M.order) for (const n of notesFor(t.id).reverse()) notes.push([t.id, t.wbs, t.name, n.author, localTs(n.created_at), localTs(n.updated_at), n.body]);
-  const nws = XLSX.utils.aoa_to_sheet(notes); nws["!cols"] = [7, 8, 32, 18, 16, 16, 80].map(w => ({ wch: w }));
+  for (const t of M.order) for (const n of notesFor(t.id).reverse()) notes.push([t.id, t.wbs, t.name, localTs(n.created_at), localTs(n.updated_at), n.body]);
+  const nws = XLSX.utils.aoa_to_sheet(notes); nws["!cols"] = [7, 8, 32, 16, 16, 80].map(w => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, nws, "Notes");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(meta), "_meta");
   return wb;
@@ -3596,7 +3592,7 @@ function renderPersonFilter() {
 }
 function renderAll() {
   renderProjectMenu(); updateIssueBadge(); renderSaveState(); renderPersonFilter();
-  if (UI.view === "plan") { renderGrid(); if (!UI.form) renderGantt(); renderForm(); }
+  if (UI.view === "plan") { renderGrid(); renderGantt(); renderForm(); }
   else if (UI.view === "raci") renderRaci();
   else if (UI.view === "people") renderPeople();
   else if (UI.view === "issues") renderIssues();
@@ -3656,15 +3652,15 @@ function initToolbar() {
     sp.setPointerCapture(e.pointerId); sp.classList.add("drag");
     const x0 = e.clientX, w0 = pane.offsetWidth;
     const mv = ev => { pane.style.width = clamp(w0 + ev.clientX - x0, 240, innerWidth - 160) + "px"; };
-    const up = () => { sp.classList.remove("drag"); sp.removeEventListener("pointermove", mv); sp.removeEventListener("pointerup", up); lsSet("pm.split", pane.offsetWidth); renderGridRows(); if (UI.form) relayoutForm(); else renderGantt(); };
+    const up = () => { sp.classList.remove("drag"); sp.removeEventListener("pointermove", mv); sp.removeEventListener("pointerup", up); lsSet("pm.split", pane.offsetWidth); renderGridRows(); renderGantt(); if (UI.form) relayoutForm(); };
     sp.addEventListener("pointermove", mv); sp.addEventListener("pointerup", up);
   });
-  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "plan") { renderGridRows(); if (UI.form) relayoutForm(); else renderGantt(); } }, 120); });
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "plan") { renderGridRows(); renderGantt(); if (UI.form) relayoutForm(); } }, 120); });
 
   document.addEventListener("keydown", e => {
     const ctrl = e.ctrlKey || e.metaKey;
     const typing = e.target.matches("input,textarea,select") && !e.target.matches("[type=checkbox]");
-    if (e.key === "Escape") { if (!$("pop").hidden) { closePop(); return; } if (modalOpen()) { closeModal(); return; } $("logPanel").hidden = true; }
+    if (e.key === "Escape") { if (!$("pop").hidden) { closePop(); return; } if (modalOpen()) { closeModal(); return; } $("logPanel").hidden = true; if (UI.form && !typing && !modalOpen()) { toggleForm(false); return; } }
     if (modalOpen() || typing) return;
     if (ctrl && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
     else if (ctrl && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { e.preventDefault(); redo(); }
