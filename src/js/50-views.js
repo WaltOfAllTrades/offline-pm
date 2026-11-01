@@ -112,7 +112,7 @@ function renderRaci() {
   for (const t of rows) {
     const map = new Map(rolesOf(t.id).map(r => [r.party_id, r.role]));
     const inh = accountable(t);
-    html += `<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${esc(t.name)}">${esc(t.wbs)}&nbsp; ${esc(t.name)}</td>`;
+    html += `<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${esc(t.name)}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${esc(t.wbs)}&nbsp; ${esc(t.name)}</a></td>`;
     for (const p of cols) {
       const r = map.get(p.id) || "";
       const ghost = !r && inh.inherited && inh.list.some(a => a.party_id === p.id);
@@ -125,12 +125,19 @@ function renderRaci() {
 }
 function initRaci() {
   $("raciWrap").addEventListener("click", e => {
+    const link = e.target.closest("[data-open]"); if (link) { e.preventDefault(); openRecord(+link.dataset.open); return; }
     const td = e.target.closest("td.cell"); if (!td) return;
-    const tid = +td.dataset.t, pid = +td.dataset.p;
-    const cur = rolesOf(tid).find(r => r.party_id === pid)?.role || "";
-    const seq = ["", "R", "A", "C", "I", ""]; const next = seq[seq.indexOf(cur) + 1];
+    const tid = +td.dataset.t, pid = +td.dataset.p, t = M.tasks.get(tid);
+    const role = rolesOf(tid).find(r => r.party_id === pid)?.role || "";
+    const cur = role === "A" && t.r_is_a ? "A/R" : role;
+    // A/R = Accountable plus the task's "Responsible same as Accountable" switch (DECISIONS #48).
+    const seq = ["", "R", "A", "A/R", "C", "I", ""]; const next = seq[seq.indexOf(cur) + 1];
     const keep = $("raciWrap").scrollTop, keepL = $("raciWrap").scrollLeft;
-    mutate(`RACI ${M.tasks.get(tid).wbs}: ${partyName(pid)} → ${next || "none"}`, () => opSetRole(tid, pid, next || null));
+    mutate(`RACI ${t.wbs}: ${partyName(pid)} → ${next || "none"}`, () => {
+      if (next === "A/R") { opSetRole(tid, pid, "A"); opSetRIsA(tid, true); return; }
+      if (cur === "A/R") opSetRIsA(tid, false);
+      opSetRole(tid, pid, next || null);
+    });
     $("raciWrap").scrollTop = keep; $("raciWrap").scrollLeft = keepL;
   });
   $("raciOnlyUsed").addEventListener("change", renderRaci);

@@ -402,6 +402,8 @@ table.rk{width:100%;border-collapse:collapse;font-size:12.5px}
 .pick-btn:hover{background:var(--sel)}
 table.closeout td{vertical-align:top;white-space:normal}
 table.closeout tr.bad td:nth-child(6){color:var(--err);font-weight:700}
+.tn-link{color:inherit;text-decoration:none}
+.tn-link:hover{color:var(--accent);text-decoration:underline}
 .print-root{display:none}
 @media print{
   :root,:root:not([data-theme="light"]){
@@ -539,7 +541,7 @@ table.closeout tr.bad td:nth-child(6){color:var(--err);font-weight:700}
       <div class="grp"><label><input type="checkbox" id="raciOnlyUsed" checked> Only people/teams with assignments</label></div>
       <div class="grp"><label><input type="checkbox" id="raciLeaves"> Hide summary tasks</label></div>
       <div class="spacer"></div>
-      <span class="hint">Click a cell to cycle: — → R → A → C → I → —</span>
+      <span class="hint">Click a cell to cycle: — → R → A → A/R → C → I → —. Click a task to open its record</span>
     </div>
     <div class="raci-wrap" id="raciWrap"></div>
   </section>
@@ -3746,7 +3748,7 @@ function renderRaci() {
   for (const t of rows) {
     const map = new Map(rolesOf(t.id).map(r => [r.party_id, r.role]));
     const inh = accountable(t);
-    html += `<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${esc(t.name)}">${esc(t.wbs)}&nbsp; ${esc(t.name)}</td>`;
+    html += `<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${esc(t.name)}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${esc(t.wbs)}&nbsp; ${esc(t.name)}</a></td>`;
     for (const p of cols) {
       const r = map.get(p.id) || "";
       const ghost = !r && inh.inherited && inh.list.some(a => a.party_id === p.id);
@@ -3759,12 +3761,19 @@ function renderRaci() {
 }
 function initRaci() {
   $("raciWrap").addEventListener("click", e => {
+    const link = e.target.closest("[data-open]"); if (link) { e.preventDefault(); openRecord(+link.dataset.open); return; }
     const td = e.target.closest("td.cell"); if (!td) return;
-    const tid = +td.dataset.t, pid = +td.dataset.p;
-    const cur = rolesOf(tid).find(r => r.party_id === pid)?.role || "";
-    const seq = ["", "R", "A", "C", "I", ""]; const next = seq[seq.indexOf(cur) + 1];
+    const tid = +td.dataset.t, pid = +td.dataset.p, t = M.tasks.get(tid);
+    const role = rolesOf(tid).find(r => r.party_id === pid)?.role || "";
+    const cur = role === "A" && t.r_is_a ? "A/R" : role;
+    // A/R = Accountable plus the task's "Responsible same as Accountable" switch (DECISIONS #48).
+    const seq = ["", "R", "A", "A/R", "C", "I", ""]; const next = seq[seq.indexOf(cur) + 1];
     const keep = $("raciWrap").scrollTop, keepL = $("raciWrap").scrollLeft;
-    mutate(`RACI ${M.tasks.get(tid).wbs}: ${partyName(pid)} → ${next || "none"}`, () => opSetRole(tid, pid, next || null));
+    mutate(`RACI ${t.wbs}: ${partyName(pid)} → ${next || "none"}`, () => {
+      if (next === "A/R") { opSetRole(tid, pid, "A"); opSetRIsA(tid, true); return; }
+      if (cur === "A/R") opSetRIsA(tid, false);
+      opSetRole(tid, pid, next || null);
+    });
     $("raciWrap").scrollTop = keep; $("raciWrap").scrollLeft = keepL;
   });
   $("raciOnlyUsed").addEventListener("change", renderRaci);

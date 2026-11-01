@@ -805,6 +805,19 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     P.db.installDb(P.db.exportBytes()); eq([P.UI.riskSel, P.UI.riskForm], [null, false]);
     P.refresh(); P.switchView("plan");
   });
+  await test("raci-ra", "matrix cycle includes A/R; task names open the record", () => {
+    fresh(); const a = T("Build"); let ana;
+    m(() => { ana = O.opAddParty("person", "Ana"); });
+    P.switchView("raci"); document.getElementById("raciOnlyUsed").checked = false; P.renderAll();
+    const cell = () => document.querySelector(`#raciWrap td.cell[data-t="${a}"][data-p="${ana}"]`);
+    const seen = []; for (let i = 0; i < 6; i++) { cell().click(); seen.push(cell().textContent); }
+    eq(seen, ["R", "A", "A/R", "C", "I", ""]);
+    cell().click(); cell().click(); cell().click(); eq([cell().textContent, task(a).r_is_a], ["A/R", 1]);
+    cell().click(); eq([cell().textContent, task(a).r_is_a], ["C", 0], "leaving A/R turns the switch off");
+    document.querySelector(`#raciWrap [data-open="${a}"]`).click();
+    eq([P.UI.view, P.UI.selId, P.UI.form], ["plan", a, true], "task link opens its record");
+    P.toggleForm(false); document.getElementById("raciOnlyUsed").checked = true;
+  });
   P.reset();
   const failed = results.filter(r => !r.pass);
   return { total: results.length, passed: results.length - failed.length, failed };
