@@ -23,8 +23,7 @@ function renderRisks() {
     if (inView && ae._commit) { riskBusy = true; try { ae._commit(); } finally { riskBusy = false; } }
     if (inView) ae._cancel?.(); // the element is about to be removed; its blur must not commit again
     const pending = UI.riskFocus; UI.riskFocus = null;
-    const keep = pending?.key || (inView ? ae.dataset.keep : null);
-    const caret = !pending && inView && ae.selectionStart != null ? [ae.selectionStart, ae.selectionEnd] : null;
+    const keep = pending?.key, mark = pending ? null : markFocus($("view-risks"));
     const sTop = body.scrollTop;
     if (UI.riskSel && !recOf(UI.riskSel)) UI.riskSel = null;
     renderRiskGrid(); renderPlanList(); renderRiskForm();
@@ -33,9 +32,9 @@ function renderRisks() {
       const el = $("view-risks").querySelector(`[data-keep="${keep}"]`);
       if (el) {
         el.focus();
-        try { const n = el.value?.length ?? 0; if (pending?.select) el.select(); else el.setSelectionRange(...(caret || [n, n])); } catch { }
+        try { const n = el.value?.length ?? 0; if (pending?.select) el.select(); else el.setSelectionRange(n, n); } catch { }
       }
-    }
+    } else refocus($("view-risks"), mark, { typed: false }); // the half-typed cell was saved above
   } finally { riskRendering = false; }
   if (riskRenderAgain) { riskRenderAgain = false; renderRisks(); }
 }

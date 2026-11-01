@@ -46,6 +46,37 @@ function trackDrag(target, { move, drop, cancel = () => { } }) {
   window.addEventListener("blur", onCancel); document.addEventListener("keydown", onKey, true);
 }
 
+// Rebuilding part of the page throws away the element that had focus (DECISIONS #76). markFocus(root) remembers it
+// by its data-* attributes under its nearest marked ancestor; an unmarked control by its place among the same tags
+// in that ancestor (a row's second person button); lacking both, by its text. It also keeps the caret and any typing
+// not yet saved. refocus(root, mark) finds the one matching element in the new markup.
+const dataSel = el => [...el.attributes].filter(a => a.name.startsWith("data-")).map(a => `[${a.name}="${CSS.escape(a.value)}"]`).join("");
+function markFocus(root) {
+  const el = document.activeElement;
+  if (!el || el === root || !root.contains(el)) return null;
+  let up = el.parentElement; while (up && up !== root && !dataSel(up)) up = up.parentElement;
+  const upSel = up && up !== root ? dataSel(up) : "", tag = el.tagName.toLowerCase();
+  const sel = dataSel(el) ? (upSel ? upSel + " " : "") + tag + dataSel(el) : null;
+  const pos = !sel && upSel ? { upSel, i: [...up.querySelectorAll(tag)].indexOf(el), cls: el.className } : null;
+  const typed = "_orig" in el && el.value !== el._orig ? el.value : null;
+  return { sel, pos, tag, text: el.textContent.trim(), typed, caret: el.selectionStart != null ? [el.selectionStart, el.selectionEnd] : null };
+}
+function refocus(root, mark, { typed = true } = {}) {
+  if (!mark) return false;
+  let found = [];
+  if (mark.sel) found = [...root.querySelectorAll(mark.sel)];
+  else if (mark.pos) {
+    const ups = root.querySelectorAll(mark.pos.upSel), c = ups.length === 1 ? ups[0].querySelectorAll(mark.tag)[mark.pos.i] : null;
+    if (c && c.className === mark.pos.cls) found = [c];
+  } else if (mark.text) found = [...root.querySelectorAll(mark.tag)].filter(x => x.textContent.trim() === mark.text);
+  if (found.length !== 1) return false; // gone, or ambiguous: better nowhere than on the wrong button
+  const el = found[0];
+  if (typed && mark.typed != null && "value" in el) el.value = mark.typed;
+  el.focus({ preventScroll: true });
+  if (mark.caret) try { el.setSelectionRange(...mark.caret); } catch { }
+  return document.activeElement === el;
+}
+
 let toastTimer;
 function toast(msg, kind = "") {
   const t = $("toast"); t.textContent = msg; t.className = "show " + kind;

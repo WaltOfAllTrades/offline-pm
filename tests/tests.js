@@ -1150,6 +1150,38 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     eq(draws(), 1, "drawn exactly once"); mo.disconnect();
     eq(rows.querySelector(".grow.sel")?.dataset.id, String(P.M.order[1].id), "with the new selection");
   });
+  await test("focus", "record panel: a dropdown change keeps focus; a field saves again after an in-place refresh", async () => {
+    fresh(); const a = T("A"); P.switchView("plan"); P.openRecord(a);
+    const pane = document.getElementById("formPane"), f = k => pane.querySelector(`[data-f="${k}"]`);
+    let st = f("status"); st.focus(); st.value = "In progress"; st.dispatchEvent(new Event("change", { bubbles: true }));
+    eq(task(a).ST, "In progress"); ok(document.activeElement === f("status") && f("status") !== st, "focus on the rebuilt Status");
+    let code = f("code"); code.focus(); code.value = "C-1"; code.dispatchEvent(new Event("change", { bubbles: true }));
+    eq(task(a).code, "C-1");
+    ok(document.activeElement === code, "text field kept (refreshed in place, not rebuilt)");
+    code.value = "C-2"; code.dispatchEvent(new Event("input")); code.dispatchEvent(new Event("change", { bubbles: true }));
+    eq(task(a).code, "C-2", "the same field saves again after more typing");
+    const d = f("duration"); d.focus(); d.value = "0"; d.dispatchEvent(new Event("change", { bubbles: true }));
+    ok(task(a).isMilestone && f("finish").disabled, "layout change rebuilds the form"); ok(document.activeElement === f("duration"), "focus kept through the rebuild");
+    P.toggleForm(false);
+  });
+  await test("focus", "redraws wait while Tab moves focus; rebuilt rows keep focus on unmarked controls", async () => {
+    fresh(); T("A"); P.switchView("plan");
+    const rows = document.getElementById("gridRows"); let seen = 0; const mo = new MutationObserver(r => seen += r.length); mo.observe(rows, { childList: true });
+    document.getElementById("gridBody").dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    P.redraw("gridRows"); await null;
+    eq(seen + mo.takeRecords().length, 0, "not while Tab is moving focus");
+    await new Promise(r => setTimeout(r, 10));
+    eq(seen + mo.takeRecords().length, 1, "drawn once focus has landed"); mo.disconnect();
+    let r; m(() => { r = O.opAddRisk({ name: "R" }); }); P.switchView("risks");
+    const row = () => document.querySelector(`#riskBody [data-risk="${r}"]`), second = () => row().querySelectorAll("button.rk-party")[1];
+    const old = second(); old.focus(); P.risk.renderRisks();
+    ok(second() !== old && document.activeElement === second(), "same button in the rebuilt row");
+    const box = document.createElement("div"); document.body.append(box);
+    box.append(Object.assign(document.createElement("button"), { textContent: "—" })); box.firstChild.focus();
+    const mk = U.markFocus(box); box.replaceChildren(...[1, 2].map(() => Object.assign(document.createElement("button"), { textContent: "—" })));
+    ok(!U.refocus(box, mk), "two candidates: no guess"); box.remove();
+    P.switchView("plan");
+  });
   await test("a11y", "dialogs take focus, keep Tab inside, and give focus back when closed", () => {
     P.switchView("plan"); const gb = document.getElementById("gridBody"); gb.focus();
     document.querySelector('#fileMenu [data-act="help"]').click();

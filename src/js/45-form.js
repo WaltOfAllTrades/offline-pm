@@ -73,17 +73,18 @@ function renderForm(force = false) {
   pane.classList.toggle("open", show); pane.setAttribute("aria-hidden", String(!show));
   $("detailsBtn").classList.toggle("primary", show);
   if (!show) { pane.dataset.task = ""; return; }
-  const ae = document.activeElement;
-  // Don't clobber a field being typed in; when switching records, commit the pending edit first.
-  if (pane.contains(ae) && ae.closest(".f-fields") && ae.matches("input,select,textarea")) {
-    if (!force && pane.dataset.task === String(UI.selId)) { refreshFieldsInPlace(selTask(), ae); return; }
-    formBusy = true; try { ae._commit?.(); ae.blur(); } finally { formBusy = false; }
-  }
-  const t = selTask();
-  const keep = pane.contains(ae) ? ae.dataset.keep : null;
-  const selRange = keep && ae.selectionStart != null ? [ae.selectionStart, ae.selectionEnd] : null;
+  const ae = document.activeElement, t = selTask();
+  const same = pane.dataset.task === String(UI.selId), inField = pane.contains(ae) && ae.closest(".f-fields") && ae.matches("input,select,textarea");
+  // While a text field has focus, update the other fields in place rather than rebuild under the typing, unless the
+  // form's layout changed (a task became a milestone or a summary): then rebuild, and refocus() puts the typing back.
+  const shape = t ? `${t.isSummary}|${t.isMilestone}|${t.r_is_a}|${t.parent_id}` : "";
+  const typing = inField && ae.matches("textarea,input:not([type=checkbox]):not([type=radio])");
+  if (typing && same && !force && pane.dataset.shape === shape) { refreshFieldsInPlace(t, ae); return; }
+  // Switching records: save the half-typed field first.
+  if (inField && !same) { formBusy = true; try { ae._commit?.(); ae.blur(); } finally { formBusy = false; } }
+  const mark = markFocus(pane);
   const scroll = pane.dataset.task === String(t?.id ?? "") ? pane.scrollTop : 0;
-  pane.dataset.task = t?.id ?? "";
+  pane.dataset.task = t?.id ?? ""; pane.dataset.shape = shape;
   pane.innerHTML = "";
   if (!t) {
     pane.append(h("div", { class: "f-head" }, h("div", { class: "f-title" }, h("h2", {}, "Record")), h("button", { class: "icon", title: "Close form (Ctrl+I)", onclick: () => toggleForm(false) }, "✕")),
@@ -95,10 +96,7 @@ function renderForm(force = false) {
   if (t.isSummary) pane.append(miniGanttSection(t));
   pane.append(notesSection(t), relatedSection(t));
   pane.scrollTop = scroll;
-  if (keep) {
-    const el = pane.querySelector(`[data-keep="${keep}"]`);
-    if (el) { el.focus(); if (selRange && el.setSelectionRange) try { el.setSelectionRange(...selRange); } catch { } }
-  }
+  refocus(pane, mark, { typed: same }); // typing never follows you to another record
 }
 
 // Another view changed the task while a form field has focus: update the other fields, keep the one being typed in.
@@ -133,13 +131,17 @@ function formHeader(t) {
 function formFields(t) {
   const commit = (fieldName, el) => () => { const v = el.value; mutate(`Task ${t.wbs}: ${fieldName} → “${v}”`, () => opSetField(t.id, fieldName, v)); };
   // Text commits once, on change or blur, whichever comes first (blur also covers values set without a change event).
+  // A field can outlive several saves (refreshed in place while focus is in the form), so it compares with the task as
+  // it is now and is ready to save again once it's focused or typed in again.
   const commitOnce = (fieldName, el) => {
     el._orig = el.value; let done = false;
-    const same = () => el.value === el._orig || (fieldName === "duration" && parseDuration(el.value) === t.dur) || (fieldName === "percent" && parsePercent(el.value) === t.P);
+    const now = () => M.tasks.get(t.id) || t;
+    const same = () => el.value === el._orig || (fieldName === "duration" && parseDuration(el.value) === now().dur) || (fieldName === "percent" && parsePercent(el.value) === now().P);
     const go = () => { if (done || same() || (el.type === "date" && !el.value)) return; done = true; commit(fieldName, el)(); };
     el._commit = go; // renderForm calls this directly when switching records
     if (el.type !== "date") el.addEventListener("change", go); // date inputs fire change per keystroke
     el.addEventListener("blur", go);
+    for (const ev of ["focus", "input"]) el.addEventListener(ev, () => { done = false; });
     if (el.tagName === "INPUT") el.addEventListener("keydown", e => { if (e.key === "Enter") el.blur(); });
   };
   const inp = (fieldName, value, attrs = {}) => { const el = h("input", { value: value ?? "", "data-f": fieldName, ...attrs }); commitOnce(fieldName, el); return el; };
@@ -154,7 +156,7 @@ function formFields(t) {
     const eff = role === "A" ? accountable(t) : responsible(t);
     const inh = !!eff.inherited, same = role === "R" && eff.same;
     const chips = html`${eff.list.length ? eff.list.map(r => chipFor(r, inh || same)) : html`<span class="hint">None</span>`}${inh && eff.list.length ? html`<span class="hint"> from ${eff.from.wbs}</span>` : ""}`;
-    const btn = h("button", { class: "f-party", disabled: same, title: same ? "Same as Accountable. Turn the switch off to choose someone else" : `Choose ${ROLE_NAMES[role]}`, html: chips });
+    const btn = h("button", { class: "f-party", "data-keep": "party-" + role, disabled: same, title: same ? "Same as Accountable. Turn the switch off to choose someone else" : `Choose ${ROLE_NAMES[role]}`, html: chips });
     btn.addEventListener("click", () => openPartyPicker(btn.getBoundingClientRect(), t.id, role));
     if (role !== "R") return btn;
     const sw = h("input", { type: "checkbox", role: "switch", class: "sw", checked: !!t.r_is_a, "data-f": "r_is_a" });

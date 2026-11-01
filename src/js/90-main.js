@@ -27,8 +27,12 @@ function renderPersonFilter() {
 const stale = new Set(); let drawQueued = false;
 function redraw(...parts) {
   for (const p of parts) stale.add(p);
-  if (!drawQueued) { drawQueued = true; queueMicrotask(drawNow); }
+  if (!drawQueued) { drawQueued = true; queueMicrotask(() => { if (!tabbing) drawNow(); }); }
 }
+// Tab saves the field it leaves (change, blur) before focus reaches the next one. Rebuilding then would remove the
+// element focus is headed for, so queued redraws wait until it has landed, and refocus() keeps it there.
+let tabbing = false;
+document.addEventListener("keydown", e => { if (e.key === "Tab" && !tabbing) { tabbing = true; setTimeout(() => { tabbing = false; if (drawQueued) drawNow(); }, 0); } }, true);
 function drawNow() {
   drawQueued = false;
   if (!ready || !stale.size) return; // before startup finishes, requests wait for its redraw("all")
@@ -44,9 +48,11 @@ function drawNow() {
     }
   }
   if (v === "risks") { if (any("risks")) renderRisks(); else if (s.has("planList")) renderPlanList(); }
+  const view = $("view-" + v), mark = (v === "raci" || v === "people" || v === "issues") && !$("formPane").contains(document.activeElement) ? markFocus(view) : null;
   if (v === "raci" && any("raci")) renderRaci();
   if (v === "people" && all) renderPeople();
   if (v === "issues" && any("issues")) renderIssues();
+  if (mark && !view.contains(document.activeElement)) refocus(view, mark);
   // The record panel last, beside the plan or the RACI matrix; asked for elsewhere, it just closes.
   if (s.has("formForce")) renderForm(true);
   else if (s.has("form") || (all && (v === "plan" || v === "raci"))) renderForm();
@@ -99,7 +105,6 @@ function initToolbar() {
     const ae = document.activeElement;
     if (ae?._commit && $("formPane").contains(ae) && !ae.contains(e.target)) { holdFormRender(); ae._commit(); }
   }, true);
-  $("formPane").addEventListener("change", e => { if (e.target.closest(".f-fields") && e.target.matches("input:not([type=date]),select,textarea")) e.target.blur(); }, true);
 
   // splitter
   const sp = $("splitter"), pane = $("gridPane");
@@ -160,7 +165,7 @@ setInterval(() => { if (fileHandle) redraw("save"); }, 15000); // "saved 2 min a
     op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote, opSetRIsA,
       opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote },
     risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport: drawn(loadRiskImport), riskImportItems, doRiskImport: drawn(doRiskImport), openRiskRecord: drawn(openRiskRecord), closeRiskForm: drawn(closeRiskForm), renderRisks: drawn(() => redraw("risks")), get RI() { return RI; }, recNotes, toLMH },
-    util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml },
+    util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml, markFocus, refocus },
     io: { loadImportFile, buildPlan, doImport: drawn(doImport), collectPeople, exportWorkbook, csvText, autoMap, riskPreviewText, get W() { return W; } },
     db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; },
       get diskRev() { return diskRev; }, get readOnly() { return readOnly; }, get fileId() { return readFileId(db); },

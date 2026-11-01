@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-CSQMld+pSjLch4PKb2hlkjPv+ZL2XFLZGpqMf4zLjMc='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-uPcMubnpox/dWJLEuKJ1MPGScnBSizoIOaZZxXAKbMY='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
 <title>Offline PM</title>
 <style>:root{
   --bg:#f5f6f8; --panel:#fff; --panel2:#fafbfc; --ink:#1b1f24; --muted:#667085; --line:#e4e7ec; --line2:#eef0f3;
@@ -870,6 +870,37 @@ function trackDrag(target, { move, drop, cancel = () => { } }) {
   const onKey = ev => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); end(ev, false); } };
   target.addEventListener("pointermove", move); target.addEventListener("pointerup", onUp); target.addEventListener("pointercancel", onCancel);
   window.addEventListener("blur", onCancel); document.addEventListener("keydown", onKey, true);
+}
+
+// Rebuilding part of the page throws away the element that had focus (DECISIONS #76). markFocus(root) remembers it
+// by its data-* attributes under its nearest marked ancestor; an unmarked control by its place among the same tags
+// in that ancestor (a row's second person button); lacking both, by its text. It also keeps the caret and any typing
+// not yet saved. refocus(root, mark) finds the one matching element in the new markup.
+const dataSel = el => [...el.attributes].filter(a => a.name.startsWith("data-")).map(a => `[${a.name}="${CSS.escape(a.value)}"]`).join("");
+function markFocus(root) {
+  const el = document.activeElement;
+  if (!el || el === root || !root.contains(el)) return null;
+  let up = el.parentElement; while (up && up !== root && !dataSel(up)) up = up.parentElement;
+  const upSel = up && up !== root ? dataSel(up) : "", tag = el.tagName.toLowerCase();
+  const sel = dataSel(el) ? (upSel ? upSel + " " : "") + tag + dataSel(el) : null;
+  const pos = !sel && upSel ? { upSel, i: [...up.querySelectorAll(tag)].indexOf(el), cls: el.className } : null;
+  const typed = "_orig" in el && el.value !== el._orig ? el.value : null;
+  return { sel, pos, tag, text: el.textContent.trim(), typed, caret: el.selectionStart != null ? [el.selectionStart, el.selectionEnd] : null };
+}
+function refocus(root, mark, { typed = true } = {}) {
+  if (!mark) return false;
+  let found = [];
+  if (mark.sel) found = [...root.querySelectorAll(mark.sel)];
+  else if (mark.pos) {
+    const ups = root.querySelectorAll(mark.pos.upSel), c = ups.length === 1 ? ups[0].querySelectorAll(mark.tag)[mark.pos.i] : null;
+    if (c && c.className === mark.pos.cls) found = [c];
+  } else if (mark.text) found = [...root.querySelectorAll(mark.tag)].filter(x => x.textContent.trim() === mark.text);
+  if (found.length !== 1) return false; // gone, or ambiguous: better nowhere than on the wrong button
+  const el = found[0];
+  if (typed && mark.typed != null && "value" in el) el.value = mark.typed;
+  el.focus({ preventScroll: true });
+  if (mark.caret) try { el.setSelectionRange(...mark.caret); } catch { }
+  return document.activeElement === el;
 }
 
 let toastTimer;
@@ -3094,17 +3125,18 @@ function renderForm(force = false) {
   pane.classList.toggle("open", show); pane.setAttribute("aria-hidden", String(!show));
   $("detailsBtn").classList.toggle("primary", show);
   if (!show) { pane.dataset.task = ""; return; }
-  const ae = document.activeElement;
-  // Don't clobber a field being typed in; when switching records, commit the pending edit first.
-  if (pane.contains(ae) && ae.closest(".f-fields") && ae.matches("input,select,textarea")) {
-    if (!force && pane.dataset.task === String(UI.selId)) { refreshFieldsInPlace(selTask(), ae); return; }
-    formBusy = true; try { ae._commit?.(); ae.blur(); } finally { formBusy = false; }
-  }
-  const t = selTask();
-  const keep = pane.contains(ae) ? ae.dataset.keep : null;
-  const selRange = keep && ae.selectionStart != null ? [ae.selectionStart, ae.selectionEnd] : null;
+  const ae = document.activeElement, t = selTask();
+  const same = pane.dataset.task === String(UI.selId), inField = pane.contains(ae) && ae.closest(".f-fields") && ae.matches("input,select,textarea");
+  // While a text field has focus, update the other fields in place rather than rebuild under the typing, unless the
+  // form's layout changed (a task became a milestone or a summary): then rebuild, and refocus() puts the typing back.
+  const shape = t ? `${t.isSummary}|${t.isMilestone}|${t.r_is_a}|${t.parent_id}` : "";
+  const typing = inField && ae.matches("textarea,input:not([type=checkbox]):not([type=radio])");
+  if (typing && same && !force && pane.dataset.shape === shape) { refreshFieldsInPlace(t, ae); return; }
+  // Switching records: save the half-typed field first.
+  if (inField && !same) { formBusy = true; try { ae._commit?.(); ae.blur(); } finally { formBusy = false; } }
+  const mark = markFocus(pane);
   const scroll = pane.dataset.task === String(t?.id ?? "") ? pane.scrollTop : 0;
-  pane.dataset.task = t?.id ?? "";
+  pane.dataset.task = t?.id ?? ""; pane.dataset.shape = shape;
   pane.innerHTML = "";
   if (!t) {
     pane.append(h("div", { class: "f-head" }, h("div", { class: "f-title" }, h("h2", {}, "Record")), h("button", { class: "icon", title: "Close form (Ctrl+I)", onclick: () => toggleForm(false) }, "✕")),
@@ -3116,10 +3148,7 @@ function renderForm(force = false) {
   if (t.isSummary) pane.append(miniGanttSection(t));
   pane.append(notesSection(t), relatedSection(t));
   pane.scrollTop = scroll;
-  if (keep) {
-    const el = pane.querySelector(`[data-keep="${keep}"]`);
-    if (el) { el.focus(); if (selRange && el.setSelectionRange) try { el.setSelectionRange(...selRange); } catch { } }
-  }
+  refocus(pane, mark, { typed: same }); // typing never follows you to another record
 }
 
 // Another view changed the task while a form field has focus: update the other fields, keep the one being typed in.
@@ -3154,13 +3183,17 @@ function formHeader(t) {
 function formFields(t) {
   const commit = (fieldName, el) => () => { const v = el.value; mutate(`Task ${t.wbs}: ${fieldName} → “${v}”`, () => opSetField(t.id, fieldName, v)); };
   // Text commits once, on change or blur, whichever comes first (blur also covers values set without a change event).
+  // A field can outlive several saves (refreshed in place while focus is in the form), so it compares with the task as
+  // it is now and is ready to save again once it's focused or typed in again.
   const commitOnce = (fieldName, el) => {
     el._orig = el.value; let done = false;
-    const same = () => el.value === el._orig || (fieldName === "duration" && parseDuration(el.value) === t.dur) || (fieldName === "percent" && parsePercent(el.value) === t.P);
+    const now = () => M.tasks.get(t.id) || t;
+    const same = () => el.value === el._orig || (fieldName === "duration" && parseDuration(el.value) === now().dur) || (fieldName === "percent" && parsePercent(el.value) === now().P);
     const go = () => { if (done || same() || (el.type === "date" && !el.value)) return; done = true; commit(fieldName, el)(); };
     el._commit = go; // renderForm calls this directly when switching records
     if (el.type !== "date") el.addEventListener("change", go); // date inputs fire change per keystroke
     el.addEventListener("blur", go);
+    for (const ev of ["focus", "input"]) el.addEventListener(ev, () => { done = false; });
     if (el.tagName === "INPUT") el.addEventListener("keydown", e => { if (e.key === "Enter") el.blur(); });
   };
   const inp = (fieldName, value, attrs = {}) => { const el = h("input", { value: value ?? "", "data-f": fieldName, ...attrs }); commitOnce(fieldName, el); return el; };
@@ -3175,7 +3208,7 @@ function formFields(t) {
     const eff = role === "A" ? accountable(t) : responsible(t);
     const inh = !!eff.inherited, same = role === "R" && eff.same;
     const chips = html`${eff.list.length ? eff.list.map(r => chipFor(r, inh || same)) : html`<span class="hint">None</span>`}${inh && eff.list.length ? html`<span class="hint"> from ${eff.from.wbs}</span>` : ""}`;
-    const btn = h("button", { class: "f-party", disabled: same, title: same ? "Same as Accountable. Turn the switch off to choose someone else" : `Choose ${ROLE_NAMES[role]}`, html: chips });
+    const btn = h("button", { class: "f-party", "data-keep": "party-" + role, disabled: same, title: same ? "Same as Accountable. Turn the switch off to choose someone else" : `Choose ${ROLE_NAMES[role]}`, html: chips });
     btn.addEventListener("click", () => openPartyPicker(btn.getBoundingClientRect(), t.id, role));
     if (role !== "R") return btn;
     const sw = h("input", { type: "checkbox", role: "switch", class: "sw", checked: !!t.r_is_a, "data-f": "r_is_a" });
@@ -3448,8 +3481,7 @@ function renderRisks() {
     if (inView && ae._commit) { riskBusy = true; try { ae._commit(); } finally { riskBusy = false; } }
     if (inView) ae._cancel?.(); // the element is about to be removed; its blur must not commit again
     const pending = UI.riskFocus; UI.riskFocus = null;
-    const keep = pending?.key || (inView ? ae.dataset.keep : null);
-    const caret = !pending && inView && ae.selectionStart != null ? [ae.selectionStart, ae.selectionEnd] : null;
+    const keep = pending?.key, mark = pending ? null : markFocus($("view-risks"));
     const sTop = body.scrollTop;
     if (UI.riskSel && !recOf(UI.riskSel)) UI.riskSel = null;
     renderRiskGrid(); renderPlanList(); renderRiskForm();
@@ -3458,9 +3490,9 @@ function renderRisks() {
       const el = $("view-risks").querySelector(`[data-keep="${keep}"]`);
       if (el) {
         el.focus();
-        try { const n = el.value?.length ?? 0; if (pending?.select) el.select(); else el.setSelectionRange(...(caret || [n, n])); } catch { }
+        try { const n = el.value?.length ?? 0; if (pending?.select) el.select(); else el.setSelectionRange(n, n); } catch { }
       }
-    }
+    } else refocus($("view-risks"), mark, { typed: false }); // the half-typed cell was saved above
   } finally { riskRendering = false; }
   if (riskRenderAgain) { riskRenderAgain = false; renderRisks(); }
 }
@@ -5306,8 +5338,12 @@ function renderPersonFilter() {
 const stale = new Set(); let drawQueued = false;
 function redraw(...parts) {
   for (const p of parts) stale.add(p);
-  if (!drawQueued) { drawQueued = true; queueMicrotask(drawNow); }
+  if (!drawQueued) { drawQueued = true; queueMicrotask(() => { if (!tabbing) drawNow(); }); }
 }
+// Tab saves the field it leaves (change, blur) before focus reaches the next one. Rebuilding then would remove the
+// element focus is headed for, so queued redraws wait until it has landed, and refocus() keeps it there.
+let tabbing = false;
+document.addEventListener("keydown", e => { if (e.key === "Tab" && !tabbing) { tabbing = true; setTimeout(() => { tabbing = false; if (drawQueued) drawNow(); }, 0); } }, true);
 function drawNow() {
   drawQueued = false;
   if (!ready || !stale.size) return; // before startup finishes, requests wait for its redraw("all")
@@ -5323,9 +5359,11 @@ function drawNow() {
     }
   }
   if (v === "risks") { if (any("risks")) renderRisks(); else if (s.has("planList")) renderPlanList(); }
+  const view = $("view-" + v), mark = (v === "raci" || v === "people" || v === "issues") && !$("formPane").contains(document.activeElement) ? markFocus(view) : null;
   if (v === "raci" && any("raci")) renderRaci();
   if (v === "people" && all) renderPeople();
   if (v === "issues" && any("issues")) renderIssues();
+  if (mark && !view.contains(document.activeElement)) refocus(view, mark);
   // The record panel last, beside the plan or the RACI matrix; asked for elsewhere, it just closes.
   if (s.has("formForce")) renderForm(true);
   else if (s.has("form") || (all && (v === "plan" || v === "raci"))) renderForm();
@@ -5378,7 +5416,6 @@ function initToolbar() {
     const ae = document.activeElement;
     if (ae?._commit && $("formPane").contains(ae) && !ae.contains(e.target)) { holdFormRender(); ae._commit(); }
   }, true);
-  $("formPane").addEventListener("change", e => { if (e.target.closest(".f-fields") && e.target.matches("input:not([type=date]),select,textarea")) e.target.blur(); }, true);
 
   // splitter
   const sp = $("splitter"), pane = $("gridPane");
@@ -5439,7 +5476,7 @@ setInterval(() => { if (fileHandle) redraw("save"); }, 15000); // "saved 2 min a
     op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote, opSetRIsA,
       opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote },
     risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport: drawn(loadRiskImport), riskImportItems, doRiskImport: drawn(doRiskImport), openRiskRecord: drawn(openRiskRecord), closeRiskForm: drawn(closeRiskForm), renderRisks: drawn(() => redraw("risks")), get RI() { return RI; }, recNotes, toLMH },
-    util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml },
+    util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml, markFocus, refocus },
     io: { loadImportFile, buildPlan, doImport: drawn(doImport), collectPeople, exportWorkbook, csvText, autoMap, riskPreviewText, get W() { return W; } },
     db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; },
       get diskRev() { return diskRev; }, get readOnly() { return readOnly; }, get fileId() { return readFileId(db); },
