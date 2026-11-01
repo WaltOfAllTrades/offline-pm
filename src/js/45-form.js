@@ -50,7 +50,9 @@ function relayoutForm() {
 let formHold = false, formHeldRender = false;
 function holdFormRender() {
   formHold = true;
+  const failsafe = setTimeout(() => release(), 1500); // a lost pointerup (alt-tab mid-click) must not freeze the form
   const release = () => {
+    clearTimeout(failsafe);
     removeEventListener("pointerup", release, true); removeEventListener("pointercancel", release, true);
     setTimeout(() => {
       formHold = false;

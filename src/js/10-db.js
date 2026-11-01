@@ -24,8 +24,17 @@ const nowIso = () => new Date().toISOString().slice(0, 19).replace("T", " ");
 
 // sql.js export() closes and reopens the connection, which resets pragmas (DECISIONS #23).
 // dbGen counts reopenings (export, install, undo), which reset SQLite's total_changes(); caches key on both.
-let dbGen = 0;
-function exportBytes() { const b = db.export(); dbGen++; db.run("PRAGMA foreign_keys = ON"); return b; }
+let dbGen = 0, inMutate = false;
+function exportBytes() {
+  // export() closes the connection, which would silently roll back an open transaction.
+  if (inMutate) throw new Error("Internal error: the database can't be copied in the middle of a change");
+  const b = db.export(); dbGen++; db.run("PRAGMA foreign_keys = ON"); return b;
+}
+// The last export's bytes, reused as the next undo snapshot while nothing has changed since (saves one full
+// export per edit). total_changes() restarts at 0 on the fresh connection export() leaves behind.
+let snapCache = null;
+function exportForSave() { const b = exportBytes(); snapCache = { bytes: b, gen: dbGen }; return b; }
+function snapshot() { return snapCache && snapCache.gen === dbGen && scalar("SELECT total_changes()") === 0 ? snapCache.bytes : exportBytes(); }
 
 const SCHEMA_V1 = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -262,9 +271,12 @@ function installDb(bytes) {
 const opNotes = []; // messages ops want shown after a successful change
 function mutate(desc, fn) {
   if (readOnly) { toast(readOnlyWhy || "This tab is read-only.", "err"); return false; }
-  const snap = exportBytes();
+  // One change at a time: a change started inside another would commit half of the outer one.
+  if (inMutate) throw new Error(`Internal error: “${desc}” started inside another change`);
+  const snap = snapshot();
   opNotes.length = 0;
   try {
+    inMutate = true;
     run("BEGIN");
     fn();
     run("UPDATE meta SET value=? WHERE key='rev'", [String(rev + 1)]);
@@ -272,10 +284,12 @@ function mutate(desc, fn) {
     rev++;
   } catch (e) {
     try { run("ROLLBACK"); } catch { }
+    inMutate = false;
     toast(e.message, "err");
     hooks.onChange();
     return false;
   }
+  inMutate = false;
   undoStack.push(snap); if (undoStack.length > UNDO_LIMIT) undoStack.shift();
   redoStack.length = 0;
   afterChange(desc);
@@ -379,7 +393,7 @@ async function drain() {
       const entry = { r, reasons, size: 0, mirrorOk: false, disk: "none", diskMs: 0, err: null, at: Date.now() };
       try {
         if (readOnly) { entry.err = "Read-only tab: nothing written"; continue; }
-        const bytes = exportBytes(), fileId = readFileId(db); entry.size = lastSize = bytes.length;
+        const bytes = exportForSave(), fileId = readFileId(db); entry.size = lastSize = bytes.length;
         if (slowSaves) await sleep(1500);
         const errs = [];
         // Disk first: if the tab dies between the two writes, the buffer is behind the file, which loads cleanly.
@@ -569,6 +583,8 @@ async function bootDb(wasmB64) {
       else setReadOnly(`Couldn't open this browser's saved copy (${e.message}) or back it up. This tab is read-only so the copy isn't overwritten.`);
     }
   } else { installDb(null); fresh = true; }
+  // Ask the browser not to evict this site's storage under pressure: without a .db file it holds the only copy.
+  if (!readOnly) navigator.storage?.persist?.().then(ok => { if (!ok) logInfo("The browser may clear its saved copy if disk space runs low. Save to a .db file to be safe."); }, () => { });
   if (handle) {
     fileHandle = handle;
     try {

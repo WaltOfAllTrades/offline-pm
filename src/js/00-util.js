@@ -19,6 +19,22 @@ function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
+// Pointer-drag plumbing shared by every drag. It ends with drop(ev) on pointerup, or cancel(ev) on
+// pointercancel, the window losing focus, or Escape, and always removes its listeners.
+function trackDrag(target, { move, drop, cancel = () => { } }) {
+  let done = false;
+  const end = (ev, ok) => {
+    if (done) return; done = true;
+    target.removeEventListener("pointermove", move); target.removeEventListener("pointerup", onUp); target.removeEventListener("pointercancel", onCancel);
+    window.removeEventListener("blur", onCancel); document.removeEventListener("keydown", onKey, true);
+    (ok ? drop : cancel)(ev);
+  };
+  const onUp = ev => end(ev, true), onCancel = ev => end(ev, false);
+  const onKey = ev => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); end(ev, false); } };
+  target.addEventListener("pointermove", move); target.addEventListener("pointerup", onUp); target.addEventListener("pointercancel", onCancel);
+  window.addEventListener("blur", onCancel); document.addEventListener("keydown", onKey, true);
+}
+
 let toastTimer;
 function toast(msg, kind = "") {
   const t = $("toast"); t.textContent = msg; t.className = "show " + kind;

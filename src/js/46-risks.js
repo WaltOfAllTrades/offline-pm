@@ -246,7 +246,7 @@ function beginRecDrag(e, src) {
     showTip(ev, where === "on" ? `Link: ${t.wbs} ${t.name} implements “${label}”` : `Create a new task ${target === t ? where + " " + t.wbs : "as first subtask of " + t.wbs} implementing “${label}”`);
   };
   const up = ev => {
-    removeEventListener("pointermove", move); removeEventListener("pointerup", up); removeEventListener("pointercancel", cancel); removeEventListener("blur", cancel);
+    removeEventListener("pointermove", move); removeEventListener("pointerup", up); removeEventListener("pointercancel", cancel); removeEventListener("blur", cancel); removeEventListener("keydown", esc, true);
     clearInterval(timer); clear(); hideTip(); document.body.style.cursor = "";
     if (!active || !drop || ev.type !== "pointerup") return;
     if (src.kind === "task") {
@@ -259,7 +259,8 @@ function beginRecDrag(e, src) {
     else chooseMitigant(ev, M.riskById.get(src.id), drop.where === "on" ? M.tasks.get(drop.taskId).name : "", act);
   };
   const cancel = ev => up(ev);
-  addEventListener("pointermove", move); addEventListener("pointerup", up); addEventListener("pointercancel", cancel); addEventListener("blur", cancel);
+  const esc = ev => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); removeEventListener("keydown", esc, true); cancel(ev); } };
+  addEventListener("pointermove", move); addEventListener("pointerup", up); addEventListener("pointercancel", cancel); addEventListener("blur", cancel); addEventListener("keydown", esc, true);
 }
 function linkMit(mitId, taskId) {
   const m = M.mitById.get(mitId), t = M.tasks.get(taskId);

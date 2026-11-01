@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-yVBhl8r4CaB1tt7h2g02+xnacVj/6KiOewyWxdhiPJk=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-JnHiXEwXJlsRBaT07AGIgHws83uOQ1R9lLYtiJFsq64='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-yVBhl8r4CaB1tt7h2g02+xnacVj/6KiOewyWxdhiPJk=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-DhewrDzpL11HFUTGE90DjBau54+jtSmIYcRDV0jqNb8='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
 <title>Offline PM</title>
 <style>:root{
   --bg:#f5f6f8; --panel:#fff; --panel2:#fafbfc; --ink:#1b1f24; --muted:#667085; --line:#e4e7ec; --line2:#eef0f3;
@@ -842,6 +842,22 @@ function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
+// Pointer-drag plumbing shared by every drag. It ends with drop(ev) on pointerup, or cancel(ev) on
+// pointercancel, the window losing focus, or Escape, and always removes its listeners.
+function trackDrag(target, { move, drop, cancel = () => { } }) {
+  let done = false;
+  const end = (ev, ok) => {
+    if (done) return; done = true;
+    target.removeEventListener("pointermove", move); target.removeEventListener("pointerup", onUp); target.removeEventListener("pointercancel", onCancel);
+    window.removeEventListener("blur", onCancel); document.removeEventListener("keydown", onKey, true);
+    (ok ? drop : cancel)(ev);
+  };
+  const onUp = ev => end(ev, true), onCancel = ev => end(ev, false);
+  const onKey = ev => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); end(ev, false); } };
+  target.addEventListener("pointermove", move); target.addEventListener("pointerup", onUp); target.addEventListener("pointercancel", onCancel);
+  window.addEventListener("blur", onCancel); document.addEventListener("keydown", onKey, true);
+}
+
 let toastTimer;
 function toast(msg, kind = "") {
   const t = $("toast"); t.textContent = msg; t.className = "show " + kind;
@@ -974,8 +990,17 @@ const nowIso = () => new Date().toISOString().slice(0, 19).replace("T", " ");
 
 // sql.js export() closes and reopens the connection, which resets pragmas (DECISIONS #23).
 // dbGen counts reopenings (export, install, undo), which reset SQLite's total_changes(); caches key on both.
-let dbGen = 0;
-function exportBytes() { const b = db.export(); dbGen++; db.run("PRAGMA foreign_keys = ON"); return b; }
+let dbGen = 0, inMutate = false;
+function exportBytes() {
+  // export() closes the connection, which would silently roll back an open transaction.
+  if (inMutate) throw new Error("Internal error: the database can't be copied in the middle of a change");
+  const b = db.export(); dbGen++; db.run("PRAGMA foreign_keys = ON"); return b;
+}
+// The last export's bytes, reused as the next undo snapshot while nothing has changed since (saves one full
+// export per edit). total_changes() restarts at 0 on the fresh connection export() leaves behind.
+let snapCache = null;
+function exportForSave() { const b = exportBytes(); snapCache = { bytes: b, gen: dbGen }; return b; }
+function snapshot() { return snapCache && snapCache.gen === dbGen && scalar("SELECT total_changes()") === 0 ? snapCache.bytes : exportBytes(); }
 
 const SCHEMA_V1 = `
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -1212,9 +1237,12 @@ function installDb(bytes) {
 const opNotes = []; // messages ops want shown after a successful change
 function mutate(desc, fn) {
   if (readOnly) { toast(readOnlyWhy || "This tab is read-only.", "err"); return false; }
-  const snap = exportBytes();
+  // One change at a time: a change started inside another would commit half of the outer one.
+  if (inMutate) throw new Error(`Internal error: “${desc}” started inside another change`);
+  const snap = snapshot();
   opNotes.length = 0;
   try {
+    inMutate = true;
     run("BEGIN");
     fn();
     run("UPDATE meta SET value=? WHERE key='rev'", [String(rev + 1)]);
@@ -1222,10 +1250,12 @@ function mutate(desc, fn) {
     rev++;
   } catch (e) {
     try { run("ROLLBACK"); } catch { }
+    inMutate = false;
     toast(e.message, "err");
     hooks.onChange();
     return false;
   }
+  inMutate = false;
   undoStack.push(snap); if (undoStack.length > UNDO_LIMIT) undoStack.shift();
   redoStack.length = 0;
   afterChange(desc);
@@ -1329,7 +1359,7 @@ async function drain() {
       const entry = { r, reasons, size: 0, mirrorOk: false, disk: "none", diskMs: 0, err: null, at: Date.now() };
       try {
         if (readOnly) { entry.err = "Read-only tab: nothing written"; continue; }
-        const bytes = exportBytes(), fileId = readFileId(db); entry.size = lastSize = bytes.length;
+        const bytes = exportForSave(), fileId = readFileId(db); entry.size = lastSize = bytes.length;
         if (slowSaves) await sleep(1500);
         const errs = [];
         // Disk first: if the tab dies between the two writes, the buffer is behind the file, which loads cleanly.
@@ -1519,6 +1549,8 @@ async function bootDb(wasmB64) {
       else setReadOnly(`Couldn't open this browser's saved copy (${e.message}) or back it up. This tab is read-only so the copy isn't overwritten.`);
     }
   } else { installDb(null); fresh = true; }
+  // Ask the browser not to evict this site's storage under pressure: without a .db file it holds the only copy.
+  if (!readOnly) navigator.storage?.persist?.().then(ok => { if (!ok) logInfo("The browser may clear its saved copy if disk space runs low. Save to a .db file to be safe."); }, () => { });
   if (handle) {
     fileHandle = handle;
     try {
@@ -2481,13 +2513,16 @@ function cancelEdit() { if (!UI.editing) return; const e = UI.editing; UI.editin
 function commitEdit(dr, dc, fromBlur) {
   const e = UI.editing; if (!e || e.done) return;
   e.done = true; UI.editing = null;
-  const val = e.el.value; e.el.remove();
+  const val = e.el.value;
   const t = M.tasks.get(e.taskId);
   const orig = t && { name: t.name, start: fmtYMD(t.S), finish: fmtYMD(t.F), duration: t.dur == null ? "" : t.dur + "d", percent: String(t.P), pred: predText(t), status: t.ST }[e.col];
   if (t && val !== orig && !(e.col === "duration" && parseDuration(val) === t.dur)) {
-    if (e.col === "pred") mutate(`Task ${t.wbs}: predecessors → “${val || "none"}”`, () => opSetPredText(t.id, val));
-    else mutate(`Task ${t.wbs}: ${e.col} → “${val}”`, () => opSetField(t.id, e.col, val));
-  } else renderGridRows();
+    const ok = e.col === "pred" ? mutate(`Task ${t.wbs}: predecessors → “${val || "none"}”`, () => opSetPredText(t.id, val))
+      : mutate(`Task ${t.wbs}: ${e.col} → “${val}”`, () => opSetField(t.id, e.col, val));
+    // Refused (bad date, finish before start…): keep the editor open with what was typed, so it can be fixed.
+    if (!ok && M.tasks.has(e.taskId)) { e.done = false; UI.editing = e; e.el.focus(); e.el.select?.(); return; }
+    e.el.remove();
+  } else { e.el.remove(); renderGridRows(); }
   if (!fromBlur) {
     $("gridBody").focus();
     if (dr) moveSel(dr);
@@ -2595,16 +2630,21 @@ function gridKey(e) {
 
 // ---------- Drag rows to reorder / re-parent ----------
 function beginRowDrag(e, id) {
-  const sx = e.clientX, sy = e.clientY; let active = false, drop = null, timer = null;
+  const sx = e.clientX, sy = e.clientY; let active = false, drop = null, timer = null, last = null;
   const body = $("gridBody");
   const clear = () => $$(".grow.drop-before,.grow.drop-after,.grow.drop-child").forEach(r => r.classList.remove("drop-before", "drop-after", "drop-child"));
   const move = ev => {
     if (!active && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return;
-    active = true; document.body.style.cursor = "grabbing";
+    active = true; document.body.style.cursor = "grabbing"; last = ev;
     const r = body.getBoundingClientRect();
     clearInterval(timer);
-    if (ev.clientY < r.top + 24) timer = setInterval(() => body.scrollTop -= 12, 30);
-    else if (ev.clientY > r.bottom - 24) timer = setInterval(() => body.scrollTop += 12, 30);
+    // Scrolling re-renders the rows, so the target is found again on every tick, under the pointer.
+    const dy = ev.clientY < r.top + 24 ? -12 : ev.clientY > r.bottom - 24 ? 12 : 0;
+    if (dy) timer = setInterval(() => { body.scrollTop += dy; renderGridRows(); hit(last); }, 30);
+    hit(ev);
+  };
+  const hit = ev => {
+    const r = body.getBoundingClientRect();
     clear(); drop = null;
     const row = document.elementFromPoint(r.left + 20, ev.clientY)?.closest(".grow");
     if (!row) return;
@@ -2616,16 +2656,18 @@ function beginRowDrag(e, id) {
     row.classList.add("drop-" + where); drop = { tid, where };
     showTip(ev, `${where === "child" ? "Make subtask of" : "Move " + where} ${target.wbs} ${target.name}`);
   };
-  const up = () => {
-    window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
-    clearInterval(timer); clear(); hideTip(); document.body.style.cursor = "";
-    if (active && drop) {
+  const stop = () => { clearInterval(timer); clear(); hideTip(); document.body.style.cursor = ""; };
+  trackDrag(window, {
+    move,
+    drop: () => {
+      stop();
+      if (!active || !drop) return;
       const self = M.tasks.get(id), target = M.tasks.get(drop.tid);
       if (drop.where === "child") { UI.collapsed.delete(drop.tid); saveCollapsed(); }
       if (mutate(`Moved “${self.name}” ${drop.where === "child" ? "under" : drop.where} “${target.name}”`, () => opMoveTo(id, drop.tid, drop.where))) selectTask(id);
-    }
-  };
-  window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    },
+    cancel: stop,
+  });
 }
 function showTip(ev, text) { const tip = $("dragTip"); tip.hidden = false; tip.textContent = text; tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY + 14 + "px"; }
 function hideTip() { $("dragTip").hidden = true; }
@@ -2854,7 +2896,11 @@ function initGantt() {
       else renderGanttRows();
       return;
     }
-    const t = M.tasks.get(+barEl.dataset.id);
+    // Commit any open edit first and work from the result, or the drag would write the old dates back.
+    const id = +barEl.dataset.id;
+    if (UI.editing) commitEdit(0, 0, true);
+    const ae = document.activeElement; if (ae?._commit && $("formPane").contains(ae)) ae._commit();
+    const t = M.tasks.get(id); if (!t) return;
     if (e.target.classList.contains("hnd")) return beginLink(e, t, e.target.dataset.side);
     const mode = e.target.dataset.edge ? "resize" + e.target.dataset.edge : "move";
     beginBarDrag(e, t, mode, barEl);
@@ -2889,13 +2935,15 @@ function beginBarDrag(e, t, mode, barEl) {
     preview();
     showTip(ev, t.isMilestone ? fmtShort(S) : `${fmtShort(S)} → ${fmtShort(F)}  ·  ${workdays(S, F)}d`);
   };
-  const up = () => {
-    svg.removeEventListener("pointermove", move); svg.removeEventListener("pointerup", up); svg.removeEventListener("pointercancel", up);
-    hideTip();
-    if (moved && (S !== t.S || F !== t.F)) mutate(`${mode === "move" ? "Moved" : "Resized"} “${t.name}” to ${fmtYMD(S)}${t.isMilestone ? "" : " → " + fmtYMD(F)}`, () => opSetField(t.id, "dates", { start: S, finish: F }));
-    else { selectTask(t.id, { scroll: false }); barClicked(t); }
-  };
-  svg.addEventListener("pointermove", move); svg.addEventListener("pointerup", up); svg.addEventListener("pointercancel", up);
+  trackDrag(svg, {
+    move,
+    drop: () => {
+      hideTip();
+      if (moved && (S !== t.S || F !== t.F)) mutate(`${mode === "move" ? "Moved" : "Resized"} “${t.name}” to ${fmtYMD(S)}${t.isMilestone ? "" : " → " + fmtYMD(F)}`, () => opSetField(t.id, "dates", { start: S, finish: F }));
+      else { selectTask(t.id, { scroll: false }); barClicked(t); }
+    },
+    cancel: () => { hideTip(); renderGanttRows(); }, // Escape puts the bar back
+  });
 }
 // Our own double-click detection: bars are re-rendered between clicks, so native dblclick can't find them.
 let lastBarClick = null;
@@ -2906,14 +2954,14 @@ function barClicked(t) {
 }
 
 function beginLink(e, from, side) {
-  const svg = $("ganttSvg"), ghost = $("ghost");
+  const svg = $("ganttSvg"), ghost = () => $("ghost"); // looked up each time: a re-render replaces it
   svg.setPointerCapture(e.pointerId);
   $("ganttPane").classList.add("linking");
   const a = anchor(SC, from, side, from.row * ROW + ROW / 2);
   let target = null, tside = null;
   const move = ev => {
     const p = svgPoint(ev);
-    ghost.setAttribute("d", `M${a.x} ${a.y}L${p.x} ${p.y}`);
+    ghost()?.setAttribute("d", `M${a.x} ${a.y}L${p.x} ${p.y}`);
     $$("#gBars .bar.target").forEach(b => b.classList.remove("target"));
     target = null;
     const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".bar");
@@ -2926,15 +2974,18 @@ function beginLink(e, from, side) {
       showTip(ev, `${DEP_NAMES[type]}: ${from.wbs} → ${t.wbs} ${t.name}`);
     } else showTip(ev, side === "F" ? "Drag to a task: from this task's finish" : "Drag to a task: from this task's start");
   };
-  const up = () => {
-    svg.removeEventListener("pointermove", move); svg.removeEventListener("pointerup", up); svg.removeEventListener("pointercancel", up);
-    $("ganttPane").classList.remove("linking"); ghost.setAttribute("d", ""); hideTip();
-    if (target) {
-      const type = (side === "F" ? "F" : "S") + tside;
-      mutate(`Linked ${from.wbs} → ${target.wbs} (${type})`, () => opAddDep(from.id, target.id, type, 0));
-    } else renderGanttRows();
-  };
-  svg.addEventListener("pointermove", move); svg.addEventListener("pointerup", up); svg.addEventListener("pointercancel", up);
+  const stop = () => { $("ganttPane").classList.remove("linking"); ghost()?.setAttribute("d", ""); hideTip(); };
+  trackDrag(svg, {
+    move,
+    drop: () => {
+      stop();
+      if (target) {
+        const type = (side === "F" ? "F" : "S") + tside;
+        mutate(`Linked ${from.wbs} → ${target.wbs} (${type})`, () => opAddDep(from.id, target.id, type, 0));
+      } else renderGanttRows();
+    },
+    cancel: () => { stop(); renderGanttRows(); },
+  });
 }
 
 // ===== 45-form.js =====
@@ -2990,7 +3041,9 @@ function relayoutForm() {
 let formHold = false, formHeldRender = false;
 function holdFormRender() {
   formHold = true;
+  const failsafe = setTimeout(() => release(), 1500); // a lost pointerup (alt-tab mid-click) must not freeze the form
   const release = () => {
+    clearTimeout(failsafe);
     removeEventListener("pointerup", release, true); removeEventListener("pointercancel", release, true);
     setTimeout(() => {
       formHold = false;
@@ -3583,7 +3636,7 @@ function beginRecDrag(e, src) {
     showTip(ev, where === "on" ? `Link: ${t.wbs} ${t.name} implements “${label}”` : `Create a new task ${target === t ? where + " " + t.wbs : "as first subtask of " + t.wbs} implementing “${label}”`);
   };
   const up = ev => {
-    removeEventListener("pointermove", move); removeEventListener("pointerup", up); removeEventListener("pointercancel", cancel); removeEventListener("blur", cancel);
+    removeEventListener("pointermove", move); removeEventListener("pointerup", up); removeEventListener("pointercancel", cancel); removeEventListener("blur", cancel); removeEventListener("keydown", esc, true);
     clearInterval(timer); clear(); hideTip(); document.body.style.cursor = "";
     if (!active || !drop || ev.type !== "pointerup") return;
     if (src.kind === "task") {
@@ -3596,7 +3649,8 @@ function beginRecDrag(e, src) {
     else chooseMitigant(ev, M.riskById.get(src.id), drop.where === "on" ? M.tasks.get(drop.taskId).name : "", act);
   };
   const cancel = ev => up(ev);
-  addEventListener("pointermove", move); addEventListener("pointerup", up); addEventListener("pointercancel", cancel); addEventListener("blur", cancel);
+  const esc = ev => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); removeEventListener("keydown", esc, true); cancel(ev); } };
+  addEventListener("pointermove", move); addEventListener("pointerup", up); addEventListener("pointercancel", cancel); addEventListener("blur", cancel); addEventListener("keydown", esc, true);
 }
 function linkMit(mitId, taskId) {
   const m = M.mitById.get(mitId), t = M.tasks.get(taskId);
@@ -5093,7 +5147,8 @@ function initToolbar() {
   $("downBtn").onclick = () => cmdStructure("down");
   $("delBtn").onclick = cmdDelete;
   $("levelSel").onchange = e => { if (e.target.value) showLevel(e.target.value); e.target.value = ""; };
-  $("searchBox").addEventListener("input", e => { UI.search = e.target.value; computeRows(); renderGrid(); renderGantt(); });
+  let searchTimer; // re-filter after a short pause, not on every keystroke
+  $("searchBox").addEventListener("input", e => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { UI.search = e.target.value; computeRows(); renderGrid(); renderGantt(); }, 150); });
   $("personFilter").addEventListener("change", e => { UI.person = e.target.value; computeRows(); renderGrid(); renderGantt(); });
   $("detailsBtn").onclick = () => toggleForm();
   $$("#grainSeg button").forEach(b => b.addEventListener("click", () => setGrain(b.dataset.grain)));

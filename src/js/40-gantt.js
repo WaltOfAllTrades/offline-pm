@@ -221,7 +221,11 @@ function initGantt() {
       else renderGanttRows();
       return;
     }
-    const t = M.tasks.get(+barEl.dataset.id);
+    // Commit any open edit first and work from the result, or the drag would write the old dates back.
+    const id = +barEl.dataset.id;
+    if (UI.editing) commitEdit(0, 0, true);
+    const ae = document.activeElement; if (ae?._commit && $("formPane").contains(ae)) ae._commit();
+    const t = M.tasks.get(id); if (!t) return;
     if (e.target.classList.contains("hnd")) return beginLink(e, t, e.target.dataset.side);
     const mode = e.target.dataset.edge ? "resize" + e.target.dataset.edge : "move";
     beginBarDrag(e, t, mode, barEl);
@@ -256,13 +260,15 @@ function beginBarDrag(e, t, mode, barEl) {
     preview();
     showTip(ev, t.isMilestone ? fmtShort(S) : `${fmtShort(S)} → ${fmtShort(F)}  ·  ${workdays(S, F)}d`);
   };
-  const up = () => {
-    svg.removeEventListener("pointermove", move); svg.removeEventListener("pointerup", up); svg.removeEventListener("pointercancel", up);
-    hideTip();
-    if (moved && (S !== t.S || F !== t.F)) mutate(`${mode === "move" ? "Moved" : "Resized"} “${t.name}” to ${fmtYMD(S)}${t.isMilestone ? "" : " → " + fmtYMD(F)}`, () => opSetField(t.id, "dates", { start: S, finish: F }));
-    else { selectTask(t.id, { scroll: false }); barClicked(t); }
-  };
-  svg.addEventListener("pointermove", move); svg.addEventListener("pointerup", up); svg.addEventListener("pointercancel", up);
+  trackDrag(svg, {
+    move,
+    drop: () => {
+      hideTip();
+      if (moved && (S !== t.S || F !== t.F)) mutate(`${mode === "move" ? "Moved" : "Resized"} “${t.name}” to ${fmtYMD(S)}${t.isMilestone ? "" : " → " + fmtYMD(F)}`, () => opSetField(t.id, "dates", { start: S, finish: F }));
+      else { selectTask(t.id, { scroll: false }); barClicked(t); }
+    },
+    cancel: () => { hideTip(); renderGanttRows(); }, // Escape puts the bar back
+  });
 }
 // Our own double-click detection: bars are re-rendered between clicks, so native dblclick can't find them.
 let lastBarClick = null;
@@ -273,14 +279,14 @@ function barClicked(t) {
 }
 
 function beginLink(e, from, side) {
-  const svg = $("ganttSvg"), ghost = $("ghost");
+  const svg = $("ganttSvg"), ghost = () => $("ghost"); // looked up each time: a re-render replaces it
   svg.setPointerCapture(e.pointerId);
   $("ganttPane").classList.add("linking");
   const a = anchor(SC, from, side, from.row * ROW + ROW / 2);
   let target = null, tside = null;
   const move = ev => {
     const p = svgPoint(ev);
-    ghost.setAttribute("d", `M${a.x} ${a.y}L${p.x} ${p.y}`);
+    ghost()?.setAttribute("d", `M${a.x} ${a.y}L${p.x} ${p.y}`);
     $$("#gBars .bar.target").forEach(b => b.classList.remove("target"));
     target = null;
     const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".bar");
@@ -293,13 +299,16 @@ function beginLink(e, from, side) {
       showTip(ev, `${DEP_NAMES[type]}: ${from.wbs} → ${t.wbs} ${t.name}`);
     } else showTip(ev, side === "F" ? "Drag to a task: from this task's finish" : "Drag to a task: from this task's start");
   };
-  const up = () => {
-    svg.removeEventListener("pointermove", move); svg.removeEventListener("pointerup", up); svg.removeEventListener("pointercancel", up);
-    $("ganttPane").classList.remove("linking"); ghost.setAttribute("d", ""); hideTip();
-    if (target) {
-      const type = (side === "F" ? "F" : "S") + tside;
-      mutate(`Linked ${from.wbs} → ${target.wbs} (${type})`, () => opAddDep(from.id, target.id, type, 0));
-    } else renderGanttRows();
-  };
-  svg.addEventListener("pointermove", move); svg.addEventListener("pointerup", up); svg.addEventListener("pointercancel", up);
+  const stop = () => { $("ganttPane").classList.remove("linking"); ghost()?.setAttribute("d", ""); hideTip(); };
+  trackDrag(svg, {
+    move,
+    drop: () => {
+      stop();
+      if (target) {
+        const type = (side === "F" ? "F" : "S") + tside;
+        mutate(`Linked ${from.wbs} → ${target.wbs} (${type})`, () => opAddDep(from.id, target.id, type, 0));
+      } else renderGanttRows();
+    },
+    cancel: () => { stop(); renderGanttRows(); },
+  });
 }

@@ -195,13 +195,16 @@ function cancelEdit() { if (!UI.editing) return; const e = UI.editing; UI.editin
 function commitEdit(dr, dc, fromBlur) {
   const e = UI.editing; if (!e || e.done) return;
   e.done = true; UI.editing = null;
-  const val = e.el.value; e.el.remove();
+  const val = e.el.value;
   const t = M.tasks.get(e.taskId);
   const orig = t && { name: t.name, start: fmtYMD(t.S), finish: fmtYMD(t.F), duration: t.dur == null ? "" : t.dur + "d", percent: String(t.P), pred: predText(t), status: t.ST }[e.col];
   if (t && val !== orig && !(e.col === "duration" && parseDuration(val) === t.dur)) {
-    if (e.col === "pred") mutate(`Task ${t.wbs}: predecessors → “${val || "none"}”`, () => opSetPredText(t.id, val));
-    else mutate(`Task ${t.wbs}: ${e.col} → “${val}”`, () => opSetField(t.id, e.col, val));
-  } else renderGridRows();
+    const ok = e.col === "pred" ? mutate(`Task ${t.wbs}: predecessors → “${val || "none"}”`, () => opSetPredText(t.id, val))
+      : mutate(`Task ${t.wbs}: ${e.col} → “${val}”`, () => opSetField(t.id, e.col, val));
+    // Refused (bad date, finish before start…): keep the editor open with what was typed, so it can be fixed.
+    if (!ok && M.tasks.has(e.taskId)) { e.done = false; UI.editing = e; e.el.focus(); e.el.select?.(); return; }
+    e.el.remove();
+  } else { e.el.remove(); renderGridRows(); }
   if (!fromBlur) {
     $("gridBody").focus();
     if (dr) moveSel(dr);
@@ -309,16 +312,21 @@ function gridKey(e) {
 
 // ---------- Drag rows to reorder / re-parent ----------
 function beginRowDrag(e, id) {
-  const sx = e.clientX, sy = e.clientY; let active = false, drop = null, timer = null;
+  const sx = e.clientX, sy = e.clientY; let active = false, drop = null, timer = null, last = null;
   const body = $("gridBody");
   const clear = () => $$(".grow.drop-before,.grow.drop-after,.grow.drop-child").forEach(r => r.classList.remove("drop-before", "drop-after", "drop-child"));
   const move = ev => {
     if (!active && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return;
-    active = true; document.body.style.cursor = "grabbing";
+    active = true; document.body.style.cursor = "grabbing"; last = ev;
     const r = body.getBoundingClientRect();
     clearInterval(timer);
-    if (ev.clientY < r.top + 24) timer = setInterval(() => body.scrollTop -= 12, 30);
-    else if (ev.clientY > r.bottom - 24) timer = setInterval(() => body.scrollTop += 12, 30);
+    // Scrolling re-renders the rows, so the target is found again on every tick, under the pointer.
+    const dy = ev.clientY < r.top + 24 ? -12 : ev.clientY > r.bottom - 24 ? 12 : 0;
+    if (dy) timer = setInterval(() => { body.scrollTop += dy; renderGridRows(); hit(last); }, 30);
+    hit(ev);
+  };
+  const hit = ev => {
+    const r = body.getBoundingClientRect();
     clear(); drop = null;
     const row = document.elementFromPoint(r.left + 20, ev.clientY)?.closest(".grow");
     if (!row) return;
@@ -330,16 +338,18 @@ function beginRowDrag(e, id) {
     row.classList.add("drop-" + where); drop = { tid, where };
     showTip(ev, `${where === "child" ? "Make subtask of" : "Move " + where} ${target.wbs} ${target.name}`);
   };
-  const up = () => {
-    window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
-    clearInterval(timer); clear(); hideTip(); document.body.style.cursor = "";
-    if (active && drop) {
+  const stop = () => { clearInterval(timer); clear(); hideTip(); document.body.style.cursor = ""; };
+  trackDrag(window, {
+    move,
+    drop: () => {
+      stop();
+      if (!active || !drop) return;
       const self = M.tasks.get(id), target = M.tasks.get(drop.tid);
       if (drop.where === "child") { UI.collapsed.delete(drop.tid); saveCollapsed(); }
       if (mutate(`Moved “${self.name}” ${drop.where === "child" ? "under" : drop.where} “${target.name}”`, () => opMoveTo(id, drop.tid, drop.where))) selectTask(id);
-    }
-  };
-  window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    },
+    cancel: stop,
+  });
 }
 function showTip(ev, text) { const tip = $("dragTip"); tip.hidden = false; tip.textContent = text; tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY + 14 + "px"; }
 function hideTip() { $("dragTip").hidden = true; }

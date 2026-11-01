@@ -44,7 +44,8 @@ function initToolbar() {
   $("downBtn").onclick = () => cmdStructure("down");
   $("delBtn").onclick = cmdDelete;
   $("levelSel").onchange = e => { if (e.target.value) showLevel(e.target.value); e.target.value = ""; };
-  $("searchBox").addEventListener("input", e => { UI.search = e.target.value; computeRows(); renderGrid(); renderGantt(); });
+  let searchTimer; // re-filter after a short pause, not on every keystroke
+  $("searchBox").addEventListener("input", e => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { UI.search = e.target.value; computeRows(); renderGrid(); renderGantt(); }, 150); });
   $("personFilter").addEventListener("change", e => { UI.person = e.target.value; computeRows(); renderGrid(); renderGantt(); });
   $("detailsBtn").onclick = () => toggleForm();
   $$("#grainSeg button").forEach(b => b.addEventListener("click", () => setGrain(b.dataset.grain)));

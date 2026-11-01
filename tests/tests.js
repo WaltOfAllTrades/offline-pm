@@ -159,7 +159,7 @@ window.runPmTests = async function () {
     m(() => O.opUpdateParty(x, { active: false })); ok(iss(b, /inactive/).length, "inactive assigned");
   });
 
-  await test("filter", "person filter includes their teams and keeps parents", () => {
+  await test("filter", "person filter includes their teams and keeps parents", async () => {
     fresh();
     const p = T("P"), a = T("a", p), b = T("b"); let x, t;
     m(() => { x = O.opAddParty("person", "X"); t = O.opAddParty("team", "T"); O.opSetMembers(t, [x]); O.opSetRole(a, t, "R"); });
@@ -168,8 +168,9 @@ window.runPmTests = async function () {
     eq(P.UI.rows.map(r => r.name), ["P", "a"], "team task + ancestor");
     pf.value = ""; pf.dispatchEvent(new Event("change"));
     const sb = document.getElementById("searchBox");
-    sb.value = "b"; sb.dispatchEvent(new Event("input")); eq(P.UI.rows.map(r => r.name), ["b"], "text filter");
-    sb.value = ""; sb.dispatchEvent(new Event("input")); eq(P.UI.rows.length, 3);
+    const typed = async v => { sb.value = v; sb.dispatchEvent(new Event("input")); await new Promise(r => setTimeout(r, 200)); }; // filtering waits for a pause
+    await typed("b"); eq(P.UI.rows.map(r => r.name), ["b"], "text filter");
+    await typed(""); eq(P.UI.rows.length, 3);
   });
 
   await test("undo", "undo/redo restore state under new revisions", () => {
@@ -1021,6 +1022,34 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     const t0 = performance.now(); await runImport("big.xlsx", bytes, W => W.mode = "new");
     ok(performance.now() - t0 < 3000, "took " + Math.round(performance.now() - t0) + "ms"); eq(P.M.order.map(t => t.name), ["Only"]);
     eq(P.io.autoMap(["Baseline Start", "Start", "Description", "Task Name", "Completed On"]), { 1: "start", 3: "name" }, "Start and Task Name win; Completed On isn't % complete");
+  });
+
+  // ---------- Medium tier, batch B: editing robustness ----------
+  await test("grid", "a refused cell edit keeps the editor and what was typed", () => {
+    fresh(); P.switchView("plan"); const a = T("A"); P.selectTask(a, { col: "start" });
+    P.cmd.startEdit("start", "31/31/2026");
+    const ed = () => document.querySelector("#gridCanvas .cell-editor");
+    ed().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    ok(ed() && ed().value === "31/31/2026", "editor still open with the text"); eq(U.fmtYMD(task(a).S), "2026-03-02");
+    ed().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); ok(!ed(), "Escape closes it");
+  });
+  await test("undo", "one change at a time; undo stays right after a change made outside mutate", async () => {
+    fresh();
+    ok(!P.mutate("outer", () => { O.opAddTask({ name: "A" }); P.mutate("inner", () => O.opAddTask({ name: "B" })); }), "nested change refused");
+    P.refresh(); eq(P.M.order.length, 0, "nothing half-committed");
+    ok(!P.mutate("t", () => { O.opAddTask({ name: "C" }); P.db.exportBytes(); }), "copying mid-change refused"); P.refresh(); eq(P.M.order.length, 0);
+    T("a"); await P.flushSaves(); P.run("UPDATE task SET name='raw'"); T("b"); P.undo(); P.refresh();
+    eq(P.M.order.map(t => t.name), ["raw"], "snapshot taken after the outside change");
+  });
+  await test("wbs-ops", "Escape cancels a row drag", () => {
+    fresh(); P.switchView("plan"); const a = T("A"), b = T("B"); P.renderAll();
+    const cell = document.querySelector(`#gridRows .grow[data-id="${a}"] [data-col="wbs"]`), r = cell.getBoundingClientRect();
+    const target = document.querySelector(`#gridRows .grow[data-id="${b}"]`).getBoundingClientRect();
+    cell.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, clientX: r.left + 5, clientY: r.top + 5 }));
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: r.left + 5, clientY: target.bottom - 2 }));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    window.dispatchEvent(new PointerEvent("pointerup", { clientX: r.left + 5, clientY: target.bottom - 2 }));
+    eq(P.M.order.map(t => t.name), ["A", "B"], "order unchanged"); ok(document.getElementById("dragTip").hidden, "tip hidden");
   });
   P.reset();
   const failed = results.filter(r => !r.pass);
