@@ -23,7 +23,7 @@ function renderPersonFilter() {
 //   rows           the outline's rows changed (filter, collapse): grid and Gantt in full
 //   gridRows, ganttRows   repaint the visible rows (selection, scrolling)      gantt   rescale the Gantt
 //   form, formForce       the record panel; formForce rebuilds it even while one of its fields has focus
-//   risks, planList, raci, issues, save
+//   risks, planList, raci, raciRows (scrolling the matrix), issues, save
 const stale = new Set(); let drawQueued = false;
 function redraw(...parts) {
   for (const p of parts) stale.add(p);
@@ -49,7 +49,7 @@ function drawNow() {
   }
   if (v === "risks") { if (any("risks")) renderRisks(); else if (s.has("planList")) renderPlanList(); }
   const view = $("view-" + v), mark = (v === "raci" || v === "people" || v === "issues") && !$("formPane").contains(document.activeElement) ? markFocus(view) : null;
-  if (v === "raci" && any("raci")) renderRaci();
+  if (v === "raci") { if (any("raci")) renderRaci(); else if (s.has("raciRows")) renderRaciRows(); }
   if (v === "people" && all) renderPeople();
   if (v === "issues" && any("issues")) renderIssues();
   if (mark && !view.contains(document.activeElement)) refocus(view, mark);
@@ -167,7 +167,7 @@ setInterval(() => { if (fileHandle) redraw("save"); }, 15000); // "saved 2 min a
     risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport: drawn(loadRiskImport), riskImportItems, doRiskImport: drawn(doRiskImport), openRiskRecord: drawn(openRiskRecord), closeRiskForm: drawn(closeRiskForm), renderRisks: drawn(() => redraw("risks")), get RI() { return RI; }, recNotes, toLMH },
     util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml, markFocus, refocus },
     io: { loadImportFile, buildPlan, doImport: drawn(doImport), collectPeople, exportWorkbook, csvText, autoMap, riskPreviewText, get W() { return W; } },
-    db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; },
+    db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get historyBytes() { return historyBytes(); }, set undoBudget(n) { undoBudget = n; trimUndo(); }, get undoBudget() { return undoBudget; }, get mirrorRev() { return mirrorRev; },
       get diskRev() { return diskRev; }, get readOnly() { return readOnly; }, get fileId() { return readFileId(db); },
       // test aid: attach a stand-in file handle without a picker
       attach(h, base = null) { fileHandle = h; filePerm = !!h; diskRev = base; }, endReadOnly() { readOnly = false; readOnlyWhy = ""; $("roBanner").hidden = true; } },

@@ -125,12 +125,32 @@ function openDepEditor(depId, x, y) {
 UI.raciBy = lsGet("pm.raciBy", "team");
 const RACI_SEQ = ["", "R", "A", "A/R", "C", "I", ""];
 const roleLabel = (t, role) => role === "A" && t.r_is_a ? "A/R" : role;
+// The matrix is drawn like the outline (DECISIONS #77): only the rows near the viewport, between two spacer rows
+// that keep the scrollbar honest, so a big plan costs no more per click or scroll than a small one.
+let RX = null; // { cls, head, rows, rowHtml(t), cols, rowH }
+function showRaci(cls, head, rows, cols, rowHtml) {
+  RX = { cls, head, rows, cols, rowHtml, rowH: RX?.rowH || 31 };
+  renderRaciRows(true);
+}
+// whole: replace the table too (new data). It goes in complete, spacers included, so the scroll position survives.
+function renderRaciRows(whole = false) {
+  const wrap = $("raciWrap"), body = wrap.querySelector("tbody"); if (!RX?.rows || (!whole && !body)) return;
+  const { scrollTop, scrollLeft } = wrap, rowH = RX.rowH, top = scrollTop - (wrap.querySelector("thead")?.offsetHeight ?? 60);
+  const first = Math.max(0, Math.floor(top / rowH) - 10), last = Math.min(RX.rows.length, Math.ceil((top + wrap.clientHeight) / rowH) + 10);
+  const pad = n => n > 0 ? html`<tr class="pad"><td colspan="${RX.cols + 2}" style="height:${n * rowH}px;padding:0;border:0"></td></tr>` : "";
+  const rows = html`${pad(first)}${RX.rows.slice(first, last).map(RX.rowHtml)}${pad(RX.rows.length - last)}`;
+  if (whole) setHtml(wrap, html`<table class="${RX.cls}"><thead>${RX.head}</thead><tbody>${rows}</tbody></table>`); else setHtml(body, rows);
+  wrap.scrollTop = scrollTop; wrap.scrollLeft = scrollLeft;
+  const real = wrap.querySelector("tbody tr:not(.pad)")?.offsetHeight; // measured once the first rows are on screen
+  if (real && real !== rowH) { RX.rowH = real; renderRaciRows(); }
+}
 function renderRaci() {
   $$("#raciBySeg button").forEach(b => b.classList.toggle("on", b.dataset.by === UI.raciBy));
   $("raciHint").textContent = UI.raciBy === "team"
     ? "Click a cell to cycle the team's role: — R A A/R C I. Use + to hand it to a team member. Click a task to open its record"
     : "Click a cell to cycle: — R A A/R C I. Click a task to open its record";
   $("raciOnlyUsed").parentElement.lastChild.textContent = UI.raciBy === "team" ? " Only teams with assignments" : " Only people/teams with assignments";
+  RX = RX && { rowH: RX.rowH };
   if (UI.raciBy === "team") return renderRaciTeams();
   const wrap = $("raciWrap");
   const onlyUsed = $("raciOnlyUsed").checked, leaves = $("raciLeaves").checked;
@@ -140,7 +160,7 @@ function renderRaci() {
   if (!M.order.length) { setHtml(wrap, html`<div class="empty">No tasks in this project yet.</div>`); return; }
   if (!cols.length) { setHtml(wrap, html`<div class="empty">No ${onlyUsed ? "assignments" : "people or teams"} yet. Untick “Only people/teams with assignments” or add people on the People &amp; teams tab.</div>`); return; }
   const issuesBy = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!issuesBy.has(i.task.id)) issuesBy.set(i.task.id, []); issuesBy.get(i.task.id).push(i.text); }
-  const body = rows.map(t => {
+  const rowHtml = t => {
     const map = new Map(rolesOf(t.id).map(r => [r.party_id, r.role]));
     const inh = accountable(t);
     const cells = cols.map(p => {
@@ -150,8 +170,8 @@ function renderRaci() {
       return html`<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" title="${p.name}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? r + (ar ? "/R" : "") : ghost ? html`<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
     });
     return html`<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
-  });
-  setHtml(wrap, html`<table class="raci"><thead><tr><th class="tn">Task</th>${cols.map(p => html`<th class="pc" title="${p.name}">${p.name}<span class="k">${p.kind === "team" ? "team" : p.title || ""}</span></th>`)}<th>Warnings</th></tr></thead><tbody>${body}</tbody></table>`);
+  };
+  showRaci("raci", html`<tr><th class="tn">Task</th>${cols.map(p => html`<th class="pc" title="${p.name}">${p.name}<span class="k">${p.kind === "team" ? "team" : p.title || ""}</span></th>`)}<th>Warnings</th></tr>`, rows, cols.length, rowHtml);
 }
 function renderRaciTeams() {
   const wrap = $("raciWrap");
@@ -164,7 +184,7 @@ function renderRaciTeams() {
   if (used.has(0)) cols.push({ id: 0, name: "No team", team: null });
   if (!cols.length) { setHtml(wrap, html`<div class="empty">${M.teams.length ? "No team has assignments yet. Untick “Only teams with assignments”." : "No teams yet. Add teams on the People & teams tab."}</div>`); return; }
   const issuesBy = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!issuesBy.has(i.task.id)) issuesBy.set(i.task.id, []); issuesBy.get(i.task.id).push(i.text); }
-  const body = rows.map(t => {
+  const rowHtml = t => {
     const roles = rolesOf(t.id);
     const cells = cols.map(c => {
       const own = c.team ? roles.find(r => r.party_id === c.id) : null;
@@ -177,8 +197,8 @@ function renderRaciTeams() {
       return html`<td class="cell tcell ${top[0] || ""}" data-t="${t.id}" data-team="${c.id}" title="${tip}">${ownL ? html`<b>${ownL}</b>` : ""}${chips}${plus}</td>`;
     });
     return html`<tr class="${t.isSummary ? "summary" : ""}${t.id === UI.selId && UI.form ? " sel" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
-  });
-  setHtml(wrap, html`<table class="raci team"><thead><tr><th class="tn">Task</th>${cols.map(c => html`<th class="pc" title="${c.name}">${c.name}<span class="k">${c.team ? `${(M.members.get(c.id) || []).length} people` : "people without a team"}</span></th>`)}<th>Warnings</th></tr></thead><tbody>${body}</tbody></table>`);
+  };
+  showRaci("raci team", html`<tr><th class="tn">Task</th>${cols.map(c => html`<th class="pc" title="${c.name}">${c.name}<span class="k">${c.team ? `${(M.members.get(c.id) || []).length} people` : "people without a team"}</span></th>`)}<th>Warnings</th></tr>`, rows, cols.length, rowHtml);
 }
 // Hand the team's role on a task to one of its members (or set a member's role when the team has none).
 function teamMemberPicker(anchor, tid, teamId) {
@@ -221,8 +241,9 @@ function initRaci() {
     $("raciWrap").scrollTop = keep; $("raciWrap").scrollLeft = keepL;
   });
   $$("#raciBySeg button").forEach(b => b.addEventListener("click", () => { UI.raciBy = b.dataset.by; lsSet("pm.raciBy", UI.raciBy); redraw("raci"); }));
-  $("raciOnlyUsed").addEventListener("change", renderRaci);
-  $("raciLeaves").addEventListener("change", renderRaci);
+  $("raciOnlyUsed").addEventListener("change", () => redraw("raci"));
+  $("raciLeaves").addEventListener("change", () => redraw("raci"));
+  $("raciWrap").addEventListener("scroll", () => redraw("raciRows"));
 }
 
 // ---------- People & teams ----------

@@ -7,7 +7,16 @@ let fileHandle = null, filePerm = false;
 let saving = false, pending = false, pendingReasons = [], lastErr = null;
 const saveLog = [];
 const undoStack = [], redoStack = [];
+// Undo keeps whole copies of the plan, so it's capped by memory as well as by count (DECISIONS #77): up to 40 steps
+// within 64 MB together with redo, dropping the oldest first, but always the last step even when one copy is bigger.
 const UNDO_LIMIT = 40;
+let undoBudget = 64 * 2 ** 20;
+const historyBytes = () => [...undoStack, ...redoStack].reduce((n, b) => n + b.byteLength, 0);
+function trimUndo() {
+  let total = historyBytes();
+  while (undoStack.length > 1 && (undoStack.length > UNDO_LIMIT || total > undoBudget)) total -= undoStack.shift().byteLength;
+  while (redoStack.length && total > undoBudget) total -= redoStack.shift().byteLength;
+}
 const hooks = { onChange() { }, onSaveState() { }, onReplace() { }, onReadOnly() { } };
 let slowSaves = false; // test/demo aid
 
@@ -290,8 +299,8 @@ function mutate(desc, fn) {
     return false;
   }
   inMutate = false;
-  undoStack.push(snap); if (undoStack.length > UNDO_LIMIT) undoStack.shift();
   redoStack.length = 0;
+  undoStack.push(snap); trimUndo();
   afterChange(desc);
   if (opNotes.length) toast(opNotes.splice(0).join(" "));
   return true;
@@ -310,12 +319,12 @@ function restoreSnapshot(bytes, desc) {
 function undo() {
   if (readOnly) return toast(readOnlyWhy, "err");
   if (!undoStack.length) return toast("Nothing to undo");
-  redoStack.push(exportBytes()); restoreSnapshot(undoStack.pop(), "Undo");
+  redoStack.push(exportBytes()); restoreSnapshot(undoStack.pop(), "Undo"); trimUndo();
 }
 function redo() {
   if (readOnly) return toast(readOnlyWhy, "err");
   if (!redoStack.length) return toast("Nothing to redo");
-  undoStack.push(exportBytes()); restoreSnapshot(redoStack.pop(), "Redo");
+  undoStack.push(exportBytes()); restoreSnapshot(redoStack.pop(), "Redo"); trimUndo();
 }
 
 // ---------- One writer at a time (DECISIONS #29) ----------

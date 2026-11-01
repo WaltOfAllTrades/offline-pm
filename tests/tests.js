@@ -1182,6 +1182,34 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     ok(!U.refocus(box, mk), "two candidates: no guess"); box.remove();
     P.switchView("plan");
   });
+  await test("raci-speed", "a big matrix draws only the rows near the viewport; scrolling and clicks still work", async () => {
+    fresh(); let ana;
+    m(() => { ana = O.opAddParty("person", "Ana"); for (let i = 0; i < 400; i++) O.opAddTask({ name: "T" + i, start: D("2026-03-02"), finish: D("2026-03-02") }); });
+    const by = P.UI.raciBy, only = document.getElementById("raciOnlyUsed"), wasOnly = only.checked;
+    P.UI.raciBy = "person"; only.checked = false; P.switchView("raci");
+    const wrap = document.getElementById("raciWrap"), drawn = () => [...wrap.querySelectorAll("tbody tr:not(.pad)")];
+    ok(drawn().length > 10 && drawn().length < 120, "drew " + drawn().length + " of 400 rows");
+    const full = wrap.scrollHeight; ok(full > 400 * 25, "spacers keep the full height: " + full);
+    wrap.scrollTop = wrap.scrollHeight; wrap.dispatchEvent(new Event("scroll"));
+    const lastTask = P.M.order.at(-1), cell = wrap.querySelector(`td.cell[data-t="${lastTask.id}"][data-p="${ana}"]`);
+    ok(cell, "last row drawn after scrolling to the bottom");
+    cell.click(); eq(P.M.raci.get(lastTask.id)?.[0]?.role, "R", "click on a far row assigns");
+    ok(wrap.querySelector(`td.cell[data-t="${lastTask.id}"][data-p="${ana}"]`)?.classList.contains("R"), "redrawn in place, still scrolled down");
+    P.UI.raciBy = by; only.checked = wasOnly; P.switchView("plan");
+  });
+  await test("undo", "undo history is capped by memory, oldest first, keeping at least the last step", () => {
+    fresh(); const a = T("A"); const budget = P.db.undoBudget;
+    try {
+      for (let i = 0; i < 6; i++) m(() => O.opSetField(a, "name", "A" + i));
+      eq(P.db.undoDepth, 7);
+      const one = P.db.historyBytes / 7;
+      P.db.undoBudget = one * 3.5;
+      eq(P.db.undoDepth, 3, "trimmed to fit"); ok(P.db.historyBytes <= P.db.undoBudget);
+      P.undo(); P.undo(); eq(task(a).name, "A3", "newest steps kept");
+      P.db.undoBudget = 1; m(() => O.opSetField(a, "name", "B"));
+      eq(P.db.undoDepth, 1, "always the last step"); P.undo(); eq(task(a).name, "A3");
+    } finally { P.db.undoBudget = budget; }
+  });
   await test("a11y", "dialogs take focus, keep Tab inside, and give focus back when closed", () => {
     P.switchView("plan"); const gb = document.getElementById("gridBody"); gb.focus();
     document.querySelector('#fileMenu [data-act="help"]').click();
