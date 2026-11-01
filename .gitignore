@@ -1,4 +1,5 @@
-﻿.claude/
+﻿.claude/*
+!.claude/skills/
 *.db
 Thumbs.db
 
