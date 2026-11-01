@@ -60,6 +60,7 @@ function loadModel() {
     if (!M.depsOut.has(d.pred_id)) M.depsOut.set(d.pred_id, []); M.depsOut.get(d.pred_id).push(d);
   }
   M.noteCount = new Map(q("SELECT n.task_id, COUNT(*) c FROM note n JOIN task t ON t.id=n.task_id WHERE t.project_id=? GROUP BY n.task_id", [M.projectId]).map(r => [r.task_id, r.c]));
+  loadRisks();
   M.issues = computeIssues();
 }
 
@@ -450,6 +451,7 @@ function seedSample() {
   opAddNote(c, "Homepage and product page wireframes reviewed with marketing. Navigation still open.");
   opAddNote(c, "Decision: keep the mega-menu, but limit it to 3 columns.");
   opAddNote(g, "Waiting on the final style guide before starting the article template.");
+  seedRisks({ migration: h2, uat: i, ana, dev });
   // Spread the sample notes over the past days so the stream looks lived-in.
   q("SELECT id FROM note ORDER BY id").forEach((n, k) => run("UPDATE note SET created_at=? WHERE id=?", [new Date(Date.now() - (8 - k * 2) * 864e5 - 3600e3 * (k + 1)).toISOString(), n.id]));
 }

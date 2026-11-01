@@ -15,8 +15,9 @@ function renderPersonFilter() {
   if (cur && !M.parties.has(+cur.slice(2))) UI.person = "";
 }
 function renderAll() {
-  renderProjectMenu(); updateIssueBadge(); renderSaveState(); renderPersonFilter();
+  renderProjectMenu(); updateIssueBadge(); updateRiskBadge(); renderSaveState(); renderPersonFilter();
   if (UI.view === "plan") { renderGrid(); renderGantt(); renderForm(); }
+  else if (UI.view === "risks") renderRisks();
   else if (UI.view === "raci") renderRaci();
   else if (UI.view === "people") renderPeople();
   else if (UI.view === "issues") renderIssues();
@@ -26,7 +27,7 @@ function onDataChanged() { if (!ready) return; refresh(); computeRows(); renderA
 function switchView(v) {
   UI.view = v; closePop();
   $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.view === v));
-  for (const s of ["plan", "raci", "people", "issues"]) $("view-" + s).hidden = s !== v;
+  for (const s of ["plan", "risks", "raci", "people", "issues"]) $("view-" + s).hidden = s !== v;
   renderAll();
   if (v === "plan") $("gridBody").focus();
 }
@@ -56,7 +57,7 @@ function initToolbar() {
   $("fileMenu").addEventListener("click", e => {
     const act = e.target.closest("button")?.dataset.act; if (!act) return;
     $("fileMenu").hidden = true;
-    ({ new: newPlanFile, open: openPlanFile, copy: saveCopy, reconnect, import: startImport, xlsx: exportXlsx, csv: exportCsv, print: () => { if (UI.view !== "plan") switchView("plan"); printPlan(); }, help: showHelp })[act]?.();
+    ({ new: newPlanFile, open: openPlanFile, copy: saveCopy, reconnect, import: startImport, riskImport: startRiskImport, xlsx: exportXlsx, csv: exportCsv, print: () => { if (UI.view !== "plan") switchView("plan"); printPlan(); }, help: showHelp })[act]?.();
   });
   $("addPersonBtn").onclick = () => editParty(null, "person");
   $("addTeamBtn").onclick = () => editParty(null, "team");
@@ -79,12 +80,12 @@ function initToolbar() {
     const up = () => { sp.classList.remove("drag"); sp.removeEventListener("pointermove", mv); sp.removeEventListener("pointerup", up); lsSet("pm.split", pane.offsetWidth + (UI.form ? formWidth() : 0)); renderGridRows(); renderGantt(); if (UI.form) relayoutForm(); };
     sp.addEventListener("pointermove", mv); sp.addEventListener("pointerup", up);
   });
-  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "plan") { if (UI.form) relayoutForm(); else if (lsGet("pm.split", null) == null) pane.style.width = gridFullWidth() + "px"; renderGridRows(); renderGantt(); } }, 120); });
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "risks") { if (UI.riskForm) sizeRiskForm(); $$("#riskBody textarea").forEach(autoGrow); } if (UI.view === "plan") { if (UI.form) relayoutForm(); else if (lsGet("pm.split", null) == null) pane.style.width = gridFullWidth() + "px"; renderGridRows(); renderGantt(); } }, 120); });
 
   document.addEventListener("keydown", e => {
     const ctrl = e.ctrlKey || e.metaKey;
     const typing = e.target.matches("input,textarea,select") && !e.target.matches("[type=checkbox]");
-    if (e.key === "Escape") { if (!$("pop").hidden) { closePop(); return; } if (modalOpen()) { closeModal(); return; } $("logPanel").hidden = true; if (UI.form && !typing && !modalOpen()) { toggleForm(false); return; } }
+    if (e.key === "Escape") { if (!$("pop").hidden) { closePop(); return; } if (modalOpen()) { closeModal(); return; } $("logPanel").hidden = true; if (!typing && !modalOpen()) { if (UI.view === "risks" && UI.riskForm) { closeRiskForm(); return; } if (UI.view === "plan" && UI.form) { toggleForm(false); return; } } }
     if (modalOpen() || typing) return;
     if (ctrl && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
     else if (ctrl && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { e.preventDefault(); redo(); }
@@ -94,11 +95,11 @@ function initToolbar() {
 
 hooks.onChange = onDataChanged;
 hooks.onSaveState = () => { if (ready) renderSaveState(); };
-hooks.onReplace = () => { UI.noteDrafts.clear(); UI.editNote = null; }; // ids from another file mean nothing here
+hooks.onReplace = () => { UI.noteDrafts.clear(); UI.editNote = null; UI.riskSel = null; UI.riskForm = false; UI.riskFocus = null; }; // ids from another file mean nothing here
 setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
 
 (async () => {
-  initToolbar(); initGrid(); initGantt(); initRaci();
+  initToolbar(); initGrid(); initGantt(); initRaci(); initRisks();
   try {
     const fresh = await bootDb(WASM_B64);
     loadModel();
@@ -118,7 +119,9 @@ setInterval(() => { if (ready && fileHandle) renderSaveState(); }, 15000);
   if (!fsSupported) toast("This browser can't save to files. Use Chrome or Edge for live saving; Excel export still works.", "err");
   window.PM = {
     M, UI, q, run, one, scalar, mutate, undo, redo, flushSaves, refresh, renderAll, selectTask, switchView, switchProject, openRecord, toggleForm, renderForm, notesFor,
-    op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote, opSetRIsA },
+    op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote, opSetRIsA,
+      opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote },
+    risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport, riskImportItems, doRiskImport, openRiskRecord, closeRiskForm, renderRisks, get RI() { return RI; }, recNotes, toLMH },
     util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum },
     io: { loadImportFile, buildPlan, doImport, collectPeople, exportWorkbook, autoMap, get W() { return W; } },
     db: { installDb, exportBytes, migrate, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get mirrorRev() { return mirrorRev; } },

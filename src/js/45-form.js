@@ -49,7 +49,11 @@ function holdFormRender() {
   formHold = true;
   const release = () => {
     removeEventListener("pointerup", release, true); removeEventListener("pointercancel", release, true);
-    setTimeout(() => { formHold = false; if (formHeldRender) { formHeldRender = false; renderForm(true); } }, 0);
+    setTimeout(() => {
+      formHold = false;
+      if (formHeldRender) { formHeldRender = false; renderForm(true); }
+      if (riskHeldRender) { riskHeldRender = false; renderRisks(); }
+    }, 0);
   };
   addEventListener("pointerup", release, true); addEventListener("pointercancel", release, true);
 }
@@ -219,52 +223,62 @@ function fmtWhen(iso) {
 const PERSON_SVG = `<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.6"/><path d="M3.2 17.5c.6-3.6 3.4-5.6 6.8-5.6s6.2 2 6.8 5.6z"/></svg>`;
 function notesSection(t) {
   const withSub = t.isSummary && UI.notesWithSub;
-  const list = notesFor(t.id, withSub);
-  const sec = h("section", { class: "f-sec notes" });
   const subCb = t.isSummary ? h("input", { type: "checkbox", checked: UI.notesWithSub }) : null;
   subCb?.addEventListener("change", () => { UI.notesWithSub = subCb.checked; lsSet("pm.notesWithSub", UI.notesWithSub); renderForm(true); });
-  sec.append(h("div", { class: "f-sec-h" }, h("h3", {}, "Work notes"), h("span", { class: "hint" }, list.length ? `${list.length}` : ""), h("span", { class: "spacer" }),
-    subCb ? h("label", { class: "hint" }, subCb, " Include subtask notes") : null));
-
-  // Compose box (notes carry a date, not a name: DECISIONS #41)
+  return notesBlock({
+    draftKey: t.id, list: notesFor(t.id, withSub), pane: "formPane", rerender: () => renderForm(true), label: n => `Task ${(M.tasks.get(n?.task_id) || t).wbs}`,
+    extras: subCb ? h("label", { class: "hint" }, subCb, " Include subtask notes") : null,
+    empty: withSub ? "No work notes on this task or its subtasks yet." : "No work notes yet.",
+    post: body => mutate(`Task ${t.wbs}: added a work note`, () => opAddNote(t.id, body)),
+    on: n => { const x = n.task_id !== t.id ? M.tasks.get(n.task_id) : null; return x ? [`${x.wbs} ${x.name}`, () => openRecord(x.id)] : null; },
+  });
+}
+// Shared work-notes journal for tasks, risks and mitigants (notes carry a date, not a name: DECISIONS #41).
+// o: { draftKey, list, pane, rerender(), label, extras?, empty, post(body) → bool, on?(note) → [text, open] | null }
+function notesBlock(o) {
+  const sec = h("section", { class: "f-sec notes" });
+  sec.append(h("div", { class: "f-sec-h" }, h("h3", {}, "Work notes"), h("span", { class: "hint" }, o.list.length ? `${o.list.length}` : ""), h("span", { class: "spacer" }), o.extras || null));
   const ta = h("textarea", { class: "n-compose", "data-keep": "compose", rows: 3, placeholder: "Add a work note… (Ctrl+Enter to post)" });
-  ta.value = UI.noteDrafts.get(t.id) || "";
-  ta.addEventListener("input", () => { ta.value ? UI.noteDrafts.set(t.id, ta.value) : UI.noteDrafts.delete(t.id); });
+  ta.value = UI.noteDrafts.get(o.draftKey) || "";
+  ta.addEventListener("input", () => { ta.value ? UI.noteDrafts.set(o.draftKey, ta.value) : UI.noteDrafts.delete(o.draftKey); });
   const post = () => {
     if (!ta.value.trim()) { toast("Write something first"); ta.focus(); return; }
     const body = ta.value;
-    UI.noteDrafts.delete(t.id);
-    if (!mutate(`Task ${t.wbs}: added a work note`, () => opAddNote(t.id, body))) { UI.noteDrafts.set(t.id, body); renderForm(true); }
+    UI.noteDrafts.delete(o.draftKey);
+    if (!o.post(body)) { UI.noteDrafts.set(o.draftKey, body); o.rerender(); }
   };
   ta.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); post(); } e.stopPropagation(); });
   sec.append(h("div", { class: "n-composer" }, ta, h("div", { class: "n-cbar" }, h("span", { class: "spacer" }), h("button", { class: "primary", onclick: post }, "Post"))));
-
-  // Stream, newest first
   const stream = h("div", { class: "n-stream" });
-  if (!list.length) stream.append(h("div", { class: "hint n-empty" }, withSub ? "No work notes on this task or its subtasks yet." : "No work notes yet."));
-  for (const n of list) stream.append(noteEntry(t, n));
+  if (!o.list.length) stream.append(h("div", { class: "hint n-empty" }, o.empty));
+  for (const n of o.list) stream.append(noteEntry(o, n));
   sec.append(stream);
   return sec;
 }
-function noteEntry(t, n) {
+function noteEntry(o, n) {
   const c = fmtWhen(n.created_at), ed = n.updated_at ? fmtWhen(n.updated_at) : null;
-  const on = n.task_id !== t.id ? M.tasks.get(n.task_id) : null;
+  const on = o.on ? o.on(n) : null;
   const editing = UI.editNote?.id === n.id;
+  const label = typeof o.label === "function" ? o.label(n) : o.label;
   const head = h("div", { class: "n-head" },
     n.author ? h("b", {}, n.author) : null,
-    on ? h("span", { class: "n-on" }, "on ", h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(on.id); } }, `${on.wbs} ${on.name}`)) : null,
+    on ? h("span", { class: "n-on" }, "on ", h("a", { href: "#", onclick: e => { e.preventDefault(); on[1](); } }, on[0])) : null,
     h("time", { title: n.created_at }, c.abs + (c.rel ? ` · ${c.rel}` : "")),
     ed ? h("span", { class: "n-ed", title: `Edited ${ed.abs}` }, "(edited)") : null,
     h("span", { class: "spacer" }),
-    editing ? null : h("button", { class: "link", onclick: () => { UI.editNote = { id: n.id, created: n.created_at, text: n.body }; renderForm(true); const ta = $("formPane").querySelector(".n-edit"); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } } }, "Edit"),
-    editing ? null : h("button", { class: "link danger", onclick: () => { if (confirm("Delete this work note? (Undo is available.)")) mutate(`Task ${on?.wbs || t.wbs}: deleted a work note`, () => opDeleteNote(n.id)); } }, "Delete"));
+    editing ? null : h("button", { class: "link", onclick: () => {
+      UI.editNote = { id: n.id, created: n.created_at, text: n.body }; o.rerender();
+      const focus = () => { const ta = $(o.pane).querySelector(".n-edit"); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } };
+      focus(); setTimeout(focus, 0); // the re-render may be deferred until the click finishes
+    } }, "Edit"),
+    editing ? null : h("button", { class: "link danger", onclick: () => { if (confirm("Delete this work note? (Undo is available.)")) mutate(`${label}: deleted a work note`, () => opDeleteNote(n.id)); } }, "Delete"));
   let body;
   if (editing) {
     const ta = h("textarea", { class: "n-edit", "data-keep": "note-edit", rows: Math.min(10, n.body.split("\n").length + 1) });
     ta.value = UI.editNote.text;
     ta.addEventListener("input", () => { if (UI.editNote) UI.editNote.text = ta.value; });
-    const save = () => { const v = ta.value; const prev = UI.editNote; UI.editNote = null; if (v.trim() === n.body) { renderForm(true); return; } if (!mutate(`Task ${on?.wbs || t.wbs}: edited a work note`, () => opEditNote(n.id, v))) { UI.editNote = prev; renderForm(true); } };
-    const cancel = () => { UI.editNote = null; renderForm(true); };
+    const save = () => { const v = ta.value; const prev = UI.editNote; UI.editNote = null; if (v.trim() === n.body) { o.rerender(); return; } if (!mutate(`${label}: edited a work note`, () => opEditNote(n.id, v))) { UI.editNote = prev; o.rerender(); } };
+    const cancel = () => { UI.editNote = null; o.rerender(); };
     ta.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); } e.stopPropagation(); });
     body = h("div", {}, ta, h("div", { class: "n-cbar" }, h("span", { class: "spacer" }), h("button", { onclick: cancel }, "Cancel"), h("button", { class: "primary", onclick: save }, "Save")));
   } else body = h("div", { class: "n-body", html: linkify(esc(n.body)) });
@@ -280,6 +294,7 @@ const RELATED_TABS = [
   { key: "pred", label: "Predecessors", count: t => (M.depsIn.get(t.id) || []).length, render: t => relDeps(t, "in") },
   { key: "succ", label: "Successors", count: t => (M.depsOut.get(t.id) || []).length, render: t => relDeps(t, "out") },
   { key: "raci", label: "People (RACI)", count: t => rolesOf(t.id).length, render: relRaci },
+  { key: "risks", label: "Risks", count: t => (M.mitByTask.get(t.id) || []).length, render: relRisks },
   { key: "issues", label: "Plan issues", count: t => M.issues.filter(i => i.task === t).length, render: relIssues },
   { key: "raid", label: "RAID", count: () => null, render: relRaid, soon: true },
 ];
@@ -354,6 +369,14 @@ function relRaci(t) {
     t.r_is_a ? h("div", { class: "hint", style: { margin: "0 0 6px" } }, "Responsible is the same as Accountable (switch on the Details section).") : null,
     acc.inherited && acc.list.length ? h("div", { class: "hint", style: { margin: "0 0 6px" } }, `Accountable inherited from ${acc.from.wbs}: ${acc.list.map(r => partyName(r.party_id)).join(", ")}`) : null,
     relTable(["Person or team", "Kind / title", "Role", ""], rows, "Nobody is assigned to this task yet."));
+}
+function relRisks(t) {
+  const list = M.mitByTask.get(t.id) || [];
+  const rows = list.map(m => h("tr", { class: "click", onclick: () => openRiskRecord("mitigant", m.id) },
+    h("td", {}, m.risk.name), h("td", {}, m.text), h("td", {}, m.eff + (m.is_control ? " · control" : "")), h("td", {}, m.achieved ? "✓" : "—"),
+    h("td", {}, h("button", { class: "x", title: "Unlink", onclick: e => { e.stopPropagation(); mutate(`Unlinked ${t.wbs} from a mitigant`, () => opUnlinkTask(m.id, t.id)); } }, "✕"))));
+  return h("div", {}, h("div", { class: "hint", style: { margin: "0 0 6px" } }, "Mitigants this task implements. Link more by dragging a mitigant onto this task on the Risks page."),
+    relTable(["Risk", "Mitigant", "Status", "Achieved", ""], rows, "This task doesn't implement any mitigant."));
 }
 function relIssues(t) {
   const list = M.issues.filter(i => i.task === t);

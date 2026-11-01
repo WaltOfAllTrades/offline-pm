@@ -76,3 +76,29 @@ Each story lists its acceptance criteria. A tag in brackets after a criterion na
   - **RAID** is a placeholder for the upcoming risks, actions, issues and decisions.
   - The last tab you used is remembered.
   - New record types are added to the tab list in one place (`RELATED_TABS`).
+
+## J. Risks (branch `notes`)
+- **J1 Risk register.** A **Risks** tab lists risks (by name; ids stay hidden) with their mitigants indented underneath, in one table with inline editing. Enter adds the next mitigant, Backspace on an empty mitigant deletes it, and ＋ Risk adds a risk. [risks-ui]
+- **J2 Risk.** Name, description, the mitigation plan as received, a response (**Mitigate** or **Accept** with a reason), probability and impact (Low/Medium/High), and Accountable/Responsible with a Same-as switch. Status is derived: **Accepted**, **Mitigating** (until every mitigant is achieved) or **Mitigated**. [risks]
+- **J3 Mitigant.** Text, Accountable/Responsible (Accountable inherited from the risk when empty; Same-as switch), a **Control** checkbox, status **Not started → Planned → Implemented → Tested**, a multi-line **Testing** field, and "handed to" (who runs it after the project). [risks]
+  - With linked tasks, the status is Planned until every task is Done, then Implemented.
+  - Tested is always set by hand, and so is any status on a mitigant with no linked tasks.
+  - A mitigant is **achieved** at Implemented, or at Tested if it's a control. [risks]
+- **J4 Implements.** The only relationship: a mitigant is implemented by tasks (many-to-many). The task record has a **Risks** tab, and the outline shows 🛡 on those tasks. Deleting a task removes its links. [risks]
+- **J5 Drag and drop.** The Risks page has a plan pane listing the WBS. [risks-ui]
+  - Drag a mitigant's ⠿ onto a task to link them, or between two tasks to create a task at that spot that implements it.
+  - Drag a risk to choose which mitigant (or a new one) to use.
+  - Drag a task from the plan pane onto a mitigant to link them.
+- **J6 ＋ Task.** Creates "Implement: <mitigant>" under a top-level "Risk mitigation" summary task (or the parent last used), linked to the mitigant and carrying its Accountable/Responsible. [risks] [risks-ui]
+- **J7 Split.** Paste a mitigation plan into the risk and press **Split into mitigants**. It proposes one mitigant per line, bullet, numbered item or sentence (without breaking at "e.g."), which you can edit before adding. [risks] [risks-ui]
+- **J8 Record panel.** The same slide-out panel as tasks, for a risk or a mitigant: fields, the mitigant list or linked tasks, and work notes. Esc closes it. [risks-ui]
+- **J9 Gaps.** Risks and mitigants are flagged ⚠ when:
+  - a risk has no mitigants, or is accepted without a reason;
+  - a mitigant has no task and hasn't started;
+  - a control is implemented but not tested;
+  - a linked task is overdue.
+
+  A **Gaps** filter and a count on the tab show them. [risks-ui]
+- **J10 Closeout.** A report listing each risk and mitigant with its status, **Achieved ✓/✗**, evidence (linked tasks with status and finish date), testing notes and handover. A summary line reads like "x of y mitigants achieved · a of b risks fully mitigated · c accepted". It can be printed or exported to Excel, and Excel export of the plan includes a Risks sheet. [risks]
+- **J11 Import.** **Import risks…** reads a risk register from Excel/CSV: it finds the header row, auto-maps columns (risk, owner, likelihood, impact, mitigation plan, response), matches owner names to people (or adds them), converts Low/Medium/High or 1–5 values, and optionally splits each plan into mitigants. [risks]
+

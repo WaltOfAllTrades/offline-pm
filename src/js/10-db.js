@@ -1,5 +1,5 @@
 // ---------- SQLite, schema, revisions, undo, live save ----------
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const IDB_NAME = "offline-pm";
 let SQL, db;
 let rev = 0, mirrorRev = null, diskRev = null, lastDiskAt = null, lastSize = 0;
@@ -83,11 +83,58 @@ CREATE TABLE IF NOT EXISTS note(
   updated_at TEXT);
 CREATE INDEX IF NOT EXISTS note_task ON note(task_id, created_at);
 `;
-const SCHEMA_ALL = SCHEMA_V1 + SCHEMA_V2;
-// v3: "Responsible is the same as Accountable" switch per task (DECISIONS #48). Columns can't be added with IF NOT EXISTS.
-function ensureColumns(d) {
-  const cols = d.exec("PRAGMA table_info(task)")[0].values.map(r => r[1]);
-  if (!cols.includes("r_is_a")) d.run("ALTER TABLE task ADD COLUMN r_is_a INTEGER NOT NULL DEFAULT 0");
+// v4: risks, their mitigants, mitigant → task "implements" links, R/A on both (DECISIONS #51-#58).
+const SCHEMA_V4 = `
+CREATE TABLE IF NOT EXISTS risk(
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL DEFAULT 0,
+  name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', plan TEXT NOT NULL DEFAULT '',
+  response TEXT NOT NULL DEFAULT 'mitigate' CHECK(response IN ('mitigate','accept')),
+  accept_reason TEXT NOT NULL DEFAULT '',
+  probability TEXT NOT NULL DEFAULT '' CHECK(probability IN ('','L','M','H')),
+  impact TEXT NOT NULL DEFAULT '' CHECK(impact IN ('','L','M','H')),
+  r_is_a INTEGER NOT NULL DEFAULT 0, created_at TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS mitigant(
+  id INTEGER PRIMARY KEY,
+  risk_id INTEGER NOT NULL REFERENCES risk(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL DEFAULT 0,
+  text TEXT NOT NULL, is_control INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT '' CHECK(status IN ('','Not started','Planned','Implemented','Tested')),
+  testing TEXT NOT NULL DEFAULT '', handed_to TEXT NOT NULL DEFAULT '',
+  r_is_a INTEGER NOT NULL DEFAULT 0, created_at TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS mitigant_task(
+  mitigant_id INTEGER NOT NULL REFERENCES mitigant(id) ON DELETE CASCADE,
+  task_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
+  PRIMARY KEY(mitigant_id, task_id));
+CREATE INDEX IF NOT EXISTS mitigant_task_t ON mitigant_task(task_id);
+CREATE TABLE IF NOT EXISTS risk_party(
+  risk_id INTEGER NOT NULL REFERENCES risk(id) ON DELETE CASCADE,
+  party_id INTEGER NOT NULL REFERENCES party(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK(role IN ('R','A')), PRIMARY KEY(risk_id, party_id));
+CREATE TABLE IF NOT EXISTS mitigant_party(
+  mitigant_id INTEGER NOT NULL REFERENCES mitigant(id) ON DELETE CASCADE,
+  party_id INTEGER NOT NULL REFERENCES party(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK(role IN ('R','A')), PRIMARY KEY(mitigant_id, party_id));
+`;
+const SCHEMA_ALL = SCHEMA_V1 + SCHEMA_V2 + SCHEMA_V4;
+// Changes CREATE ... IF NOT EXISTS can't express: v3 task.r_is_a (DECISIONS #48); v4 notes on risks and mitigants too.
+function upgradeTables(d) {
+  const cols = t => d.exec(`PRAGMA table_info(${t})`)[0].values.map(r => r[1]);
+  if (!cols("task").includes("r_is_a")) d.run("ALTER TABLE task ADD COLUMN r_is_a INTEGER NOT NULL DEFAULT 0");
+  if (!cols("note").includes("risk_id")) d.run(`
+    CREATE TABLE note_v4(
+      id INTEGER PRIMARY KEY,
+      task_id INTEGER REFERENCES task(id) ON DELETE CASCADE,
+      risk_id INTEGER REFERENCES risk(id) ON DELETE CASCADE,
+      mitigant_id INTEGER REFERENCES mitigant(id) ON DELETE CASCADE,
+      body TEXT NOT NULL, author TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT,
+      CHECK((task_id IS NOT NULL) + (risk_id IS NOT NULL) + (mitigant_id IS NOT NULL) = 1));
+    INSERT INTO note_v4(id, task_id, body, author, created_at, updated_at) SELECT id, task_id, body, author, created_at, updated_at FROM note;
+    DROP TABLE note; ALTER TABLE note_v4 RENAME TO note;
+    CREATE INDEX IF NOT EXISTS note_task ON note(task_id, created_at);
+    CREATE INDEX IF NOT EXISTS note_risk ON note(risk_id, created_at);
+    CREATE INDEX IF NOT EXISTS note_mit ON note(mitigant_id, created_at);`);
 }
 
 const tableExists = (d, name) => !!d.exec("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", [name])[0];
@@ -96,14 +143,14 @@ const tableExists = (d, name) => !!d.exec("SELECT 1 FROM sqlite_master WHERE typ
 function migrate(d) {
   const ver = d.exec("PRAGMA user_version")[0].values[0][0];
   if (ver > SCHEMA_VERSION) throw new Error(`This file was made by a newer version of the app (schema ${ver}). Please use the newer app.`);
-  if (ver === SCHEMA_VERSION) { d.run(SCHEMA_ALL); ensureColumns(d); return ""; }
+  if (ver === SCHEMA_VERSION) { d.run(SCHEMA_ALL); upgradeTables(d); return ""; }
   let note = "";
   d.run("BEGIN");
   try {
     const legacy = tableExists(d, "tasks"); // proof-of-concept layout
     const oldRev = legacy && tableExists(d, "meta") ? +(d.exec("SELECT value FROM meta WHERE key='rev'")[0]?.values[0][0] ?? 0) : 0;
     if (legacy && tableExists(d, "meta")) d.run("ALTER TABLE meta RENAME TO meta_v0");
-    d.run(SCHEMA_ALL); ensureColumns(d);
+    d.run(SCHEMA_ALL); upgradeTables(d);
     if (legacy) {
       d.run("INSERT INTO project(name, created_at) VALUES ('Imported plan', ?)", [nowIso()]);
       const pid = d.exec("SELECT last_insert_rowid()")[0].values[0][0];

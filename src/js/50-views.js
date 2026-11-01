@@ -35,10 +35,18 @@ const initials = n => n.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].t
 // ---------- Party picker (R/A cells, record form) ----------
 function openPartyPicker(rect, taskId, role) {
   const t = M.tasks.get(taskId); if (!t) return;
-  const current = new Set(rolesOf(taskId, role).map(r => r.party_id));
-  const others = new Map(rolesOf(taskId).filter(r => r.role !== role).map(r => [r.party_id, r.role]));
+  openPartyPickerFor(rect, {
+    title: `${ROLE_NAMES[role]}: ${t.wbs} ${t.name}`, role,
+    current: rolesOf(taskId, role).map(r => r.party_id),
+    others: new Map(rolesOf(taskId).filter(r => r.role !== role).map(r => [r.party_id, r.role])),
+    save: ids => mutate(`Task ${t.wbs}: ${ROLE_NAMES[role]} → ${ids.map(partyName).join(", ") || "none"}`, () => opSetRoleParties(taskId, role, ids)),
+  });
+}
+// Generic picker: { title, role, current: [ids], others: Map(id → role), save(ids), onDone? }.
+function openPartyPickerFor(rect, o) {
+  const current = new Set(o.current);
   const box = h("div");
-  box.append(h("h4", {}, `${ROLE_NAMES[role]}: ${t.wbs} ${t.name}`));
+  box.append(h("h4", {}, o.title));
   const search = h("input", { type: "search", placeholder: "Search people & teams…", style: { width: "100%" } });
   const list = h("div", { class: "pick" });
   const all = [...M.people, ...M.teams].filter(p => p.active || current.has(p.id));
@@ -48,7 +56,7 @@ function openPartyPicker(rect, taskId, role) {
       if (s && !p.name.toLowerCase().includes(s) && !p.email.toLowerCase().includes(s)) continue;
       const cb = h("input", { type: "checkbox", checked: current.has(p.id) });
       cb.addEventListener("change", () => { cb.checked ? current.add(p.id) : current.delete(p.id); });
-      list.append(h("label", {}, cb, (p.kind === "team" ? "👥 " : "") + p.name, others.has(p.id) ? h("span", { class: "sub" }, `now ${others.get(p.id)}`) : p.kind === "team" ? h("span", { class: "sub" }, "team") : null));
+      list.append(h("label", {}, cb, (p.kind === "team" ? "👥 " : "") + p.name, o.others.has(p.id) ? h("span", { class: "sub" }, `now ${o.others.get(p.id)}`) : p.kind === "team" ? h("span", { class: "sub" }, "team") : null));
     }
     if (!list.children.length) list.append(h("div", { class: "hint", style: { padding: "6px" } }, all.length ? "No match." : "No people yet."));
   };
@@ -58,18 +66,18 @@ function openPartyPicker(rect, taskId, role) {
     let pid; if (mutate(`Added ${kind} ${name}`, () => { pid = opAddParty(kind, name); })) { current.add(pid); const p = M.parties.get(pid); if (p) all.push(p); search.value = ""; draw(); }
   };
   draw();
+  const done = () => { if (o.onDone) o.onDone(); else $("gridBody").focus(); };
   const save = () => {
     closePop(false);
     const ids = [...current];
-    const before = rolesOf(taskId, role).map(r => r.party_id).sort().join();
-    if (before !== ids.slice().sort().join()) mutate(`Task ${t.wbs}: ${ROLE_NAMES[role]} → ${ids.map(partyName).join(", ") || "none"}`, () => opSetRoleParties(taskId, role, ids));
-    $("gridBody").focus();
+    if (o.current.slice().sort().join() !== ids.slice().sort().join()) o.save(ids);
+    done();
   };
-  search.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); save(); } if (e.key === "Escape") { closePop(); $("gridBody").focus(); } });
+  search.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); save(); } if (e.key === "Escape") { closePop(); done(); } });
   box.append(search, list, h("div", { class: "acts" },
     h("button", { onclick: () => addNew("person") }, "＋ Person"), h("button", { onclick: () => addNew("team") }, "＋ Team"),
     h("span", { class: "spacer" }), h("button", { class: "primary", onclick: save }, "Done")));
-  if (role === "A" && current.size > 1) box.prepend(h("div", { class: "msg warn" }, "RACI expects exactly one Accountable."));
+  if (o.role === "A" && current.size > 1) box.prepend(h("div", { class: "msg warn" }, "RACI expects exactly one Accountable."));
   openPop(rect.left, rect.bottom + 4, box, save);
 }
 
@@ -130,7 +138,7 @@ function initRaci() {
 }
 
 // ---------- People & teams ----------
-function assignmentCounts() { const c = new Map(); for (const r of q("SELECT party_id, COUNT(*) n FROM raci GROUP BY party_id")) c.set(r.party_id, r.n); return c; }
+function assignmentCounts() { const c = new Map(); for (const r of q("SELECT party_id, COUNT(*) n FROM (SELECT party_id FROM raci UNION ALL SELECT party_id FROM risk_party UNION ALL SELECT party_id FROM mitigant_party) GROUP BY party_id")) c.set(r.party_id, r.n); return c; }
 function renderPeople() {
   const counts = assignmentCounts();
   const pl = $("peopleList"), tl = $("teamList"); pl.innerHTML = ""; tl.innerHTML = "";
@@ -188,7 +196,7 @@ function editParty(id, kind) {
   };
   const del = () => {
     const n = assignmentCounts().get(id) || 0;
-    if (!confirm(`Delete ${p.name}? ${n ? `They are assigned to ${n} task(s); those assignments will be removed. Consider marking them inactive instead.` : ""}`)) return;
+    if (!confirm(`Delete ${p.name}? ${n ? `They hold ${n} task or risk role(s); those will be removed. Consider marking them inactive instead.` : ""}`)) return;
     if (mutate(`Deleted ${p.kind} ${p.name}`, () => opDeleteParty(id))) closeModal();
   };
   const foot = h("div", { class: "modal-f" }, id ? h("button", { class: "danger", onclick: del }, "Delete") : null, h("span", { class: "spacer" }), h("button", { onclick: closeModal }, "Cancel"), h("button", { class: "primary", onclick: save }, "Save"));

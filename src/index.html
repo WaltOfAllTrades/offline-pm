@@ -15,6 +15,7 @@
   </div>
   <nav class="tabs" role="tablist">
     <button class="tab active" data-view="plan">Plan</button>
+    <button class="tab" data-view="risks">Risks <span id="riskGapCount" class="badge" hidden title="Risks with gaps"></span></button>
     <button class="tab" data-view="raci">RACI matrix</button>
     <button class="tab" data-view="people">People &amp; teams</button>
     <button class="tab" data-view="issues">Issues <span id="issueBadge" class="badge" hidden></span></button>
@@ -32,6 +33,7 @@
       <button data-act="reconnect" id="mReconnect" hidden>Reconnect to file</button>
       <hr>
       <button data-act="import">Import from Excel / CSV…</button>
+      <button data-act="riskImport">Import risks from Excel / CSV…</button>
       <button data-act="xlsx">Export to Excel (.xlsx)</button>
       <button data-act="csv">Export tasks (.csv)</button>
       <hr>
@@ -85,6 +87,25 @@
       <div class="gantt-pane" id="ganttPane">
         <div class="gantt-head" id="ganttHead"><svg id="ganttHeadSvg"></svg></div>
         <div class="gantt-body" id="ganttBody"><svg id="ganttSvg"></svg></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="view-risks" class="view" hidden>
+    <div class="toolbar">
+      <div class="grp"><button id="addRiskBtn" class="primary" title="New risk">＋ Risk</button></div>
+      <div class="grp seg" id="riskSeg"><button data-f="all" class="on">All</button><button data-f="gaps" title="Risks with something not covered">Gaps</button></div>
+      <div class="grp"><input id="riskSearch" type="search" placeholder="Filter risks…" size="16"></div>
+      <div class="spacer"></div>
+      <span class="hint">Drag ⠿ onto a task to link it, or between tasks to create one</span>
+      <div class="grp"><button id="riskImportBtn">Import risks…</button><button id="closeoutBtn">Closeout report</button></div>
+    </div>
+    <div class="split" id="riskSplit">
+      <section id="riskFormPane" class="form-pane" aria-hidden="true"></section>
+      <div class="rk-pane" id="riskBody"></div>
+      <div class="rp-pane">
+        <div class="rp-head"><b>Plan</b><input id="planSearch" type="search" placeholder="Find task…"></div>
+        <div class="rp-list" id="riskPlanList"></div>
       </div>
     </div>
   </section>

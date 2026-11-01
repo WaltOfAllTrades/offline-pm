@@ -199,7 +199,7 @@ window.runPmTests = async function () {
       "INSERT INTO deps VALUES (2,1),(3,2);");
     const bytes = d.export(); d.close();
     P.db.installDb(bytes); P.M.projectId = null; P.refresh();
-    eq(P.scalar("PRAGMA user_version"), 3); eq(P.db.rev, 7, "rev kept");
+    eq(P.scalar("PRAGMA user_version"), 4); eq(P.db.rev, 7, "rev kept");
     eq(P.M.order.map(t => [t.name, t.ST]), [["One", "Done"], ["Two", "In progress"], ["Three", "Not started"]]);
     eq(P.M.deps.length, 2); ok(!P.scalar("select count(*) from sqlite_master where name='tasks'"), "old table dropped");
   });
@@ -378,7 +378,7 @@ window.runPmTests = async function () {
     const d = new P.SQL.Database(P.db.exportBytes()); d.run("DROP TABLE note; PRAGMA user_version = 1;");
     const bytes = d.export(); d.close();
     P.db.installDb(bytes); P.M.projectId = null; P.refresh();
-    eq(P.scalar("PRAGMA user_version"), 3); ok(P.scalar("select count(*) from sqlite_master where name='note'"), "note table created");
+    eq(P.scalar("PRAGMA user_version"), 4); ok(P.scalar("select count(*) from sqlite_master where name='note'"), "note table created");
     eq(P.M.order.map(t => t.name), ["Keep me"]);
     m(() => O.opAddNote(P.M.order[0].id, "works after upgrade")); eq(P.notesFor(P.M.order[0].id).length, 1);
   });
@@ -591,8 +591,219 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     const d = new P.SQL.Database(P.db.exportBytes()); d.run("ALTER TABLE task DROP COLUMN r_is_a; PRAGMA user_version = 2;");
     const bytes = d.export(); d.close();
     P.db.installDb(bytes); P.M.projectId = null; P.refresh();
-    eq(P.scalar("PRAGMA user_version"), 3); eq(P.M.order[0].r_is_a, 0);
+    eq(P.scalar("PRAGMA user_version"), 4); eq(P.M.order[0].r_is_a, 0);
     m(() => O.opSetRIsA(P.M.order[0].id, true)); eq(P.M.order[0].r_is_a, 1);
+  });
+  // ---------- Risks and mitigants ----------
+  const R = P.risk;
+  const rk = id => P.M.riskById.get(id), mt = id => P.M.mitById.get(id);
+
+  await test("risks", "status rules: manual without tasks, follows tasks, Tested by hand, controls need Tested", () => {
+    fresh(); const t1 = T("Do it"); let r, a, c;
+    m(() => { r = O.opAddRisk({ name: "Vendor late" }); a = O.opAddMitigant(r, "Sign backup vendor"); c = O.opAddMitigant(r, "Weekly vendor review", null, { is_control: 1 }); });
+    eq([mt(a).eff, mt(a).achieved], ["Not started", false]); ok(mt(a).gaps.length, "gap: no task and not started");
+    eq(rk(r).status, "Mitigating"); ok(rk(r).gaps.some(g => /mitigants? ha(s|ve) gaps/.test(g)), "risk gap names its mitigants"); ok(rk(r).gaps.includes("No Accountable"));
+    m(() => O.opUpdateMitigant(a, { status: "Implemented" })); eq([mt(a).eff, mt(a).achieved], ["Implemented", true], "manual status without tasks");
+    m(() => O.opLinkTask(c, t1)); eq(mt(c).eff, "Planned", "linked task not done → Planned");
+    m(() => O.opSetField(t1, "status", "Done")); eq([mt(c).eff, mt(c).achieved], ["Implemented", false], "control implemented but not achieved");
+    ok(mt(c).gaps.includes("Control implemented but not tested"));
+    m(() => O.opUpdateMitigant(c, { status: "Tested" })); eq([mt(c).eff, mt(c).achieved], ["Tested", true]);
+    eq(rk(r).status, "Mitigated"); eq(rk(r).achievedCount, 2);
+    m(() => O.opUpdateRisk(r, { response: "accept" })); eq(rk(r).status, "Accepted"); ok(rk(r).gaps.includes("Accepted without a reason"));
+    m(() => O.opDelete(t1)); eq(mt(c).tasks.length, 0, "deleting the task removes the link");
+  });
+
+  await test("risks", "Responsible / Accountable on risks and mitigants, inheritance and the same-as switch", () => {
+    fresh(); let r, mi, ana, ben;
+    m(() => { ana = O.opAddParty("person", "Ana"); ben = O.opAddParty("person", "Ben"); r = O.opAddRisk({ name: "R" }); mi = O.opAddMitigant(r, "M"); O.opSetRecParties("risk", r, "A", [ana]); });
+    eq(P.M.mitById.get(mi).parties.length, 0);
+    const accM = () => { const x = mt(mi); const own = x.parties.filter(p => p.role === "A"); return own.length ? own : rk(r).parties.filter(p => p.role === "A"); };
+    eq(accM().map(p => p.party_id), [ana], "mitigant inherits the risk's Accountable");
+    m(() => { O.opSetRecParties("mitigant", mi, "R", [ben]); O.opSetRecParties("mitigant", mi, "A", [ben]); });
+    eq(mt(mi).parties.map(p => [p.party_id, p.role]), [[ben, "A"]], "a party holds one role: R moved to A");
+    m(() => O.opSetRecRIsA("mitigant", mi, true)); eq(mt(mi).r_is_a, 1);
+    m(() => O.opSetRecParties("mitigant", mi, "R", [ana])); eq(mt(mi).r_is_a, 0, "picking a Responsible ends same-as");
+  });
+
+  await test("risks", "split a mitigation plan into mitigants", () => {
+    eq(R.splitMitigationPlan("Start early. Freeze content two weeks out! Weekly review? E.g. Q3 is fine."), ["Start early.", "Freeze content two weeks out!", "Weekly review?", "E.g. Q3 is fine."]);
+    eq(R.splitMitigationPlan("- First thing\n• Second thing\n3) Third thing\n\n"), ["First thing", "Second thing", "Third thing"]);
+    eq(R.splitMitigationPlan("1. Hire a backup vendor; 2. Review weekly"), ["Hire a backup vendor;", "Review weekly"], "inline numbering");
+    eq(R.splitMitigationPlan(""), []);
+  });
+
+  await test("risks", "＋ Task: creates a linked task under Risk mitigation or at a spot, carrying R/A", () => {
+    fresh(); const a = T("A"), b = T("B"); let r, mi, ana, ben, id1, id2;
+    m(() => { ana = O.opAddParty("person", "Ana"); ben = O.opAddParty("person", "Ben"); r = O.opAddRisk({ name: "R" }); mi = O.opAddMitigant(r, "Keep a 2-week buffer in the schedule for migration rework"); O.opSetRecParties("risk", r, "A", [ana]); O.opSetRecParties("mitigant", mi, "R", [ben]); });
+    localStorage.removeItem("pm.mitParent." + P.M.projectId);
+    m(() => { id1 = O.opTaskFromMitigant(mi); });
+    const t = task(id1); eq(t.parent?.name, "Risk mitigation", "default parent created"); ok(t.name.startsWith("Implement: Keep a 2-week buffer"), t.name);
+    eq(mt(mi).tasks.map(x => x.id), [id1], "linked");
+    eq(P.M.raci.get(id1).map(x => [x.party_id, x.role]).sort(), [[ana, "A"], [ben, "R"]].sort(), "R/A copied (A inherited from risk)");
+    m(() => { id2 = O.opTaskFromMitigant(mi, { targetId: b, where: "before" }); });
+    eq(P.M.order.map(x => x.name).slice(0, 3), ["A", task(id2).name, "B"], "placed before B");
+    eq(mt(mi).eff, "Planned");
+  });
+
+  await test("migrate", "schema v3 file gains risks; notes rebuilt with task notes kept", () => {
+    fresh(); const a = T("Keep"); m(() => O.opAddNote(a, "old note"));
+    const d = new P.SQL.Database(P.db.exportBytes());
+    d.run(`DROP TABLE mitigant_party; DROP TABLE risk_party; DROP TABLE mitigant_task; DROP TABLE mitigant; DROP TABLE risk;
+      CREATE TABLE note_old(id INTEGER PRIMARY KEY, task_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE, body TEXT NOT NULL, author TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT);
+      INSERT INTO note_old SELECT id, task_id, body, author, created_at, updated_at FROM note; DROP TABLE note; ALTER TABLE note_old RENAME TO note; PRAGMA user_version = 3;`);
+    const bytes = d.export(); d.close();
+    P.db.installDb(bytes); P.M.projectId = null; P.refresh();
+    eq(P.scalar("PRAGMA user_version"), 4); eq(P.notesFor(P.M.order[0].id).map(n => n.body), ["old note"]);
+    let r; m(() => { r = O.opAddRisk({ name: "After upgrade" }); O.opAddRecNote("risk", r, "risk note"); });
+    eq(R.recNotes("risk", r).map(n => n.body), ["risk note"]);
+    throws(() => P.run("INSERT INTO note(body, created_at) VALUES ('orphan', 'x')"), /CHECK/, "a note belongs to exactly one record");
+  });
+
+  await test("risks-ui", "grid: rows, Enter adds the next mitigant, status select, gaps filter, ＋ Task", () => {
+    fresh(); const t1 = T("Build"); let r, mi;
+    m(() => { r = O.opAddRisk({ name: "Data loss" }); mi = O.opAddMitigant(r, "Nightly backups"); O.opAddRisk({ name: "Calm", response: "accept", accept_reason: "Low impact" }); });
+    P.switchView("risks");
+    eq(document.querySelectorAll("#riskBody tr.rk-risk").length, 2); eq(document.querySelectorAll("#riskBody tr.rk-mit").length, 1);
+    const ta = document.querySelector(`[data-keep="m${mi}:text"]`); ta.focus();
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    eq(rk(r).mitigants.map(x => x.text), ["Nightly backups", "New mitigant"], "Enter adds a mitigant after");
+    const newId = rk(r).mitigants[1].id; ok(document.activeElement === document.querySelector(`[data-keep="m${newId}:text"]`), "focus moves to the new mitigant");
+    const st = document.querySelector(`tr[data-mit="${mi}"] select.rk-st`); st.value = "Implemented"; st.dispatchEvent(new Event("change"));
+    eq(mt(mi).eff, "Implemented");
+    document.querySelector('#riskSeg button[data-f="gaps"]').click();
+    eq([...document.querySelectorAll("#riskBody tr.rk-risk")].map(x => +x.dataset.risk), [r], "gaps filter shows only risks with gaps");
+    document.querySelector('#riskSeg button[data-f="all"]').click();
+    [...document.querySelectorAll(`tr[data-mit="${newId}"] button`)].find(b => b.textContent === "＋ Task").click();
+    eq(mt(newId).tasks.length, 1, "＋ Task linked a new task");
+    ok(document.querySelector(`#riskPlanList .rp-row[data-id="${mt(newId).tasks[0].id}"] .sh`), "plan pane shows the shield");
+    P.switchView("plan");
+  });
+
+  await test("risks-ui", "drag a mitigant onto a task links it; between tasks creates one there; task onto mitigant links", async () => {
+    fresh(); const a = T("Alpha"), b = T("Beta"); let r, mi, mi2;
+    m(() => { r = O.opAddRisk({ name: "R" }); mi = O.opAddMitigant(r, "Mitigant one"); mi2 = O.opAddMitigant(r, "Mitigant two"); });
+    P.switchView("risks");
+    const center = el => { const q2 = el.getBoundingClientRect(); return { x: q2.left + q2.width / 2, y: q2.top + q2.height / 2, top: q2.top, h: q2.height }; };
+    const drag = (fromEl, x, y) => {
+      const s = center(fromEl);
+      fromEl.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, clientX: s.x, clientY: s.y }));
+      window.dispatchEvent(new PointerEvent("pointermove", { clientX: s.x + 20, clientY: s.y + 20 }));
+      window.dispatchEvent(new PointerEvent("pointermove", { clientX: x, clientY: y }));
+      window.dispatchEvent(new PointerEvent("pointerup", { clientX: x, clientY: y }));
+    };
+    const rowOf = id => document.querySelector(`#riskPlanList .rp-row[data-id="${id}"]`);
+    const handle = id => document.querySelector(`tr[data-mit="${id}"] .rk-drag`);
+    let c = center(rowOf(b)); drag(handle(mi), c.x, c.y);
+    eq(mt(mi).tasks.map(t => t.id), [b], "dropped on Beta → linked");
+    c = center(rowOf(b)); drag(handle(mi2), c.x, c.top + 2);
+    eq(P.M.order.map(t => t.name)[1].startsWith("Implement: Mitigant two"), true, "dropped above Beta → new task there");
+    c = center(document.querySelector(`tr[data-mit="${mi2}"]`)); drag(rowOf(a), c.x, c.y);
+    ok(mt(mi2).tasks.some(t => t.id === a), "task dragged onto mitigant → linked");
+    P.switchView("plan");
+  });
+
+  await test("risks-ui", "record panel: fields, notes on a risk, split dialog, mitigant tasks", () => {
+    fresh(); const t1 = T("Build"); let r;
+    m(() => { r = O.opAddRisk({ name: "Scope creep", plan: "Freeze scope at sign-off. Change board reviews every request." }); });
+    R.openRiskRecord("risk", r);
+    const fp2 = document.getElementById("riskFormPane"); ok(fp2.classList.contains("open"), "panel open");
+    ok(fp2.querySelector(".f-title h2").textContent.includes("Scope creep"));
+    [...fp2.querySelectorAll("button")].find(b => b.textContent.includes("Split into mitigants")).click();
+    const mt2 = document.querySelector("#modal textarea"); eq(mt2.value.split("\n"), ["Freeze scope at sign-off.", "Change board reviews every request."]);
+    [...document.querySelectorAll("#modal button")].find(b => b.textContent === "Add mitigants").click();
+    eq(rk(r).mitigants.length, 2, "split created mitigants");
+    const ta = fp2.querySelector(".n-compose"); ta.value = "Raised at steering"; ta.dispatchEvent(new Event("input"));
+    [...fp2.querySelectorAll("button")].find(b => b.textContent === "Post").click();
+    eq(R.recNotes("risk", r).map(n => n.body), ["Raised at steering"]);
+    const mid = rk(r).mitigants[0].id; R.openRiskRecord("mitigant", mid);
+    ok(fp2.querySelector(".f-kind").textContent === "Mitigant");
+    const sel = [...fp2.querySelectorAll("select")].find(s => s.options[0]?.textContent === "＋ Link a task…"); sel.value = String(t1); sel.dispatchEvent(new Event("change"));
+    eq(mt(mid).tasks.map(t => t.id), [t1], "linked from the record");
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    ok(!fp2.classList.contains("open"), "Esc closes");
+    P.switchView("plan");
+  });
+
+  await test("risks", "closeout summary, rows and Excel export", () => {
+    fresh(); const t1 = T("Done task"); let r, a2;
+    m(() => { r = O.opAddRisk({ name: "R1" }); a2 = O.opAddMitigant(r, "Do X"); O.opLinkTask(a2, t1); O.opSetField(t1, "status", "Done"); O.opAddMitigant(r, "Control Y", null, { is_control: 1, status: "Implemented", testing: "Sample 5 cases" });
+      O.opAddRisk({ name: "R2", response: "accept", accept_reason: "Cheap to absorb" }); });
+    eq(R.closeoutSummary(), "1 of 2 mitigants achieved · 0 of 1 risks mitigated · 1 accepted");
+    const rows = R.closeoutRows();
+    eq(rows.map(x => [x.risk, x.mitigant, x.achieved]), [["R1", "Do X", "Yes"], ["R1", "Control Y", "No"], ["R2", "", "n/a"]]); eq(rows[2].reason, "Cheap to absorb");
+    ok(rows[0].evidence.startsWith("1 Done task (Done"), rows[0].evidence);
+    const wb = P.io.exportWorkbook(); ok(wb.SheetNames.includes("Risks"), "Risks sheet in export");
+  });
+
+  await test("risks", "import a risk register: mapping, owners, LMH, split plans", () => {
+    fresh(); let ana; m(() => { ana = O.opAddParty("person", "Ana Ruiz"); });
+    const wb = XL.utils.book_new();
+    XL.utils.book_append_sheet(wb, XL.utils.aoa_to_sheet([
+      ["Risk register"], [],
+      ["Risk Title", "Risk Owner", "Likelihood", "Impact", "Mitigation Plan", "Response"],
+      ["Vendor late", "ana ruiz", "High", 2, "Backup vendor on standby. Weekly vendor call.", "Mitigate"],
+      ["Office move", "New Person", "low", "Medium", "", "Accept"],
+    ]), "Risks");
+    R.loadRiskImport("register.xlsx", XL.write(wb, { type: "array", bookType: "xlsx" }));
+    const items = R.riskImportItems();
+    eq(items.map(x => [x.name, x.A, x.probability, x.impact, x.response]), [["Vendor late", "ana ruiz", "H", "L", "mitigate"], ["Office move", "New Person", "L", "M", "accept"]]);
+    R.doRiskImport(items);
+    eq(P.M.risks.map(x => [x.name, x.mitigants.length]), [["Vendor late", 2], ["Office move", 0]]);
+    eq(P.M.risks[0].parties.map(p => p.party_id), [ana], "owner matched case-insensitively");
+    ok([...P.M.parties.values()].some(p => p.name === "New Person"), "unknown owner added as a person");
+    P.switchView("plan");
+  });
+
+  await test("risks", "task record Risks tab and outline shield", () => {
+    fresh(); const t1 = T("Build"); let r, mi;
+    m(() => { r = O.opAddRisk({ name: "R" }); mi = O.opAddMitigant(r, "M"); O.opLinkTask(mi, t1); });
+    P.switchView("plan"); P.renderAll();
+    ok(document.querySelector(`#gridRows .grow[data-id="${t1}"]`).textContent.includes("🛡1"), "shield in outline");
+    P.openRecord(t1); document.querySelector('#formPane .rel-tab[data-tab="risks"]').click();
+    eq(document.querySelector('#formPane .rel-tab[data-tab="risks"] .cnt').textContent, "1");
+    ok(document.querySelector("#formPane .rel-body").textContent.includes("M"), "lists the mitigant");
+    P.toggleForm(false);
+  });
+  await test("risks-review", "toLMH handles words, 1–3 and 1–5 scales, percentages", () => {
+    const L = R.toLMH;
+    eq(["Minor", "minor", "Moderate", "Major", "Very High", "low", "x"].map(v => L(v)), ["L", "L", "M", "H", "H", "L", ""]);
+    eq([1, 2, 3].map(v => L(v, 3)), ["L", "M", "H"], "1–3 scale"); eq([1, 2, 3, 4, 5].map(v => L(v, 5)), ["L", "L", "M", "H", "H"], "1–5 scale");
+    eq(["90%", "0.9", "0.2", "45%"].map(v => L(v)), ["H", "H", "L", "M"], "percentages and fractions");
+  });
+
+  await test("risks-review", "Backspace on an empty mitigant deletes it once, cleanly; not when it has content attached", () => {
+    fresh(); let r, a, b;
+    m(() => { r = O.opAddRisk({ name: "R" }); a = O.opAddMitigant(r, "Keep"); b = O.opAddMitigant(r, "Drop me"); O.opUpdateMitigant(a, { testing: "has notes" }); });
+    P.switchView("risks");
+    const errBefore = document.getElementById("toast").className;
+    let ta = document.querySelector(`[data-keep="m${b}:text"]`); ta.focus(); ta.value = ""; ta.dispatchEvent(new Event("input"));
+    ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
+    eq(rk(r).mitigants.map(x => x.text), ["Keep"]); ok(!/err/.test(document.getElementById("toast").className) || /err/.test(errBefore), "no 'not found' error");
+    eq(document.querySelectorAll("#riskBody table.rk").length, 1, "table rendered once");
+    ta = document.querySelector(`[data-keep="m${a}:text"]`); ta.focus(); ta.value = ""; ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
+    ok(P.M.mitById.has(a), "mitigant with testing notes is not quick-deleted");
+    ta.value = "Keep"; P.switchView("plan");
+  });
+
+  await test("risks-review", "import: title rows above the header, a Risk ID column, 'Smith, John' as one owner", () => {
+    fresh();
+    const wb = XL.utils.book_new();
+    XL.utils.book_append_sheet(wb, XL.utils.aoa_to_sheet([["Programme risk register", "Q3"], ["Risk ID", "Risk", "Owner", "Likelihood", "Impact", "Mitigation"], ["R-1", "Late vendor", "Smith, John", 3, 3, "Do A. Do B."]]), "Register");
+    R.loadRiskImport("reg.xlsx", XL.write(wb, { type: "array", bookType: "xlsx" }));
+    eq(P.risk.RI.headers[1], "Risk", "header row found below the title"); eq(P.risk.RI.map.name, 1, "Risk ID not used as the name");
+    const items = R.riskImportItems(); eq(items.map(x => [x.name, x.probability, x.impact]), [["Late vendor", "H", "H"]], "1–3 scale detected");
+    R.doRiskImport(items);
+    eq([...P.M.parties.values()].map(p => p.name), ["Smith, John"]);
+  });
+
+  await test("risks-review", "opening another file clears the risk selection; status select disables task-driven options", () => {
+    fresh(); const t1 = T("T"); let r, mi;
+    m(() => { r = O.opAddRisk({ name: "R" }); mi = O.opAddMitigant(r, "M"); O.opLinkTask(mi, t1); });
+    R.openRiskRecord("mitigant", mi);
+    const opts = [...document.querySelector(`tr[data-mit="${mi}"] select.rk-st`).options].map(o => [o.value, o.disabled]);
+    eq(opts, [["Not started", true], ["Planned", false], ["Implemented", true], ["Tested", false]]);
+    P.db.installDb(P.db.exportBytes()); eq([P.UI.riskSel, P.UI.riskForm], [null, false]);
+    P.refresh(); P.switchView("plan");
   });
   P.reset();
   const failed = results.filter(r => !r.pass);

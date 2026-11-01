@@ -76,7 +76,7 @@ function cellHtml(t, c) {
     case "wbs": return esc(t.wbs);
     case "name": {
       const caret = t.isSummary ? `<span class="caret" data-caret>${UI.collapsed.has(t.id) && !filterActive() ? "▶" : "▼"}</span>` : `<span class="caret"></span>`;
-      return `<span style="width:${t.depth * 16}px;flex:none"></span>${caret}${t.isMilestone ? '<span class="ms-ico">◆</span>' : ""}<span class="nm">${esc(t.name)}</span>${_warnSet.has(t.id) ? '<span class="warn-dot" title="Has warnings, see Issues">⚠</span>' : ""}${M.noteCount.get(t.id) ? `<span class="nc" title="${M.noteCount.get(t.id)} work note(s)">💬${M.noteCount.get(t.id)}</span>` : ""}<span class="open-rec" data-open title="Open record form">↗</span>`;
+      return `<span style="width:${t.depth * 16}px;flex:none"></span>${caret}${t.isMilestone ? '<span class="ms-ico">◆</span>' : ""}<span class="nm">${esc(t.name)}</span>${_warnSet.has(t.id) ? '<span class="warn-dot" title="Has warnings, see Issues">⚠</span>' : ""}${M.noteCount.get(t.id) ? `<span class="nc" title="${M.noteCount.get(t.id)} work note(s)">💬${M.noteCount.get(t.id)}</span>` : ""}${M.mitByTask.get(t.id) ? `<span class="nc" title="Implements ${M.mitByTask.get(t.id).length} risk mitigant(s)">🛡${M.mitByTask.get(t.id).length}</span>` : ""}<span class="open-rec" data-open title="Open record form">↗</span>`;
     }
     case "start": return fmtShort(t.S);
     case "finish": return fmtShort(t.F);

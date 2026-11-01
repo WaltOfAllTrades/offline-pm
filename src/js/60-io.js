@@ -552,6 +552,7 @@ function exportWorkbook() {
   for (const t of M.order) for (const n of notesFor(t.id).reverse()) notes.push([t.id, t.wbs, t.name, localTs(n.created_at), localTs(n.updated_at), n.body]);
   const nws = XLSX.utils.aoa_to_sheet(notes); nws["!cols"] = [7, 8, 32, 16, 16, 80].map(w => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, nws, "Notes");
+  if (M.risks.length) XLSX.utils.book_append_sheet(wb, closeoutSheet(), "Risks");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(meta), "_meta");
   return wb;
 }
