@@ -883,22 +883,25 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     P.db.installDb(P.db.exportBytes()); eq([P.UI.riskSel, P.UI.riskForm], [null, false]);
     P.refresh(); P.switchView("plan");
   });
-  await test("raci-ra", "matrix cycle includes A/R; task names open the record", () => {
+  // RACI cells: a click opens the role picker, Alt+click cycles (DECISIONS #78).
+  const altClick = el => el.dispatchEvent(new MouseEvent("click", { bubbles: true, altKey: true }));
+  const pickRole = (el, r) => { el.click(); [...document.querySelectorAll("#pop .role-btn")].find(b => b.textContent === (r || "—")).click(); };
+  await test("raci-ra", "matrix Alt+click cycle includes A/R; task names open the record", () => {
     fresh(); const a = T("Build"); let ana;
     m(() => { ana = O.opAddParty("person", "Ana"); });
     P.UI.raciBy = "person"; P.switchView("raci"); document.getElementById("raciOnlyUsed").checked = false; P.renderAll();
     const cell = () => document.querySelector(`#raciWrap td.cell[data-t="${a}"][data-p="${ana}"]`);
-    const seen = []; for (let i = 0; i < 6; i++) { cell().click(); seen.push(cell().textContent); }
+    const seen = []; for (let i = 0; i < 6; i++) { altClick(cell()); seen.push(cell().textContent); }
     eq(seen, ["R", "A", "A/R", "C", "I", ""]);
-    cell().click(); cell().click(); cell().click(); eq([cell().textContent, task(a).r_is_a], ["A/R", 1]);
-    cell().click(); eq([cell().textContent, task(a).r_is_a], ["C", 0], "leaving A/R turns the switch off");
+    altClick(cell()); altClick(cell()); altClick(cell()); eq([cell().textContent, task(a).r_is_a], ["A/R", 1]);
+    altClick(cell()); eq([cell().textContent, task(a).r_is_a], ["C", 0], "leaving A/R turns the switch off");
     document.querySelector(`#raciWrap [data-open="${a}"]`).click();
     eq([P.UI.view, P.UI.selId, P.UI.form], ["raci", a, true], "task link opens its record on the RACI page");
     const fp3 = document.getElementById("formPane"); ok(fp3.classList.contains("open") && document.getElementById("raciSplit").contains(fp3), "panel slides out beside the matrix");
     P.toggleForm(false); P.switchView("plan"); ok(document.getElementById("split").contains(fp3) || !fp3.classList.contains("open"), "panel not left open on the RACI page");
     document.getElementById("raciOnlyUsed").checked = true;
   });
-  await test("raci-team", "one team per person; team view rolls up members; click cycles the team; + hands the role to a member", () => {
+  await test("raci-team", "one team per person; team view rolls up members; picker sets the team's role; + hands the role to a member", () => {
     fresh(); const a = T("Build"); let ana, ben, eng, ops;
     m(() => { ana = O.opAddParty("person", "Ana Ruiz"); ben = O.opAddParty("person", "Ben Okafor"); eng = O.opAddParty("team", "Eng"); ops = O.opAddParty("team", "Ops"); O.opSetMembers(eng, [ana, ben]); });
     m(() => O.opSetMembers(ops, [ben])); eq([P.M.teamsOf.get(ben), P.M.members.get(eng)], [[ops], [ana]], "joining Ops moved Ben out of Eng");
@@ -906,13 +909,39 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     P.UI.raciBy = "team"; P.switchView("raci"); document.getElementById("raciOnlyUsed").checked = true; P.renderAll();
     const cell = tm => document.querySelector(`#raciWrap td.tcell[data-t="${a}"][data-team="${tm}"]`);
     eq([cell(eng).querySelector(".mr").textContent, cell(ops).querySelector(".mr").textContent], ["R·AR", "C·BO"], "members roll up under their team");
-    cell(eng).click(); eq(P.M.raci.get(a).find(r => r.party_id === eng)?.role, "R", "click cycles the team's own role");
-    cell(eng).click(); cell(eng).click(); eq([cell(eng).querySelector("b").textContent, task(a).r_is_a], ["A/R", 1]);
+    eq(cell(eng).querySelector(".mr").title, "Ana Ruiz: Responsible", "chip tooltip has the full name");
+    cell(eng).click(); ok([...document.querySelectorAll("#pop .hint")].some(d => d.textContent === "Ana Ruiz: Responsible"), "picker lists members by full name");
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    pickRole(cell(eng), "R"); eq(P.M.raci.get(a).find(r => r.party_id === eng)?.role, "R", "picker sets the team's own role");
+    const steps = P.db.undoDepth; pickRole(cell(eng), "A/R"); eq([cell(eng).querySelector("b").textContent, task(a).r_is_a, P.db.undoDepth - steps], ["A/R", 1, 1], "straight to A/R in one undo step");
     cell(eng).querySelector(".plus").click();
     [...document.querySelectorAll("#pop .pick-btn")].find(b => b.textContent.startsWith("Ana Ruiz")).click();
     eq(P.M.raci.get(a).map(r => [P.M.parties.get(r.party_id).name, r.role]).sort(), [["Ana Ruiz", "A"], ["Ben Okafor", "C"]], "team's A moved to Ana (A/R switch kept)");
     eq(task(a).r_is_a, 1);
     P.switchView("plan");
+  });
+
+  await test("raci-keys", "RACI matrix is a keyboard grid: one tab stop, arrows move, letters set roles, Enter opens the picker", () => {
+    fresh(); const a = T("Build"), b = T("Test"); let ana, ben;
+    m(() => { ana = O.opAddParty("person", "Ana"); ben = O.opAddParty("person", "Ben"); });
+    const by = P.UI.raciBy, only = document.getElementById("raciOnlyUsed"), wasOnly = only.checked;
+    P.UI.raciBy = "person"; only.checked = false; P.switchView("raci");
+    const wrap = document.getElementById("raciWrap"), cell = (t, p) => wrap.querySelector(`td.cell[data-t="${t}"][data-p="${p}"]`);
+    const key = (k, o = {}) => document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...o }));
+    eq(wrap.querySelector("table").getAttribute("role"), "grid");
+    eq(wrap.querySelectorAll('td.cell[tabindex="0"]').length, 1, "exactly one tab stop");
+    cell(a, ana).focus(); key("r"); eq(P.M.raci.get(a).map(r => [r.party_id, r.role]), [[ana, "R"]], "R sets Responsible");
+    eq(document.activeElement, cell(a, ana), "focus stays on the redrawn cell");
+    key("ArrowRight"); eq(document.activeElement, cell(a, ben), "ArrowRight");
+    key("A", { shiftKey: true }); eq([P.M.raci.get(a).find(r => r.party_id === ben).role, task(a).r_is_a], ["A", 1], "Shift+A sets A/R");
+    key("ArrowDown"); eq(document.activeElement, cell(b, ben), "ArrowDown"); key("c"); key("Delete");
+    eq(P.M.raci.get(b) || [], [], "Delete clears");
+    key("Home"); eq(document.activeElement, cell(b, ana), "Home");
+    eq(wrap.querySelectorAll('td.cell[tabindex="0"]').length, 1, "tab stop follows focus");
+    key("Enter"); ok(!document.getElementById("pop").hidden && document.activeElement.closest("#pop"), "Enter opens the picker, focused");
+    document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    ok(document.getElementById("pop").hidden && document.activeElement === cell(b, ana), "Escape closes it and focus returns to the cell");
+    P.UI.raciBy = by; only.checked = wasOnly; P.switchView("plan");
   });
 
   // ---------- Trust boundary and save safety (DECISIONS #29, #62–#64) ----------
@@ -1213,7 +1242,7 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     wrap.scrollTop = wrap.scrollHeight; wrap.dispatchEvent(new Event("scroll"));
     const lastTask = P.M.order.at(-1), cell = wrap.querySelector(`td.cell[data-t="${lastTask.id}"][data-p="${ana}"]`);
     ok(cell, "last row drawn after scrolling to the bottom");
-    cell.click(); eq(P.M.raci.get(lastTask.id)?.[0]?.role, "R", "click on a far row assigns");
+    pickRole(cell, "R"); eq(P.M.raci.get(lastTask.id)?.[0]?.role, "R", "click on a far row assigns");
     ok(wrap.querySelector(`td.cell[data-t="${lastTask.id}"][data-p="${ana}"]`)?.classList.contains("R"), "redrawn in place, still scrolled down");
     P.UI.raciBy = by; only.checked = wasOnly; P.switchView("plan");
   });

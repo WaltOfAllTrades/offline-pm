@@ -121,10 +121,14 @@ function openDepEditor(depId, x, y) {
 
 // ---------- RACI matrix ----------
 // By team (default): columns are teams; each cell shows the team's own role plus its members' roles (home team).
-// Click cycles the team's own role; the small + hands that role to one of the team's members (DECISIONS #61).
+// Click opens a picker for the team's own role; the small + hands that role to one of the team's members (DECISIONS #61).
+// The matrix is a keyboard grid too (DECISIONS #78): arrows move, R A C I set a role, Shift+A sets A/R, Delete clears,
+// Enter opens the picker, + opens the member picker. Alt+click keeps the old one-step cycle.
 UI.raciBy = lsGet("pm.raciBy", "team");
 const RACI_SEQ = ["", "R", "A", "A/R", "C", "I", ""];
 const roleLabel = (t, role) => role === "A" && t.r_is_a ? "A/R" : role;
+const roleTitle = r => r === "A/R" ? "Accountable and Responsible" : ROLE_NAMES[r] || "No role";
+let raciCur = ""; // data-* selector of the cell that holds the grid's one tab stop
 // The matrix is drawn like the outline (DECISIONS #77): only the rows near the viewport, between two spacer rows
 // that keep the scrollbar honest, so a big plan costs no more per click or scroll than a small one.
 let RX = null; // { cls, head, rows, rowHtml(t), cols, rowH }
@@ -137,18 +141,20 @@ function renderRaciRows(whole = false) {
   const wrap = $("raciWrap"), body = wrap.querySelector("tbody"); if (!RX?.rows || (!whole && !body)) return;
   const { scrollTop, scrollLeft } = wrap, rowH = RX.rowH, top = scrollTop - (wrap.querySelector("thead")?.offsetHeight ?? 60);
   const first = Math.max(0, Math.floor(top / rowH) - 10), last = Math.min(RX.rows.length, Math.ceil((top + wrap.clientHeight) / rowH) + 10);
-  const pad = n => n > 0 ? html`<tr class="pad"><td colspan="${RX.cols + 2}" style="height:${n * rowH}px;padding:0;border:0"></td></tr>` : "";
+  const pad = n => n > 0 ? html`<tr class="pad" aria-hidden="true"><td colspan="${RX.cols + 2}" style="height:${n * rowH}px;padding:0;border:0"></td></tr>` : "";
   const rows = html`${pad(first)}${RX.rows.slice(first, last).map(RX.rowHtml)}${pad(RX.rows.length - last)}`;
-  if (whole) setHtml(wrap, html`<table class="${RX.cls}"><thead>${RX.head}</thead><tbody>${rows}</tbody></table>`); else setHtml(body, rows);
+  if (whole) setHtml(wrap, html`<table class="${RX.cls}" role="grid" aria-label="RACI matrix" aria-rowcount="${RX.rows.length + 1}"><thead>${RX.head}</thead><tbody>${rows}</tbody></table>`); else setHtml(body, rows);
   wrap.scrollTop = scrollTop; wrap.scrollLeft = scrollLeft;
+  // Roving tab stop: Tab enters the grid at the last cell used (or the first drawn one), arrows do the rest.
+  (raciCur && wrap.querySelector("td.cell" + raciCur) || wrap.querySelector("td.cell"))?.setAttribute("tabindex", "0");
   const real = wrap.querySelector("tbody tr:not(.pad)")?.offsetHeight; // measured once the first rows are on screen
   if (real && real !== rowH) { RX.rowH = real; renderRaciRows(); }
 }
 function renderRaci() {
   $$("#raciBySeg button").forEach(b => b.classList.toggle("on", b.dataset.by === UI.raciBy));
   $("raciHint").textContent = UI.raciBy === "team"
-    ? "Click a cell to cycle the team's role: — R A A/R C I. Use + to hand it to a team member. Click a task to open its record"
-    : "Click a cell to cycle: — R A A/R C I. Click a task to open its record";
+    ? "Click a cell to pick the team's role; + hands it to a member. Keys: arrows, R A C I, Shift+A for A/R, Delete, +"
+    : "Click a cell to pick a role. Keys: arrows, R A C I, Shift+A for A/R, Delete clears";
   $("raciOnlyUsed").parentElement.lastChild.textContent = UI.raciBy === "team" ? " Only teams with assignments" : " Only people/teams with assignments";
   RX = RX && { rowH: RX.rowH };
   if (UI.raciBy === "team") return renderRaciTeams();
@@ -167,7 +173,7 @@ function renderRaci() {
       const r = map.get(p.id) || "";
       const ghost = !r && inh.inherited && inh.list.some(a => a.party_id === p.id);
       const ar = t.r_is_a && (r === "A" || ghost); // Responsible = Accountable
-      return html`<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" title="${p.name}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? r + (ar ? "/R" : "") : ghost ? html`<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
+      return html`<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" role="gridcell" tabindex="-1" title="${p.name}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? r + (ar ? "/R" : "") : ghost ? html`<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
     });
     return html`<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
   };
@@ -192,9 +198,9 @@ function renderRaciTeams() {
       const ownL = own ? roleLabel(t, own.role) : "";
       const top = ownL || (mem[0] ? roleLabel(t, mem[0].role) : "");
       const tip = [own ? `${c.name} (team): ${ownL}` : "", ...mem.map(r => `${partyName(r.party_id)}: ${roleLabel(t, r.role)}`)].filter(Boolean).join("\n") || `${c.name}: none`;
-      const chips = mem.map(r => html`<span class="mr r-${r.role}" data-p="${r.party_id}">${roleLabel(t, r.role)}·${initials(partyName(r.party_id))}</span>`);
-      const plus = c.team && (M.members.get(c.id) || []).length ? html`<button class="plus" data-plus="${c.id}" title="Give this to a member of ${c.name}">+</button>` : "";
-      return html`<td class="cell tcell ${top[0] || ""}" data-t="${t.id}" data-team="${c.id}" title="${tip}">${ownL ? html`<b>${ownL}</b>` : ""}${chips}${plus}</td>`;
+      const chips = mem.map(r => html`<span class="mr r-${r.role}" data-p="${r.party_id}" title="${partyName(r.party_id)}: ${roleTitle(roleLabel(t, r.role))}">${roleLabel(t, r.role)}·${initials(partyName(r.party_id))}</span>`);
+      const plus = c.team && (M.members.get(c.id) || []).length ? html`<button class="plus" data-plus="${c.id}" tabindex="-1" title="Give this to a member of ${c.name} (key: +)">+</button>` : "";
+      return html`<td class="cell tcell ${top[0] || ""}" data-t="${t.id}" data-team="${c.id}" role="gridcell" tabindex="-1" title="${tip}">${ownL ? html`<b>${ownL}</b>` : ""}${chips}${plus}</td>`;
     });
     return html`<tr class="${t.isSummary ? "summary" : ""}${t.id === UI.selId && UI.form ? " sel" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
   };
@@ -220,25 +226,83 @@ function teamMemberPicker(anchor, tid, teamId) {
   box.append(list);
   openPop(anchor.left, anchor.bottom + 4, box);
 }
+const raciCellRole = td => { const tid = +td.dataset.t, pid = +(td.dataset.team || td.dataset.p); return roleLabel(M.tasks.get(tid), rolesOf(tid).find(r => r.party_id === pid)?.role || ""); };
+// One change, one undo step. A/R = Accountable plus the task's "Responsible same as Accountable" switch (DECISIONS #48).
+function setRaciRole(td, next) {
+  if (td.dataset.team === "0") return; // "No team" column: display only
+  const tid = +td.dataset.t, pid = +(td.dataset.team || td.dataset.p), t = M.tasks.get(tid), cur = raciCellRole(td);
+  if (next === cur) return;
+  mutate(`RACI ${t.wbs}: ${partyName(pid)} → ${next || "none"}`, () => {
+    if (next === "A/R") { opSetRole(tid, pid, "A"); opSetRIsA(tid, true); return; }
+    if (cur === "A/R") opSetRIsA(tid, false);
+    opSetRole(tid, pid, next || null);
+  });
+}
+// The picker under a cell: every role in one click, and in the team view who of the team has which role, by full name.
+function raciPicker(td) {
+  const tid = +td.dataset.t, team = td.dataset.team, pid = +(team ?? td.dataset.p), t = M.tasks.get(tid), cur = raciCellRole(td);
+  const box = h("div", { class: "raci-pick" }, h("h4", {}, `${team === "0" ? "No team" : partyName(pid) + (team ? " (team)" : "")} · ${t.wbs} ${t.name}`));
+  if (team !== "0") {
+    const btns = h("div", { class: "roles" }, ...RACI_SEQ.slice(0, -1).map(r => h("button", {
+      class: "role-btn" + (r ? " r-" + r[0] : ""), "aria-pressed": String(r === cur), title: roleTitle(r),
+      onclick: () => { closePop(); setRaciRole(td, r); },
+    }, r || "—")));
+    btns.addEventListener("keydown", e => {
+      const all = [...btns.children], i = all.indexOf(document.activeElement);
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") { e.preventDefault(); all[(i + (e.key === "ArrowRight" ? 1 : all.length - 1)) % all.length].focus(); }
+    });
+    box.append(btns);
+  }
+  if (team) {
+    const mem = rolesOf(tid).filter(r => M.parties.get(r.party_id)?.kind === "person" && (homeTeam(r.party_id) ?? 0) === pid);
+    if (mem.length) box.append(h("div", { class: "pick" }, ...mem.map(r => h("div", { class: "hint" }, `${partyName(r.party_id)}: ${roleTitle(roleLabel(t, r.role))}`))));
+    if (team !== "0" && (M.members.get(pid) || []).length) box.append(h("div", { class: "acts" }, h("button", { onclick: () => { const a = td.getBoundingClientRect(); closePop(); teamMemberPicker(a, tid, pid); } }, `Give to a member of ${partyName(pid)}… (+)`)));
+  }
+  box.append(h("div", { class: "hint" }, "On a cell: R A C I, Shift+A for A/R, Delete clears, arrows move. Alt+click cycles."));
+  const a = td.getBoundingClientRect(); openPop(a.left, a.bottom + 4, box);
+  ($("pop").querySelector('[aria-pressed="true"]') || $("pop").querySelector("button"))?.focus();
+}
+// Move focus to another cell. Rows off screen aren't drawn, so scroll there and draw them first.
+function raciMove(td, dr, dc) {
+  const wrap = $("raciWrap"), cells = [...td.parentElement.querySelectorAll("td.cell")];
+  const ci = clamp(dc === -Infinity ? 0 : dc === Infinity ? cells.length - 1 : cells.indexOf(td) + dc, 0, cells.length - 1);
+  const ri = clamp(RX.rows.findIndex(t => t.id === +td.dataset.t) + dr, 0, RX.rows.length - 1), tid = RX.rows[ri].id;
+  const rowOf = () => wrap.querySelector(`td.cell[data-t="${tid}"]`)?.parentElement;
+  if (!rowOf()) { wrap.scrollTop = ri * RX.rowH - wrap.clientHeight / 2; renderRaciRows(); }
+  const el = rowOf()?.querySelectorAll("td.cell")[ci]; if (!el) return;
+  el.focus({ preventScroll: true });
+  // Bring it into view clear of the sticky header row and task column.
+  const head = wrap.querySelector("thead").offsetHeight, side = el.parentElement.querySelector(".tn").offsetWidth;
+  if (el.offsetTop - head < wrap.scrollTop) wrap.scrollTop = el.offsetTop - head;
+  else if (el.offsetTop + el.offsetHeight > wrap.scrollTop + wrap.clientHeight) wrap.scrollTop = el.offsetTop + el.offsetHeight - wrap.clientHeight;
+  if (el.offsetLeft - side < wrap.scrollLeft) wrap.scrollLeft = el.offsetLeft - side;
+  else if (el.offsetLeft + el.offsetWidth > wrap.scrollLeft + wrap.clientWidth) wrap.scrollLeft = el.offsetLeft + el.offsetWidth - wrap.clientWidth;
+}
 function initRaci() {
   $("raciWrap").addEventListener("click", e => {
     const link = e.target.closest("[data-open]"); if (link) { e.preventDefault(); openRecord(+link.dataset.open); redraw("raci"); return; }
     const plus = e.target.closest("[data-plus]");
     if (plus) { const td = plus.closest("td.cell"); teamMemberPicker(plus.getBoundingClientRect(), +td.dataset.t, +plus.dataset.plus); return; }
     const td = e.target.closest("td.cell"); if (!td) return;
-    if (td.dataset.team === "0") return; // "No team" column: display only
-    const tid = +td.dataset.t, pid = +(td.dataset.team || td.dataset.p), t = M.tasks.get(tid);
-    const role = rolesOf(tid).find(r => r.party_id === pid)?.role || "";
-    const cur = role === "A" && t.r_is_a ? "A/R" : role;
-    // A/R = Accountable plus the task's "Responsible same as Accountable" switch (DECISIONS #48).
-    const next = RACI_SEQ[RACI_SEQ.indexOf(cur) + 1];
-    const keep = $("raciWrap").scrollTop, keepL = $("raciWrap").scrollLeft;
-    mutate(`RACI ${t.wbs}: ${partyName(pid)} → ${next || "none"}`, () => {
-      if (next === "A/R") { opSetRole(tid, pid, "A"); opSetRIsA(tid, true); return; }
-      if (cur === "A/R") opSetRIsA(tid, false);
-      opSetRole(tid, pid, next || null);
-    });
-    $("raciWrap").scrollTop = keep; $("raciWrap").scrollLeft = keepL;
+    if (e.altKey) setRaciRole(td, RACI_SEQ[RACI_SEQ.indexOf(raciCellRole(td)) + 1]); // the old one-step cycle
+    else raciPicker(td);
+  });
+  $("raciWrap").addEventListener("focusin", e => {
+    const td = e.target.closest("td.cell"); if (!td) return;
+    for (const x of $("raciWrap").querySelectorAll('td.cell[tabindex="0"]')) if (x !== td) x.tabIndex = -1;
+    td.tabIndex = 0; raciCur = dataSel(td);
+  });
+  $("raciWrap").addEventListener("keydown", e => {
+    const td = e.target.closest("td.cell"); if (!td || e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key, page = Math.max(1, Math.floor($("raciWrap").clientHeight / RX.rowH) - 1);
+    const move = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1], Home: [0, -Infinity], End: [0, Infinity], PageUp: [-page, 0], PageDown: [page, 0] }[k];
+    const role = { r: "R", a: e.shiftKey ? "A/R" : "A", c: "C", i: "I" }[k.toLowerCase()] ?? (k === "Delete" || k === "Backspace" ? "" : null);
+    if (move) raciMove(td, ...move);
+    else if (role != null) setRaciRole(td, role);
+    else if (k === "Enter" || k === " " || k === "F2") raciPicker(td);
+    else if (k === "+" && td.querySelector("[data-plus]")) teamMemberPicker(td.getBoundingClientRect(), +td.dataset.t, +td.dataset.team);
+    else return;
+    e.preventDefault();
   });
   $$("#raciBySeg button").forEach(b => b.addEventListener("click", () => { UI.raciBy = b.dataset.by; lsSet("pm.raciBy", UI.raciBy); redraw("raci"); }));
   $("raciOnlyUsed").addEventListener("change", () => redraw("raci"));

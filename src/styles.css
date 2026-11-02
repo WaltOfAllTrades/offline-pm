@@ -411,6 +411,15 @@ table.raci.team td.tcell b{font-weight:700;margin-right:3px}
 table.raci.team .mr{display:inline-block;font-size:10.5px;font-weight:600;border-radius:7px;padding:0 4px;margin:0 1px;background:var(--line2);color:var(--ink)}
 table.raci.team .plus{position:absolute;top:1px;right:1px;width:15px;height:15px;line-height:12px;padding:0;border-radius:4px;font-size:12px;opacity:0;color:var(--accent)}
 table.raci.team td.tcell:hover .plus{opacity:1}
+table.raci.team td.tcell:focus .plus,table.raci.team td.tcell:focus-within .plus{opacity:.5}
+@media (hover:none){table.raci.team .plus{opacity:.5}}
+table.raci td.cell:focus{outline:none}
+table.raci td.cell:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.raci-pick .roles{display:flex;gap:4px;margin:6px 0}
+.raci-pick .role-btn{min-width:38px;font-weight:750}
+.raci-pick .role-btn.r-R{color:var(--R)} .raci-pick .role-btn.r-A{color:var(--A)} .raci-pick .role-btn.r-C{color:var(--C)} .raci-pick .role-btn.r-I{color:var(--I)}
+.raci-pick .role-btn[aria-pressed="true"]{background:var(--sel);border-color:var(--accent)}
+.raci-pick .acts{margin-top:6px}
 table.raci.team .mr.r-R{color:var(--R)} table.raci.team .mr.r-A{color:var(--A)} table.raci.team .mr.r-C{color:var(--C)} table.raci.team .mr.r-I{color:var(--I)}
 table.raci tr.sel td{outline:1px solid var(--accent);outline-offset:-1px}
 .tn-link{color:inherit;text-decoration:none}
