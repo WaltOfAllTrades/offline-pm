@@ -77,10 +77,21 @@ function refocus(root, mark, { typed = true } = {}) {
   return document.activeElement === el;
 }
 
+// { undo: true } adds an Undo button for the change just made. It only undoes while nothing else has changed since
+// (every change bumps rev), so it can never take back a later edit. Long messages and Undo stay longer; hovering holds them.
 let toastTimer;
-function toast(msg, kind = "") {
-  const t = $("toast"); t.textContent = msg; t.className = "show " + kind;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = "", kind === "err" ? 4500 : 2600);
+function toast(msg, kind = "", { undo: canUndo = false } = {}) {
+  const t = $("toast"), at = canUndo ? rev : null;
+  const hide = () => { t.className = ""; t.onpointerenter = t.onpointerleave = null; };
+  t.replaceChildren(msg); t.className = "show " + kind;
+  if (canUndo) {
+    t.append(" ", h("button", { class: "t-undo", onclick: () => { hide(); if (rev === at) undo(); else toast("Something else changed since. Use Undo (Ctrl+Z) to step back."); } }, "Undo"));
+    t.classList.add("act");
+  }
+  const ms = Math.max(kind === "err" ? 4500 : 2600, msg.length * 55) + (canUndo ? 5000 : 0);
+  clearTimeout(toastTimer); toastTimer = setTimeout(hide, ms);
+  t.onpointerenter = () => clearTimeout(toastTimer);
+  t.onpointerleave = () => { clearTimeout(toastTimer); toastTimer = setTimeout(hide, 2000); };
 }
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };

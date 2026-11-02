@@ -305,7 +305,27 @@ window.runPmTests = async function () {
     P.selectTask(a, { col: "pred" });
     P.cmd.cmdAdd("task"); const ed2 = document.querySelector(".cell-editor"); ok(ed2, "new task editor"); ed2.value = "second"; P.cmd.commitEdit(0, 0);
     eq(P.M.order.map(t => t.name), ["after", "second"]);
-    P.selectTask(P.M.order[1].id); P.cmd.gridKey(new KeyboardEvent("keydown", { key: "Tab" })); eq(P.M.order[1].wbs, "1.1", "Tab indents");
+    P.selectTask(P.M.order[1].id, { col: "name" }); P.cmd.gridKey(new KeyboardEvent("keydown", { key: "Tab" }));
+    eq([P.M.order[1].wbs, P.UI.col], ["2", "start"], "Tab moves to the next cell and doesn't indent");
+  });
+  await test("grid", "Tab past the last cell leaves the grid; Shift+Tab past the first one too", () => {
+    fresh(); const a = T("A"); P.switchView("plan");
+    const gb = document.getElementById("gridBody"), key = (o = {}) => { const ev = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true, ...o }); gb.dispatchEvent(ev); return ev.defaultPrevented; };
+    P.selectTask(a, { col: "A" }); ok(!key(), "not captured on the last column");
+    P.selectTask(a, { col: "name" }); ok(!key({ shiftKey: true }), "not captured going back from the first column");
+    ok(key(), "captured in the middle"); eq(P.UI.col, "start");
+  });
+  await test("undo", "delete offers Undo in the message; it stops working once something else changes", async () => {
+    fresh(); const a = T("A"), b = T("B"); P.switchView("plan");
+    P.selectTask(a); P.cmd.cmdDelete();
+    eq(P.M.order.map(t => t.name), ["B"], "deleted without a question");
+    const btn = () => document.querySelector("#toast .t-undo");
+    ok(btn(), "Undo offered"); btn().click(); P.drawNow();
+    eq(P.M.order.map(t => t.name), ["A", "B"], "Undo brought it back");
+    P.selectTask(b); P.cmd.cmdDelete(); const stale = btn();
+    m(() => O.opSetField(a, "name", "A2"));
+    stale.click(); P.drawNow();
+    eq(P.M.order.map(t => t.name), ["A2"], "a later change isn't undone by an old Undo");
   });
 
   await test("gantt", "grains and fit build sane scales", () => {

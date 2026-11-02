@@ -302,7 +302,7 @@ function mutate(desc, fn) {
   redoStack.length = 0;
   undoStack.push(snap); trimUndo();
   afterChange(desc);
-  if (opNotes.length) toast(opNotes.splice(0).join(" "));
+  if (opNotes.length) toast(opNotes.splice(0).join(" "), "", { undo: true }); // things the app did on its own: offer to take them back
   return true;
 }
 function afterChange(desc) { hooks.onChange(); queueSave(desc); }

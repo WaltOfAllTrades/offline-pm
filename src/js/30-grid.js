@@ -252,10 +252,13 @@ function cmdDelete() {
   const t = selTask(); if (!t) return;
   const n = countDesc(t);
   const notes = [t, ...M.order.slice(t.index + 1, t.index + 1 + n)].reduce((s, x) => s + (M.noteCount.get(x.id) || 0), 0);
-  const parts = [n ? `its ${n} subtask${n > 1 ? "s" : ""}` : "", notes ? `${notes} work note${notes > 1 ? "s" : ""}` : ""].filter(Boolean);
-  if (parts.length && !confirm(`Delete “${t.name}” and ${parts.join(" and ")}? (Undo is available.)`)) return;
+  const parts = [n ? `${n} subtask${n > 1 ? "s" : ""}` : "", notes ? `${notes} work note${notes > 1 ? "s" : ""}` : ""].filter(Boolean);
   const next = UI.rows.slice(t.row + 1).find(r => !isAncestor(t, r)) || UI.rows[t.row - 1]; // first visible row after the subtree
-  if (mutate(`Deleted “${t.name}”${n ? ` (+${n} subtasks)` : ""}`, () => opDelete(t.id))) selectTask(next && M.tasks.has(next.id) ? next.id : null);
+  // No "are you sure?": it deletes at once and offers Undo, which is quicker and harder to get wrong.
+  if (mutate(`Deleted “${t.name}”${n ? ` (+${n} subtasks)` : ""}`, () => opDelete(t.id))) {
+    selectTask(next && M.tasks.has(next.id) ? next.id : null);
+    toast(`Deleted “${shortText(t.name, 40)}”${parts.length ? ` with ${parts.join(" and ")}` : ""}`, "", { undo: true });
+  }
 }
 const countDesc = t => t.children.reduce((s, c) => s + 1 + countDesc(c), 0);
 
@@ -307,7 +310,9 @@ function gridKey(e) {
     case "PageUp": e.preventDefault(); return moveSel(-Math.floor($("gridBody").clientHeight / ROW));
     case "Home": if (ctrl) { e.preventDefault(); return UI.rows[0] && selectTask(UI.rows[0].id); } return;
     case "End": if (ctrl) { e.preventDefault(); return UI.rows.length && selectTask(UI.rows.at(-1).id); } return;
-    case "Tab": if (!t) return; e.preventDefault(); return cmdStructure(e.shiftKey ? "outdent" : "indent"); // no selection: Tab leaves the grid
+    // Tab moves along the row as in a spreadsheet, and past the last (or first) cell it leaves the grid. It no longer
+    // indents: Enter-then-Tab used to restructure the plan by accident (DECISIONS #72). Alt+Shift+→/← indent.
+    case "Tab": { if (!t) return; const c = colIndex(UI.col) + (e.shiftKey ? -1 : 1); if (c < 1 || c >= COLS.length) return; e.preventDefault(); return moveCol(e.shiftKey ? -1 : 1); }
     case "Enter": case "F2": e.preventDefault(); return startEdit();
     case "Insert": e.preventDefault(); return cmdAdd("task", ctrl);
     case "Delete": e.preventDefault(); return cmdDelete();

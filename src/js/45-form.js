@@ -284,7 +284,7 @@ function noteEntry(o, n) {
       const focus = () => { const ta = $(o.pane).querySelector(".n-edit"); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } };
       focus(); setTimeout(focus, 0); // again once a render held for the click (holdFormRender) has run
     } }, "Edit"),
-    editing ? null : h("button", { class: "link danger", onclick: () => { if (confirm("Delete this work note? (Undo is available.)")) mutate(`${label}: deleted a work note`, () => opDeleteNote(n.id)); } }, "Delete"));
+    editing ? null : h("button", { class: "link danger", onclick: () => { if (mutate(`${label}: deleted a work note`, () => opDeleteNote(n.id))) toast("Deleted a work note", "", { undo: true }); } }, "Delete"));
   let body;
   if (editing) {
     const ta = h("textarea", { class: "n-edit", "data-keep": "note-edit", rows: Math.min(10, n.body.split("\n").length + 1) });
@@ -351,7 +351,7 @@ function relDeps(t, dir) {
     type.addEventListener("change", ch); lag.addEventListener("change", ch);
     return h("tr", {}, h("td", {}, h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(o.id); } }, o.wbs)), h("td", {}, o.name),
       h("td", {}, type), h("td", {}, lag), h("td", { title: d.violated ? "Dates conflict with this link. Dates are never moved automatically." : "" }, d.violated ? "⚠ conflict" : "OK"),
-      h("td", {}, h("button", { class: "x", title: "Remove link", onclick: () => mutate("Removed link", () => opRemoveDep(d.id)) }, "✕")));
+      h("td", {}, h("button", { class: "x", title: "Remove link", onclick: () => { if (mutate("Removed link", () => opRemoveDep(d.id))) toast(`Removed link ${M.tasks.get(d.pred_id)?.wbs ?? ""} → ${M.tasks.get(d.succ_id)?.wbs ?? ""}`, "", { undo: true }); } }, "✕")));
   });
   const linked = new Set(list.map(d => dir === "in" ? d.pred_id : d.succ_id));
   const add = h("select", {}, h("option", { value: "" }, dir === "in" ? "＋ Add predecessor…" : "＋ Add successor…"),

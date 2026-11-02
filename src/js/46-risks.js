@@ -156,14 +156,14 @@ function statusSelect(m, cls = "") {
 const openBtn = (kind, id) => h("button", { class: "open-rec rk-open", title: "Open record", onclick: e => { e.stopPropagation(); openRiskRecord(kind, id); } }, "↗");
 const isSel = rec => UI.riskSel && UI.riskSel.kind === rec.kind && UI.riskSel.id === rec.id;
 function focusRisk(key, select) { UI.riskFocus = { key, select }; redraw("risks"); }
+// Deletes at once and offers Undo, like tasks.
 function deleteRiskRec(r) {
   const n = r.mitigants.length;
-  if (n && !confirm(`Delete risk “${r.name}” and its ${n} mitigant${n > 1 ? "s" : ""}? (Undo is available.)`)) return;
-  mutate(`Deleted risk “${r.name}”`, () => opDeleteRisk(r.id));
+  if (mutate(`Deleted risk “${r.name}”`, () => opDeleteRisk(r.id))) toast(`Deleted risk “${shortText(r.name, 40)}”${n ? ` and its ${n} mitigant${n > 1 ? "s" : ""}` : ""}`, "", { undo: true });
 }
 function deleteMitRec(m) {
-  if (m.tasks.length && !confirm(`Delete this mitigant? It is linked to ${m.tasks.length} task(s); the tasks stay. (Undo is available.)`)) return;
-  mutate("Deleted mitigant", () => opDeleteMitigant(m.id));
+  const n = m.tasks.length;
+  if (mutate("Deleted mitigant", () => opDeleteMitigant(m.id))) toast(`Deleted mitigant${n ? `; its ${n} linked task${n > 1 ? "s stay" : " stays"} in the plan` : ""}`, "", { undo: true });
 }
 function quickTask(m, place) {
   let id;

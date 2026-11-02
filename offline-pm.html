@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-7pRE1W+M/kueZmPnjjP+ocWa4N25IH4XFFQ0fkYQhiQ='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-n5Qym97lxARpNycr+2vpuRsxlk7EOD4feE5+rQj0wkA='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
 <title>Offline PM</title>
 <style>:root{
   --bg:#f5f6f8; --panel:#fff; --panel2:#fafbfc; --ink:#1b1f24; --muted:#667085; --line:#e4e7ec; --line2:#eef0f3;
@@ -254,7 +254,8 @@ table.map select{max-width:240px}
 kbd{font:11.5px ui-monospace,Consolas,monospace;background:var(--line2);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
 
 #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);padding:9px 14px;border-radius:8px;background:var(--ink);color:var(--bg);opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;z-index:100}
-#toast.show{opacity:1}#toast.err{background:var(--err-bg);color:var(--err);border:1px solid var(--err);font-weight:600}
+#toast.show{opacity:1}#toast.act{pointer-events:auto}
+#toast .t-undo{margin-left:10px;padding:2px 10px;border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit;font-weight:700}#toast.err{background:var(--err-bg);color:var(--err);border:1px solid var(--err);font-weight:600}
 
 /* print */
 /* record form */
@@ -497,8 +498,8 @@ table.raci tr.sel td{outline:1px solid var(--accent);outline-offset:-1px}
         <button id="addMsBtn" title="New milestone">◆ Milestone</button>
       </div>
       <div class="grp">
-        <button id="outdentBtn" class="icon" title="Outdent (Shift+Tab)">⇤</button>
-        <button id="indentBtn" class="icon" title="Indent (Tab)">⇥</button>
+        <button id="outdentBtn" class="icon" title="Outdent (Alt+Shift+←)">⇤</button>
+        <button id="indentBtn" class="icon" title="Indent (Alt+Shift+→)">⇥</button>
         <button id="upBtn" class="icon" title="Move up (Alt+Shift+↑)">↑</button>
         <button id="downBtn" class="icon" title="Move down (Alt+Shift+↓)">↓</button>
         <button id="delBtn" class="icon" title="Delete task (Delete)">🗑</button>
@@ -903,10 +904,21 @@ function refocus(root, mark, { typed = true } = {}) {
   return document.activeElement === el;
 }
 
+// { undo: true } adds an Undo button for the change just made. It only undoes while nothing else has changed since
+// (every change bumps rev), so it can never take back a later edit. Long messages and Undo stay longer; hovering holds them.
 let toastTimer;
-function toast(msg, kind = "") {
-  const t = $("toast"); t.textContent = msg; t.className = "show " + kind;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = "", kind === "err" ? 4500 : 2600);
+function toast(msg, kind = "", { undo: canUndo = false } = {}) {
+  const t = $("toast"), at = canUndo ? rev : null;
+  const hide = () => { t.className = ""; t.onpointerenter = t.onpointerleave = null; };
+  t.replaceChildren(msg); t.className = "show " + kind;
+  if (canUndo) {
+    t.append(" ", h("button", { class: "t-undo", onclick: () => { hide(); if (rev === at) undo(); else toast("Something else changed since. Use Undo (Ctrl+Z) to step back."); } }, "Undo"));
+    t.classList.add("act");
+  }
+  const ms = Math.max(kind === "err" ? 4500 : 2600, msg.length * 55) + (canUndo ? 5000 : 0);
+  clearTimeout(toastTimer); toastTimer = setTimeout(hide, ms);
+  t.onpointerenter = () => clearTimeout(toastTimer);
+  t.onpointerleave = () => { clearTimeout(toastTimer); toastTimer = setTimeout(hide, 2000); };
 }
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
@@ -1313,7 +1325,7 @@ function mutate(desc, fn) {
   redoStack.length = 0;
   undoStack.push(snap); trimUndo();
   afterChange(desc);
-  if (opNotes.length) toast(opNotes.splice(0).join(" "));
+  if (opNotes.length) toast(opNotes.splice(0).join(" "), "", { undo: true }); // things the app did on its own: offer to take them back
   return true;
 }
 function afterChange(desc) { hooks.onChange(); queueSave(desc); }
@@ -2635,10 +2647,13 @@ function cmdDelete() {
   const t = selTask(); if (!t) return;
   const n = countDesc(t);
   const notes = [t, ...M.order.slice(t.index + 1, t.index + 1 + n)].reduce((s, x) => s + (M.noteCount.get(x.id) || 0), 0);
-  const parts = [n ? `its ${n} subtask${n > 1 ? "s" : ""}` : "", notes ? `${notes} work note${notes > 1 ? "s" : ""}` : ""].filter(Boolean);
-  if (parts.length && !confirm(`Delete “${t.name}” and ${parts.join(" and ")}? (Undo is available.)`)) return;
+  const parts = [n ? `${n} subtask${n > 1 ? "s" : ""}` : "", notes ? `${notes} work note${notes > 1 ? "s" : ""}` : ""].filter(Boolean);
   const next = UI.rows.slice(t.row + 1).find(r => !isAncestor(t, r)) || UI.rows[t.row - 1]; // first visible row after the subtree
-  if (mutate(`Deleted “${t.name}”${n ? ` (+${n} subtasks)` : ""}`, () => opDelete(t.id))) selectTask(next && M.tasks.has(next.id) ? next.id : null);
+  // No "are you sure?": it deletes at once and offers Undo, which is quicker and harder to get wrong.
+  if (mutate(`Deleted “${t.name}”${n ? ` (+${n} subtasks)` : ""}`, () => opDelete(t.id))) {
+    selectTask(next && M.tasks.has(next.id) ? next.id : null);
+    toast(`Deleted “${shortText(t.name, 40)}”${parts.length ? ` with ${parts.join(" and ")}` : ""}`, "", { undo: true });
+  }
 }
 const countDesc = t => t.children.reduce((s, c) => s + 1 + countDesc(c), 0);
 
@@ -2690,7 +2705,9 @@ function gridKey(e) {
     case "PageUp": e.preventDefault(); return moveSel(-Math.floor($("gridBody").clientHeight / ROW));
     case "Home": if (ctrl) { e.preventDefault(); return UI.rows[0] && selectTask(UI.rows[0].id); } return;
     case "End": if (ctrl) { e.preventDefault(); return UI.rows.length && selectTask(UI.rows.at(-1).id); } return;
-    case "Tab": if (!t) return; e.preventDefault(); return cmdStructure(e.shiftKey ? "outdent" : "indent"); // no selection: Tab leaves the grid
+    // Tab moves along the row as in a spreadsheet, and past the last (or first) cell it leaves the grid. It no longer
+    // indents: Enter-then-Tab used to restructure the plan by accident (DECISIONS #72). Alt+Shift+→/← indent.
+    case "Tab": { if (!t) return; const c = colIndex(UI.col) + (e.shiftKey ? -1 : 1); if (c < 1 || c >= COLS.length) return; e.preventDefault(); return moveCol(e.shiftKey ? -1 : 1); }
     case "Enter": case "F2": e.preventDefault(); return startEdit();
     case "Insert": e.preventDefault(); return cmdAdd("task", ctrl);
     case "Delete": e.preventDefault(); return cmdDelete();
@@ -3345,7 +3362,7 @@ function noteEntry(o, n) {
       const focus = () => { const ta = $(o.pane).querySelector(".n-edit"); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } };
       focus(); setTimeout(focus, 0); // again once a render held for the click (holdFormRender) has run
     } }, "Edit"),
-    editing ? null : h("button", { class: "link danger", onclick: () => { if (confirm("Delete this work note? (Undo is available.)")) mutate(`${label}: deleted a work note`, () => opDeleteNote(n.id)); } }, "Delete"));
+    editing ? null : h("button", { class: "link danger", onclick: () => { if (mutate(`${label}: deleted a work note`, () => opDeleteNote(n.id))) toast("Deleted a work note", "", { undo: true }); } }, "Delete"));
   let body;
   if (editing) {
     const ta = h("textarea", { class: "n-edit", "data-keep": "note-edit", rows: Math.min(10, n.body.split("\n").length + 1) });
@@ -3412,7 +3429,7 @@ function relDeps(t, dir) {
     type.addEventListener("change", ch); lag.addEventListener("change", ch);
     return h("tr", {}, h("td", {}, h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(o.id); } }, o.wbs)), h("td", {}, o.name),
       h("td", {}, type), h("td", {}, lag), h("td", { title: d.violated ? "Dates conflict with this link. Dates are never moved automatically." : "" }, d.violated ? "⚠ conflict" : "OK"),
-      h("td", {}, h("button", { class: "x", title: "Remove link", onclick: () => mutate("Removed link", () => opRemoveDep(d.id)) }, "✕")));
+      h("td", {}, h("button", { class: "x", title: "Remove link", onclick: () => { if (mutate("Removed link", () => opRemoveDep(d.id))) toast(`Removed link ${M.tasks.get(d.pred_id)?.wbs ?? ""} → ${M.tasks.get(d.succ_id)?.wbs ?? ""}`, "", { undo: true }); } }, "✕")));
   });
   const linked = new Set(list.map(d => dir === "in" ? d.pred_id : d.succ_id));
   const add = h("select", {}, h("option", { value: "" }, dir === "in" ? "＋ Add predecessor…" : "＋ Add successor…"),
@@ -3623,14 +3640,14 @@ function statusSelect(m, cls = "") {
 const openBtn = (kind, id) => h("button", { class: "open-rec rk-open", title: "Open record", onclick: e => { e.stopPropagation(); openRiskRecord(kind, id); } }, "↗");
 const isSel = rec => UI.riskSel && UI.riskSel.kind === rec.kind && UI.riskSel.id === rec.id;
 function focusRisk(key, select) { UI.riskFocus = { key, select }; redraw("risks"); }
+// Deletes at once and offers Undo, like tasks.
 function deleteRiskRec(r) {
   const n = r.mitigants.length;
-  if (n && !confirm(`Delete risk “${r.name}” and its ${n} mitigant${n > 1 ? "s" : ""}? (Undo is available.)`)) return;
-  mutate(`Deleted risk “${r.name}”`, () => opDeleteRisk(r.id));
+  if (mutate(`Deleted risk “${r.name}”`, () => opDeleteRisk(r.id))) toast(`Deleted risk “${shortText(r.name, 40)}”${n ? ` and its ${n} mitigant${n > 1 ? "s" : ""}` : ""}`, "", { undo: true });
 }
 function deleteMitRec(m) {
-  if (m.tasks.length && !confirm(`Delete this mitigant? It is linked to ${m.tasks.length} task(s); the tasks stay. (Undo is available.)`)) return;
-  mutate("Deleted mitigant", () => opDeleteMitigant(m.id));
+  const n = m.tasks.length;
+  if (mutate("Deleted mitigant", () => opDeleteMitigant(m.id))) toast(`Deleted mitigant${n ? `; its ${n} linked task${n > 1 ? "s stay" : " stays"} in the plan` : ""}`, "", { undo: true });
 }
 function quickTask(m, place) {
   let id;
@@ -4166,7 +4183,7 @@ function openDepEditor(depId, x, y) {
     h("div", { class: "hint" }, `${p.wbs} ${p.name}`), h("div", { class: "hint" }, `→ ${s.wbs} ${s.name}`),
     h("div", { class: "frm", style: { marginTop: "8px" } }, h("label", {}, "Type"), type, h("label", {}, "Lag (days)"), h("div", {}, lag, h("span", { class: "hint" }, "  negative = lead"))),
     d.violated ? h("div", { class: "msg warn" }, "Dates currently conflict with this link. Dates are never moved automatically.") : null,
-    h("div", { class: "acts" }, h("button", { class: "danger", onclick: () => { closePop(); UI.selDep = null; mutate(`Removed link ${p.wbs} → ${s.wbs}`, () => opRemoveDep(d.id)); } }, "Delete link"), h("button", { onclick: closePop }, "Close")));
+    h("div", { class: "acts" }, h("button", { class: "danger", onclick: () => { closePop(); UI.selDep = null; if (mutate(`Removed link ${p.wbs} → ${s.wbs}`, () => opRemoveDep(d.id))) toast(`Removed link ${p.wbs} → ${s.wbs}`, "", { undo: true }); } }, "Delete link"), h("button", { onclick: closePop }, "Close")));
   openPop(x + 8, y + 8, box);
 }
 
@@ -4477,9 +4494,9 @@ async function showBackups() {
 // ---------- Help ----------
 function showHelp() {
   const rows = [
-    ["Insert", "New task below"], ["Ctrl+Insert", "New subtask"], ["Tab / Shift+Tab", "Indent / outdent (also Alt+Shift+→ / ←)"], ["Alt+Shift+↑/↓", "Move task up / down"],
-    ["Alt+← / Alt+→", "Collapse / expand"], ["Enter or F2", "Edit cell (Enter again to save)"], ["Type", "Start editing the cell"], ["Esc", "Cancel edit, or clear the selection so Tab moves on"],
-    ["Delete", "Delete task (and subtasks)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+I", "Open / close the record form"], ["Arrows, PgUp/PgDn", "Move around"],
+    ["Insert", "New task below"], ["Ctrl+Insert", "New subtask"], ["Tab / Shift+Tab", "Next / previous cell (past the row's end, out of the outline)"], ["Alt+Shift+→ / Alt+Shift+←", "Indent / outdent"], ["Alt+Shift+↑/↓", "Move task up / down"],
+    ["Alt+← / Alt+→", "Collapse / expand"], ["Enter or F2", "Edit cell (Enter again to save)"], ["Type", "Start editing the cell"], ["Esc", "Cancel edit, or clear the selection"],
+    ["Delete", "Delete task and subtasks (Undo appears in the message)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+I", "Open / close the record form"], ["Arrows, PgUp/PgDn", "Move around"],
   ];
   const body = h("div", { class: "modal-b" },
     h("h3", { style: { marginTop: 0 } }, "Keyboard (outline grid)"),

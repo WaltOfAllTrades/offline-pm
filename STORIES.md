@@ -21,7 +21,7 @@ Each story lists its acceptance criteria. A tag in brackets after a criterion na
 
 ## C. WBS outline
 - **C1 Hierarchy** of any depth. The WBS number (1.2.3.4) is calculated from position, never stored. [wbs]
-- **C2 Edit structure.** Add a task (sibling below), add a subtask, indent (Tab), outdent (Shift+Tab), move up/down (Alt+Shift+↑/↓), drag a row to reorder or to nest it under another, and delete a task with its subtree. [wbs-ops]
+- **C2 Edit structure.** Add a task (sibling below), add a subtask, indent (Alt+Shift+→), outdent (Alt+Shift+←), move up/down (Alt+Shift+↑/↓), drag a row to reorder or to nest it under another, and delete a task with its subtree. Tab moves to the next cell, never restructures. Deleting offers **Undo** in the message instead of asking first. [wbs-ops] [grid] [undo]
 - **C3 Inline editing** in spreadsheet style: name, start, finish, duration, % complete, status, predecessors, responsible, accountable.
 - **C4 Summary rollups.** A summary task's start is its earliest child start and its finish is its latest child finish. % complete is weighted by duration. Status is derived from the children. These summary fields are read-only. [rollup]
 - **C5 Milestones.** A milestone is a zero-duration task, drawn as a diamond. [milestone]
@@ -66,7 +66,7 @@ Each story lists its acceptance criteria. A tag in brackets after a criterion na
 - **I3 Fields.** Two columns, labels above: Name; Type/Status; Start/Finish; Duration/% complete; Accountable/Responsible; Parent/WBS code; Description. Accountable shows as inherited when it comes from a parent. A **Same as Accountable** switch makes Responsible follow the Accountable (shown as A/R in the matrix). [form] [raci-ra] It uses the same edit rules as the outline. Rolled-up fields are read-only on summary tasks. [form]
 - **I4 Mini Gantt for parents.** A summary task's record shows a small Gantt of its subtasks, scaled to fit, with % complete fill, status colours, milestones, a today line, the parent's date range shaded, and links between the subtasks (conflicts in red). It shows direct subtasks by default; an "All levels" toggle shows the whole subtree, up to 80 rows. Clicking a subtask's bar or label opens its record. [form] [mini-gantt]
 - **I5 Work notes.** A journal made only of notes, newest first. Each note shows a small blank person avatar, the yellow work-note bar, the date and time (absolute, plus relative such as "3 h ago"), and "(edited)" after a change. Notes carry no name. Post with the Post button or Ctrl+Enter. [notes] [form]
-  - Notes can be edited inline (Ctrl+Enter saves, Esc cancels) and deleted, with confirmation and undo.
+  - Notes can be edited inline (Ctrl+Enter saves, Esc cancels) and deleted, with an Undo button in the message that follows.
   - An unposted draft is kept for each record while you move between records.
   - Note text is shown exactly as written, and http(s) links are clickable.
 - **I6 Subtask notes on parents.** A summary task's stream includes its subtasks' notes by default, each labelled with a link to its subtask. A toggle switches to the parent's own notes only. [form]
