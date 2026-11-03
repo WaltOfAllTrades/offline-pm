@@ -77,10 +77,21 @@ function refocus(root, mark, { typed = true } = {}) {
   return document.activeElement === el;
 }
 
+// { undo: true } adds an Undo button for the change just made. It only undoes while nothing else has changed since
+// (every change bumps rev), so it can never take back a later edit. Long messages and Undo stay longer; hovering holds them.
 let toastTimer;
-function toast(msg, kind = "") {
-  const t = $("toast"); t.textContent = msg; t.className = "show " + kind;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = "", kind === "err" ? 4500 : 2600);
+function toast(msg, kind = "", { undo: canUndo = false } = {}) {
+  const t = $("toast"), at = canUndo ? rev : null;
+  const hide = () => { t.className = ""; t.onpointerenter = t.onpointerleave = null; };
+  t.replaceChildren(msg); t.className = "show " + kind;
+  if (canUndo) {
+    t.append(" ", h("button", { class: "t-undo", onclick: () => { hide(); if (rev === at) undo(); else toast("Something else changed since. Use Undo (Ctrl+Z) to step back."); } }, "Undo"));
+    t.classList.add("act");
+  }
+  const ms = Math.max(kind === "err" ? 4500 : 2600, msg.length * 55) + (canUndo ? 5000 : 0);
+  clearTimeout(toastTimer); toastTimer = setTimeout(hide, ms);
+  t.onpointerenter = () => clearTimeout(toastTimer);
+  t.onpointerleave = () => { clearTimeout(toastTimer); toastTimer = setTimeout(hide, 2000); };
 }
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
@@ -141,6 +152,25 @@ function parseDuration(v) {
 function splitNames(v, semicolonOnly) {
   const s = String(v ?? "");
   return s.split(semicolonOnly || /[;\n]/.test(s) ? /[;\n]+/ : /,+/).map(x => x.trim()).filter(Boolean);
+}
+// What Excel puts on the clipboard → { lines, cols }: one line per row, from the first column only (cols says how many
+// there were, so a paste can warn). Cells holding a newline, tab or quote arrive quoted, with "" for a quote. Excel ends
+// with one newline, which is dropped; blank lines stay, as "", so pasted rows stay lined up with the sheet.
+function parseClipColumn(text) {
+  const s = String(text ?? "").replace(/\r\n?/g, "\n"), rows = [[]];
+  let cell = "", quoted = false, start = true;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quoted) { if (c !== '"') cell += c; else if (s[i + 1] === '"') { cell += '"'; i++; } else quoted = false; continue; }
+    if (c === '"' && start) { quoted = true; start = false; continue; }
+    start = false;
+    if (c === "\t") { rows.at(-1).push(cell); cell = ""; start = true; }
+    else if (c === "\n") { rows.at(-1).push(cell); rows.push([]); cell = ""; start = true; }
+    else cell += c;
+  }
+  rows.at(-1).push(cell);
+  if (rows.length > 1 && rows.at(-1).length === 1 && rows.at(-1)[0] === "") rows.pop();
+  return { lines: rows.map(r => r[0].trim()), cols: Math.max(...rows.map(r => r.length)) };
 }
 // Percent "50%", 0.5, "50" → 0..100
 function parsePercent(v) {

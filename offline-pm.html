@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-7pRE1W+M/kueZmPnjjP+ocWa4N25IH4XFFQ0fkYQhiQ='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-opY8KKjSYw8amPTWlRPbeWzElf0Dj9SqasV0B1JCaaI='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
 <title>Offline PM</title>
 <style>:root{
   --bg:#f5f6f8; --panel:#fff; --panel2:#fafbfc; --ink:#1b1f24; --muted:#667085; --line:#e4e7ec; --line2:#eef0f3;
@@ -254,7 +254,8 @@ table.map select{max-width:240px}
 kbd{font:11.5px ui-monospace,Consolas,monospace;background:var(--line2);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
 
 #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);padding:9px 14px;border-radius:8px;background:var(--ink);color:var(--bg);opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;z-index:100}
-#toast.show{opacity:1}#toast.err{background:var(--err-bg);color:var(--err);border:1px solid var(--err);font-weight:600}
+#toast.show{opacity:1}#toast.act{pointer-events:auto}
+#toast .t-undo{margin-left:10px;padding:2px 10px;border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit;font-weight:700}#toast.err{background:var(--err-bg);color:var(--err);border:1px solid var(--err);font-weight:600}
 
 /* print */
 /* record form */
@@ -417,6 +418,15 @@ table.raci.team td.tcell b{font-weight:700;margin-right:3px}
 table.raci.team .mr{display:inline-block;font-size:10.5px;font-weight:600;border-radius:7px;padding:0 4px;margin:0 1px;background:var(--line2);color:var(--ink)}
 table.raci.team .plus{position:absolute;top:1px;right:1px;width:15px;height:15px;line-height:12px;padding:0;border-radius:4px;font-size:12px;opacity:0;color:var(--accent)}
 table.raci.team td.tcell:hover .plus{opacity:1}
+table.raci.team td.tcell:focus .plus,table.raci.team td.tcell:focus-within .plus{opacity:.5}
+@media (hover:none){table.raci.team .plus{opacity:.5}}
+table.raci td.cell:focus{outline:none}
+table.raci td.cell:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.raci-pick .roles{display:flex;gap:4px;margin:6px 0}
+.raci-pick .role-btn{min-width:38px;font-weight:750}
+.raci-pick .role-btn.r-R{color:var(--R)} .raci-pick .role-btn.r-A{color:var(--A)} .raci-pick .role-btn.r-C{color:var(--C)} .raci-pick .role-btn.r-I{color:var(--I)}
+.raci-pick .role-btn[aria-pressed="true"]{background:var(--sel);border-color:var(--accent)}
+.raci-pick .acts{margin-top:6px}
 table.raci.team .mr.r-R{color:var(--R)} table.raci.team .mr.r-A{color:var(--A)} table.raci.team .mr.r-C{color:var(--C)} table.raci.team .mr.r-I{color:var(--I)}
 table.raci tr.sel td{outline:1px solid var(--accent);outline-offset:-1px}
 .tn-link{color:inherit;text-decoration:none}
@@ -447,6 +457,35 @@ table.raci tr.sel td{outline:1px solid var(--accent);outline-offset:-1px}
   .gantt-pane,.splitter{display:none}
   .tabs{order:10;width:100%;margin-left:0}
 }
+
+/* Interaction plan (DECISIONS #80–#92) */
+.f-back{flex:none;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:5px 9px;align-self:center}
+.rel-list tr.flash td,.rk tr.flash td{animation:flash 1.4s ease}
+.gc.c-notes{overflow:hidden;white-space:nowrap}
+.gc.c-notes .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+#selCount{align-self:center;margin-left:4px}
+.g-draw{fill:transparent;cursor:crosshair}
+.g-hint{fill:var(--muted);font-size:11.5px;font-style:italic;pointer-events:none}
+.bar.drawing{opacity:.75}
+.pick-btn.on{background:var(--sel);box-shadow:inset 2px 0 0 var(--accent)}
+.pick-btn kbd{margin-right:4px}
+.pick-btn .sub{display:block;color:var(--muted);font-size:11.5px;margin:2px 0 0 26px}
+.paste-pick,.search-pick{width:420px;max-width:calc(100vw - 32px);outline:none}
+.paste-prev{margin:4px 0 6px;padding-left:22px;font-size:12.5px;color:var(--muted);max-height:120px;overflow:hidden}
+.paste-prev li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search-pick .pick{max-height:340px}
+.people-cols{grid-template-columns:minmax(560px,2fr) minmax(380px,1fr)}
+table.ptable{width:100%;border-collapse:collapse;font-size:13px}
+.ptable th{text-align:left;font-weight:600;color:var(--muted);padding:4px 6px;border-bottom:1px solid var(--line)}
+.ptable td{padding:3px 6px;border-bottom:1px solid var(--line2);vertical-align:middle}
+.ptable td.c{text-align:center}
+.ptable td.num{text-align:right;color:var(--muted)}
+.ptable input:not([type=checkbox]),.ptable select{width:100%;min-width:0;border-color:transparent;background:transparent;padding:3px 5px}
+.ptable input:not([type=checkbox]):hover,.ptable select:hover,.ptable input:focus,.ptable select:focus{border-color:var(--line);background:var(--panel)}
+.ptable .pt-acts{white-space:nowrap;text-align:right}
+.ptable .pt-acts button{padding:3px 7px;font-size:12px}
+.ptable .pt-mem{color:var(--muted);font-size:12.5px}
+.ptable tr.inactive input[data-f=name]{text-decoration:line-through;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -492,16 +531,18 @@ table.raci tr.sel td{outline:1px solid var(--accent);outline-offset:-1px}
   <section id="view-plan" class="view">
     <div class="toolbar">
       <div class="grp">
-        <button id="addTaskBtn" class="primary" title="New task below (Insert)">＋ Task</button>
+        <button id="addTaskBtn" class="primary" title="New task below (Insert). With the record open, the new record opens">＋ Task</button>
         <button id="addSubBtn" title="New subtask (Ctrl+Insert)">＋ Subtask</button>
         <button id="addMsBtn" title="New milestone">◆ Milestone</button>
+        <button id="pasteBtn" title="Paste a column copied from Excel into the selected cell (or click a cell and press Ctrl+V)">📋 Paste</button>
       </div>
       <div class="grp">
-        <button id="outdentBtn" class="icon" title="Outdent (Shift+Tab)">⇤</button>
-        <button id="indentBtn" class="icon" title="Indent (Tab)">⇥</button>
+        <button id="outdentBtn" class="icon" title="Outdent the selected rows (Alt+Shift+←). Shift+click selects a block">⇤</button>
+        <button id="indentBtn" class="icon" title="Indent the selected rows (Alt+Shift+→). Shift+click selects a block">⇥</button>
         <button id="upBtn" class="icon" title="Move up (Alt+Shift+↑)">↑</button>
         <button id="downBtn" class="icon" title="Move down (Alt+Shift+↓)">↓</button>
-        <button id="delBtn" class="icon" title="Delete task (Delete)">🗑</button>
+        <button id="delBtn" class="icon" title="Delete the selected rows (Delete)">🗑</button>
+        <span id="selCount" class="hint" hidden></span>
       </div>
       <div class="grp">
         <select id="levelSel" title="Show outline levels">
@@ -569,7 +610,7 @@ table.raci tr.sel td{outline:1px solid var(--accent);outline-offset:-1px}
   <section id="view-people" class="view" hidden>
     <div class="people-cols">
       <div class="card">
-        <div class="card-h"><h2>People</h2><button id="addPersonBtn" class="primary">＋ Person</button></div>
+        <div class="card-h"><h2>People</h2><button id="addPersonBtn" class="primary" title="Add a row; paste a column of names into it to add many">＋ Person</button></div>
         <div id="peopleList"></div>
       </div>
       <div class="card">
@@ -903,10 +944,21 @@ function refocus(root, mark, { typed = true } = {}) {
   return document.activeElement === el;
 }
 
+// { undo: true } adds an Undo button for the change just made. It only undoes while nothing else has changed since
+// (every change bumps rev), so it can never take back a later edit. Long messages and Undo stay longer; hovering holds them.
 let toastTimer;
-function toast(msg, kind = "") {
-  const t = $("toast"); t.textContent = msg; t.className = "show " + kind;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = "", kind === "err" ? 4500 : 2600);
+function toast(msg, kind = "", { undo: canUndo = false } = {}) {
+  const t = $("toast"), at = canUndo ? rev : null;
+  const hide = () => { t.className = ""; t.onpointerenter = t.onpointerleave = null; };
+  t.replaceChildren(msg); t.className = "show " + kind;
+  if (canUndo) {
+    t.append(" ", h("button", { class: "t-undo", onclick: () => { hide(); if (rev === at) undo(); else toast("Something else changed since. Use Undo (Ctrl+Z) to step back."); } }, "Undo"));
+    t.classList.add("act");
+  }
+  const ms = Math.max(kind === "err" ? 4500 : 2600, msg.length * 55) + (canUndo ? 5000 : 0);
+  clearTimeout(toastTimer); toastTimer = setTimeout(hide, ms);
+  t.onpointerenter = () => clearTimeout(toastTimer);
+  t.onpointerleave = () => { clearTimeout(toastTimer); toastTimer = setTimeout(hide, 2000); };
 }
 
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } };
@@ -967,6 +1019,25 @@ function parseDuration(v) {
 function splitNames(v, semicolonOnly) {
   const s = String(v ?? "");
   return s.split(semicolonOnly || /[;\n]/.test(s) ? /[;\n]+/ : /,+/).map(x => x.trim()).filter(Boolean);
+}
+// What Excel puts on the clipboard → { lines, cols }: one line per row, from the first column only (cols says how many
+// there were, so a paste can warn). Cells holding a newline, tab or quote arrive quoted, with "" for a quote. Excel ends
+// with one newline, which is dropped; blank lines stay, as "", so pasted rows stay lined up with the sheet.
+function parseClipColumn(text) {
+  const s = String(text ?? "").replace(/\r\n?/g, "\n"), rows = [[]];
+  let cell = "", quoted = false, start = true;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quoted) { if (c !== '"') cell += c; else if (s[i + 1] === '"') { cell += '"'; i++; } else quoted = false; continue; }
+    if (c === '"' && start) { quoted = true; start = false; continue; }
+    start = false;
+    if (c === "\t") { rows.at(-1).push(cell); cell = ""; start = true; }
+    else if (c === "\n") { rows.at(-1).push(cell); rows.push([]); cell = ""; start = true; }
+    else cell += c;
+  }
+  rows.at(-1).push(cell);
+  if (rows.length > 1 && rows.at(-1).length === 1 && rows.at(-1)[0] === "") rows.pop();
+  return { lines: rows.map(r => r[0].trim()), cols: Math.max(...rows.map(r => r.length)) };
 }
 // Percent "50%", 0.5, "50" → 0..100
 function parsePercent(v) {
@@ -1313,7 +1384,7 @@ function mutate(desc, fn) {
   redoStack.length = 0;
   undoStack.push(snap); trimUndo();
   afterChange(desc);
-  if (opNotes.length) toast(opNotes.splice(0).join(" "));
+  if (opNotes.length) toast(opNotes.splice(0).join(" "), "", { undo: true }); // things the app did on its own: offer to take them back
   return true;
 }
 function afterChange(desc) { hooks.onChange(); queueSave(desc); }
@@ -1800,10 +1871,12 @@ function insertAt(parentId, index, id) {
 }
 
 function opAddTask({ parentId = null, afterId = null, name = "New task", start, finish, kind = "task", projectId = M.projectId } = {}) {
-  let s = start ?? nextWorkday(todayNum());
-  let f = kind === "milestone" ? s : (finish ?? s);
+  // start: null makes an undated task (what the app's own add buttons do, DECISIONS #80); leaving it out keeps the
+  // old default of the next workday, which import and the tests rely on.
+  const s = start === undefined ? nextWorkday(todayNum()) : start;
+  const f = s == null ? null : kind === "milestone" ? s : (finish ?? s);
   run("INSERT INTO task(project_id, parent_id, position, name, kind, start, finish, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-    [projectId, parentId, 1e9, name, kind, fmtYMD(s), fmtYMD(f), nowIso(), nowIso()]);
+    [projectId, parentId, 1e9, name, kind, s == null ? null : fmtYMD(s), f == null ? null : fmtYMD(f), nowIso(), nowIso()]);
   const id = lastId();
   if (projectId === M.projectId) {
     const sib = siblingsOf(parentId).filter(x => x !== id);
@@ -1873,6 +1946,34 @@ function opMoveTo(id, targetId, where) {
     insertAt(target.parent_id, sib.indexOf(targetId) + (where === "after" ? 1 : 0), id);
   }
   if (t.parent_id !== (where === "child" ? targetId : target.parent_id)) { renumber(siblingsOf(t.parent_id)); keepRollupIfChildless(t.parent_id); }
+  dropHierarchyLinks(); checkDateCycles();
+}
+
+// A pasted WBS column → levels, relative to the first line, numbers thrown away (DECISIONS #85). A skipped level drops
+// to the lowest open one ("1" then "1.1.1" is "1.1"); a line that isn't a WBS number keeps the level above it.
+function wbsLevels(lines) {
+  const segs = lines.map(l => /^\d+(\.\d+)*\.?$/.test(l.trim()) ? l.trim().replace(/\.$/, "").split(".").length : null);
+  const base = segs.find(n => n != null) ?? 1, levels = []; let bad = 0;
+  segs.forEach((n, i) => {
+    if (n == null) { bad++; levels.push(i ? levels[i - 1] : 0); return; }
+    levels.push(clamp(n - base, 0, i ? levels[i - 1] + 1 : 0));
+  });
+  return { levels, bad };
+}
+// Re-nest a run of rows (ids in visual order) to the given levels. The first row keeps its place and parent P; a row at
+// level 0 goes under P straight after the last level-0 row, any other under the nearest earlier row one level up.
+// Rows keep their order, and each takes its existing subtree along.
+function opNestByWbs(ids, levels) {
+  if (!ids.length) return;
+  const P = taskRow(ids[0]).parent_id, oldParents = new Set(), lastAt = [ids[0]];
+  ids.forEach((id, i) => {
+    if (!i) return;
+    const L = levels[i]; oldParents.add(taskRow(id).parent_id);
+    if (L === 0) insertAt(P, siblingsOf(P).filter(x => x !== id).indexOf(lastAt[0]) + 1, id);
+    else insertAt(lastAt[L - 1], null, id);
+    lastAt[L] = id; lastAt.length = L + 1;
+  });
+  for (const p of oldParents) { renumber(siblingsOf(p)); keepRollupIfChildless(p); }
   dropHierarchyLinks(); checkDateCycles();
 }
 
@@ -2334,7 +2435,7 @@ function mitigationParent() {
     if (saved.parent == null || one("SELECT 1 FROM task WHERE id=? AND project_id=?", [saved.parent, M.projectId])) return saved.parent;
   }
   const found = one("SELECT id FROM task WHERE project_id=? AND parent_id IS NULL AND name='Risk mitigation' ORDER BY position LIMIT 1", [M.projectId]);
-  return found ? found.id : opAddTask({ name: "Risk mitigation" });
+  return found ? found.id : opAddTask({ name: "Risk mitigation", start: null });
 }
 // Create a task that implements the mitigant, linked, carrying its Responsible / Accountable (DECISIONS #57).
 // place = { targetId, where: "before" | "after" } puts it at that spot in the WBS.
@@ -2344,10 +2445,10 @@ function opTaskFromMitigant(mitId, place = null) {
   let id;
   if (place) {
     const tgt = taskRow(place.targetId);
-    id = opAddTask({ name, parentId: tgt.parent_id, start: parseYMD(tgt.start) ?? undefined, finish: parseYMD(tgt.start) ?? undefined });
+    id = opAddTask({ name, parentId: tgt.parent_id, start: null, finish: null });
     opMoveTo(id, place.targetId, place.where);
     lsSet(mitParentKey(), { parent: tgt.parent_id });
-  } else id = opAddTask({ name, parentId: mitigationParent() });
+  } else id = opAddTask({ name, parentId: mitigationParent(), start: null, finish: null });
   opLinkTask(mitId, id);
   const rec = M.mitById.get(mitId);
   if (rec) {
@@ -2384,7 +2485,7 @@ function seedRisks(tasks) {
 // ---------- Outline / WBS grid (virtualized) ----------
 const ROW = 30;
 const UI = {
-  view: "plan", selId: null, col: "name", collapsed: new Set(), search: "", person: "", grain: "week",
+  view: "plan", selId: null, anchorId: null, col: "name", collapsed: new Set(), search: "", person: "", grain: "week",
   rows: [], editing: null, selDep: null,
 };
 const COLS = [
@@ -2398,6 +2499,7 @@ const COLS = [
   { key: "pred", label: "Predecessors", w: 112, edit: "text" },
   { key: "R", label: "Responsible", w: 150, edit: "party" },
   { key: "A", label: "Accountable", w: 140, edit: "party" },
+  { key: "notes", label: "Description", w: 220, edit: "record" }, // several lines, so it's edited in the record (DECISIONS #86)
 ];
 const colByKey = k => COLS.find(c => c.key === k);
 const colIndex = k => COLS.findIndex(c => c.key === k);
@@ -2436,6 +2538,7 @@ function computeRows() {
     walk(M.roots);
   }
   UI.rows.forEach((t, i) => t.row = i);
+  const a = M.tasks.get(UI.anchorId); if (!a || UI.rows[a.row] !== a) UI.anchorId = null; // a hidden anchor ends the block
 }
 
 function renderGridHead() {
@@ -2476,6 +2579,7 @@ function cellHtml(t, c) {
     case "pred": return predText(t);
     case "R": return html`<span class="chips">${rChips(t)}</span>`;
     case "A": { const a = accountable(t); return html`<span class="chips">${a.list.map(r => chipFor(r, a.inherited))}</span>`; }
+    case "notes": return t.notes ? html`<span class="nm" title="${t.notes}">${t.notes.split("\n")[0]}</span>` : "";
   }
   return "";
 }
@@ -2490,12 +2594,14 @@ function renderGridRows() {
   }
   const first = Math.max(0, Math.floor(body.scrollTop / ROW) - 8);
   const last = Math.min(UI.rows.length, Math.ceil((body.scrollTop + body.clientHeight) / ROW) + 8);
+  const block = selBlock(), inBlock = new Set(block.map(t => t.id));
+  $("selCount").hidden = block.length < 2; $("selCount").textContent = `${block.length} rows`;
   const rows = [];
   for (let i = first; i < last; i++) {
-    const t = UI.rows[i], sel = t.id === UI.selId;
+    const t = UI.rows[i], sel = inBlock.has(t.id), active = t.id === UI.selId;
     const expanded = t.isSummary ? html` aria-expanded="${String(!(UI.collapsed.has(t.id) && !filterActive()))}"` : "";
     const cells = COLS.map(c => {
-      const ro = (t.isSummary && ROLLED.has(c.key)) ? " ro" : "", cur = sel && c.key === UI.col ? " cur" : "";
+      const ro = (t.isSummary && ROLLED.has(c.key)) ? " ro" : "", cur = active && c.key === UI.col ? " cur" : "";
       return html`<div class="gc c-${c.key}${ro}${cur}" role="gridcell" aria-label="${c.label}" data-col="${c.key}" style="width:${c.w}px"${c.key === "wbs" ? html` title="Drag to move"` : ""}>${cellHtml(t, c)}</div>`;
     });
     rows.push(html`<div class="grow ${t.isSummary ? "summary" : ""} ${sel ? "sel" : ""}" id="gr-${t.id}" role="row" aria-rowindex="${i + 1}" aria-level="${t.depth + 1}" aria-selected="${String(sel)}"${expanded} data-id="${t.id}" style="top:${i * ROW}px;width:${gridWidth()}px">${cells}</div>`);
@@ -2506,7 +2612,9 @@ function renderGridRows() {
 }
 
 // ---------- Selection ----------
-function selectTask(id, { scroll = true, col } = {}) {
+// extend: Shift+click or Shift+arrow, which keeps the anchor and makes a block of the rows between (DECISIONS #82).
+function selectTask(id, { scroll = true, col, extend = false } = {}) {
+  UI.anchorId = extend ? (UI.anchorId ?? UI.selId) : null;
   UI.selId = id; if (col) UI.col = col;
   if (id != null && scroll) revealTask(id);
   redraw("gridRows", "ganttRows", "form");
@@ -2525,13 +2633,23 @@ function revealTask(id) {
   else if (left + w > body.scrollLeft + body.clientWidth) body.scrollLeft = left + w - body.clientWidth;
 }
 const selTask = () => M.tasks.get(UI.selId) || null;
-function moveSel(dr) {
+// The selected rows, in outline order: from the anchor to the active row, or just the active row.
+function selBlock() {
+  const t = selTask(), a = M.tasks.get(UI.anchorId);
+  if (!t) return [];
+  if (!a || a === t || UI.rows[a.row] !== a || UI.rows[t.row] !== t) return [t];
+  return UI.rows.slice(Math.min(a.row, t.row), Math.max(a.row, t.row) + 1);
+}
+// The rows of a block that none of its other rows contain: structure commands move these, each with its subtree.
+const blockTops = list => { const ids = new Set(list.map(t => t.id)); return list.filter(t => { for (let x = t.parent; x; x = x.parent) if (ids.has(x.id)) return false; return true; }); };
+function moveSel(dr, { extend = false } = {}) {
   if (!UI.rows.length) return;
   const cur = selTask(); let i = cur && UI.rows[cur.row] === cur ? cur.row : -1;
   i = clamp(i + dr, 0, UI.rows.length - 1);
-  selectTask(UI.rows[i].id);
+  if (UI.form) UI.histMode = "replace"; // stepping through rows doesn't fill the Back history
+  selectTask(UI.rows[i].id, { extend });
 }
-function moveCol(dc) { UI.col = COLS[clamp(colIndex(UI.col) + dc, 1, COLS.length - 1)].key; if (UI.selId) revealTask(UI.selId); redraw("gridRows"); }
+function moveCol(dc) { UI.col = COLS[clamp(colIndex(UI.col) + dc, 0, COLS.length - 1)].key; if (UI.selId) revealTask(UI.selId); redraw("gridRows"); }
 
 function toggleCollapse(id, force) {
   const has = UI.collapsed.has(id), want = force ?? !has;
@@ -2553,7 +2671,9 @@ function startEdit(colKey = UI.col, initial = null) {
   const c = colByKey(colKey); if (!c || !c.edit) return;
   if (UI.editing) commitEdit(0, 0, true);
   if (t.isSummary && ROLLED.has(c.key)) { toast("Summary rows roll up from their subtasks"); return; }
-  UI.col = colKey; revealTask(t.id); redraw("gridRows"); drawNow(); // the cell is looked up next
+  UI.col = colKey;
+  if (c.edit === "record") { UI.formFocus = "notes"; openRecord(t.id); return; }
+  revealTask(t.id); redraw("gridRows"); drawNow(); // the cell is looked up next
   const cell = $("gridCanvas").querySelector(`.grow[data-id="${t.id}"] [data-col="${colKey}"]`);
   if (!cell) return;
   if (c.edit === "party") { openPartyPicker(cell.getBoundingClientRect(), t.id, colKey); return; }
@@ -2604,15 +2724,16 @@ function commitEdit(dr, dc, fromBlur) {
 }
 
 // ---------- Structure commands ----------
-function newTaskDefaults(ref) {
-  const s = ref && ref.S != null ? ref.S : nextWorkday(todayNum());
-  return { start: s, finish: s };
+// Tasks you add start with no dates (DECISIONS #80): plans arrive as names, and dates are set on the Gantt or typed in.
+function newTaskDefaults() { return { start: null, finish: null }; }
+function clearFilter() {
+  if (!filterActive()) return false;
+  UI.search = ""; UI.person = ""; $("searchBox").value = ""; $("personFilter").value = "";
+  computeRows(); redraw("rows");
+  return true;
 }
 function cmdAdd(kind = "task", asChild = false) {
-  if (filterActive()) { // a new task wouldn't match the filter and would vanish
-    UI.search = ""; UI.person = ""; $("searchBox").value = ""; $("personFilter").value = "";
-    toast("Filter cleared so you can see the new task");
-  }
+  if (clearFilter()) toast("Filter cleared so you can see the new task"); // a new task wouldn't match the filter and would vanish
   const t = selTask(); let id;
   const opts = { name: kind === "milestone" ? "New milestone" : "New task", kind, ...newTaskDefaults(t) };
   if (asChild && t) { opts.parentId = t.id; UI.collapsed.delete(t.id); saveCollapsed(); }
@@ -2620,27 +2741,169 @@ function cmdAdd(kind = "task", asChild = false) {
   if (asChild && t && !t.isSummary && (rolesOf(t.id).length || M.depsIn.get(t.id))) toast(`“${t.name}” is now a summary task; its dates roll up from subtasks`);
   if (mutate(kind === "milestone" ? "Added milestone" : asChild ? "Added subtask" : "Added task", () => { id = opAddTask(opts); })) {
     selectTask(id, { col: "name" });
-    startEdit("name");
+    // With the record panel open the new record opens, name selected; closed, the outline's own editor (DECISIONS #90).
+    if (UI.form) { UI.formFocus = "name"; openRecord(id); } else startEdit("name");
   }
 }
 function cmdStructure(op) {
   const t = selTask(); if (!t) return toast("Select a task first");
   const id = t.id;
   const labels = { indent: "Indented", outdent: "Outdented", up: "Moved up", down: "Moved down" };
+  const tops = blockTops(selBlock());
+  if (tops.length > 1) { // a block: every top row moves one level, in order, in one undo step (DECISIONS #83)
+    if (op === "up" || op === "down") return toast("Move up and down work on one row at a time. Select one row.");
+    if (op === "indent") { const f = tops[0], sib = f.parent ? f.parent.children : M.roots, prev = sib[sib.indexOf(f) - 1]; if (prev) { UI.collapsed.delete(prev.id); saveCollapsed(); } }
+    mutate(`${labels[op]} ${tops.length} tasks`, () => {
+      if (op === "outdent") for (const x of tops) if (taskRow(x.id).parent_id == null) throw new Error(`“${x.name}” is already at the top level`);
+      for (const x of tops) (op === "indent" ? opIndent : opOutdent)(x.id);
+    });
+    return; // the same ids stay selected, so ⇥ again indents again
+  }
   const fn = { indent: () => opIndent(id), outdent: () => opOutdent(id), up: () => opMove(id, -1), down: () => opMove(id, 1) }[op];
   if (op === "indent") { const sib = t.parent ? t.parent.children : M.roots; const prev = sib[sib.indexOf(t) - 1]; if (prev) { UI.collapsed.delete(prev.id); saveCollapsed(); } }
   if (mutate(`${labels[op]} “${t.name}”`, fn)) selectTask(id);
 }
 function cmdDelete() {
   const t = selTask(); if (!t) return;
+  const tops = blockTops(selBlock());
+  if (tops.length > 1) {
+    const n = tops.reduce((s, x) => s + countDesc(x), 0);
+    const notes = tops.flatMap(x => [x, ...descendantsOf(x)]).reduce((s, x) => s + (M.noteCount.get(x.id) || 0), 0);
+    const parts = [n ? `${n} subtask${n > 1 ? "s" : ""}` : "", notes ? `${notes} work note${notes > 1 ? "s" : ""}` : ""].filter(Boolean);
+    const lastTop = tops.at(-1), end = lastTop.row + 1 + countDesc(lastTop);
+    const next = UI.rows.slice(end).find(r => !tops.some(x => isAncestor(x, r))) || UI.rows[tops[0].row - 1];
+    if (mutate(`Deleted ${tops.length} tasks`, () => tops.forEach(x => opDelete(x.id)))) {
+      selectTask(next && M.tasks.has(next.id) ? next.id : null);
+      toast(`Deleted ${tops.length} tasks${parts.length ? ` with ${parts.join(" and ")}` : ""}`, "", { undo: true });
+    }
+    return;
+  }
   const n = countDesc(t);
   const notes = [t, ...M.order.slice(t.index + 1, t.index + 1 + n)].reduce((s, x) => s + (M.noteCount.get(x.id) || 0), 0);
-  const parts = [n ? `its ${n} subtask${n > 1 ? "s" : ""}` : "", notes ? `${notes} work note${notes > 1 ? "s" : ""}` : ""].filter(Boolean);
-  if (parts.length && !confirm(`Delete “${t.name}” and ${parts.join(" and ")}? (Undo is available.)`)) return;
+  const parts = [n ? `${n} subtask${n > 1 ? "s" : ""}` : "", notes ? `${notes} work note${notes > 1 ? "s" : ""}` : ""].filter(Boolean);
   const next = UI.rows.slice(t.row + 1).find(r => !isAncestor(t, r)) || UI.rows[t.row - 1]; // first visible row after the subtree
-  if (mutate(`Deleted “${t.name}”${n ? ` (+${n} subtasks)` : ""}`, () => opDelete(t.id))) selectTask(next && M.tasks.has(next.id) ? next.id : null);
+  // No "are you sure?": it deletes at once and offers Undo, which is quicker and harder to get wrong.
+  if (mutate(`Deleted “${t.name}”${n ? ` (+${n} subtasks)` : ""}`, () => opDelete(t.id))) {
+    selectTask(next && M.tasks.has(next.id) ? next.id : null);
+    toast(`Deleted “${shortText(t.name, 40)}”${parts.length ? ` with ${parts.join(" and ")}` : ""}`, "", { undo: true });
+  }
 }
 const countDesc = t => t.children.reduce((s, c) => s + 1 + countDesc(c), 0);
+
+// ---------- Column paste (DECISIONS #84, #85) ----------
+// Ctrl+V with more than one line asks what to do with them; the selected cell says which column and row it starts at.
+// One line pasted while editing a cell goes into the editor; one line on a selected cell fills just that cell.
+function gridPaste(e) {
+  const { lines, cols } = parseClipColumn(e.clipboardData?.getData("text/plain") ?? "");
+  if (UI.editing) { if (lines.length < 2) return; e.preventDefault(); cancelEdit(); }
+  else e.preventDefault();
+  openGridPaste(lines, cols);
+}
+async function pasteFromClipboard() {
+  let text;
+  try { text = await navigator.clipboard.readText(); } catch { text = null; }
+  if (text == null) return toast("The browser didn't allow reading the clipboard. Click a cell and press Ctrl+V instead.");
+  const { lines, cols } = parseClipColumn(text);
+  openGridPaste(lines, cols, true);
+}
+function openGridPaste(lines, cols, always = false) {
+  const t = selTask(); if (!t) return toast("Click the cell where the pasted list should start.");
+  if (!lines.length || (lines.length === 1 && !lines[0])) return toast("The clipboard is empty.");
+  const col = UI.col, options = pasteOptions(t, col, lines);
+  if (lines.length === 1 && !always) { if (col !== "wbs") cmdPaste(options[0].id, col, lines); return; }
+  revealTask(t.id); redraw("gridRows"); drawNow(); // the cell is looked up next
+  const cell = $("gridCanvas").querySelector(`.grow[data-id="${t.id}"] [data-col="${col}"]`);
+  const rect = (cell || $("gridBody")).getBoundingClientRect();
+  openPasteChooser(rect, { title: `Paste ${lines.length} line${lines.length === 1 ? "" : "s"} into ${colByKey(col).label}`, lines, cols, key: "paste." + col, options });
+}
+function pasteOptions(t, col, lines) {
+  const room = UI.rows.length - t.row, n = lines.filter(Boolean).length, past = lines.slice(room).filter(Boolean).length;
+  const run = mode => () => cmdPaste(mode, col, lines), at = `${t.wbs} ${shortText(t.name, 30)}`;
+  const fits = lines.length > room ? `; ${lines.length - room} line${lines.length - room === 1 ? "" : "s"} won't fit` : "";
+  if (col === "wbs") return [{ id: "nest", label: "Nest these rows by WBS", sub: `Uses the numbers for levels only, from row ${t.wbs} down${fits}`, run: run("nest") }];
+  if (col === "name") return [
+    { id: "fill", label: "Fill down", sub: `Overwrite names from row ${t.wbs} down${past ? `; adds ${past} new task${past === 1 ? "" : "s"} past the end` : ""}`, run: run("fill") },
+    { id: "child", label: `Add as subtasks of “${at}”`, sub: `${n} new task${n === 1 ? "" : "s"} after its existing subtasks`, run: run("child") },
+    { id: "below", label: `Add below “${at}”`, sub: `${n} new task${n === 1 ? "" : "s"} at the same level, straight after it`, run: run("below") },
+  ];
+  const what = col === "R" || col === "A" ? "names matched to people and teams" : colByKey(col).label;
+  return [{ id: "fill", label: col === "R" || col === "A" ? "Fill down (match names)" : "Fill down", sub: `Overwrite ${what} from row ${t.wbs} down${fits}`, run: run("fill") }];
+}
+// mode: "fill" | "child" | "below" (Name) | "nest" (WBS). One change, one undo step; afterwards the affected rows are
+// selected as a block, since the next step is usually to indent them (DECISIONS #91).
+function cmdPaste(mode, col, lines) {
+  const t0 = selTask(); if (!t0) return toast("Click the cell where the pasted list should start.");
+  const cleared = clearFilter();
+  if (cleared) revealTask(t0.id);
+  const rows = UI.rows.slice(t0.row), affected = [];
+  const label = colByKey(col).label;
+  if (mode === "child") { UI.collapsed.delete(t0.id); saveCollapsed(); }
+  const ok = mutate(`Pasted ${lines.length} lines into ${label}`, () => {
+    if (cleared) opNotes.push("Filter cleared so you can see the pasted rows.");
+    const over = lines.length - rows.length, overNote = () => { if (over > 0) opNotes.push(`${over} line${over === 1 ? "" : "s"} didn't fit below the last row.`); };
+    if (col === "name") {
+      if (mode === "fill") {
+        let renamed = 0, added = 0, after = rows.at(-1).id; const parentId = rows.at(-1).parent_id;
+        lines.forEach((l, i) => {
+          const r = rows[i];
+          if (r) { affected.push(r.id); if (l && l !== r.name) { opSetField(r.id, "name", l); renamed++; } }
+          else if (l) { after = opAddTask({ parentId, afterId: after, name: l, ...newTaskDefaults() }); affected.push(after); added++; }
+        });
+        opNotes.push(`Pasted ${lines.length} names: ${renamed} renamed, ${added} new task${added === 1 ? "" : "s"}.`);
+      } else {
+        if (mode === "child" && !t0.isSummary && (rolesOf(t0.id).length || M.depsIn.get(t0.id))) opNotes.push(`“${t0.name}” is now a summary task; its dates roll up from subtasks.`);
+        let after = mode === "below" ? t0.id : null;
+        for (const l of lines) if (l) {
+          const id = opAddTask(mode === "child" ? { parentId: t0.id, name: l, ...newTaskDefaults() } : { parentId: t0.parent_id, afterId: after, name: l, ...newTaskDefaults() });
+          affected.push(after = id);
+        }
+        opNotes.push(`Added ${affected.length} ${mode === "child" ? "subtask" : "task"}${affected.length === 1 ? "" : "s"} ${mode === "child" ? "under" : "below"} ${t0.wbs} ${t0.name}.`);
+      }
+      return;
+    }
+    const list = rows.slice(0, lines.length);
+    affected.push(...list.map(r => r.id));
+    if (col === "wbs") {
+      const { levels, bad } = wbsLevels(lines.slice(0, list.length));
+      opNestByWbs(affected, levels);
+      opNotes.push(`Nested ${list.length} rows by WBS.`);
+      if (bad) opNotes.push(`${bad} line${bad === 1 ? " wasn't a WBS number, so that row was" : "s weren't WBS numbers, so those rows were"} kept at the level above ${bad === 1 ? "it" : "them"}.`);
+      return overNote();
+    }
+    if (col === "R" || col === "A") {
+      const byName = new Map(); for (const p of [...M.teams, ...M.people]) if (p.active) byName.set(p.name.trim().toLowerCase(), p.id); // people win a name clash
+      const unknown = new Map(); let set = 0;
+      list.forEach((r, i) => {
+        const names = lines[i].split(/[,;/]/).map(x => x.trim()).filter(Boolean);
+        if (!names.length) { opSetRoleParties(r.id, col, []); set++; return; }
+        const ids = [];
+        for (const nm of names) { const id = byName.get(nm.toLowerCase()); if (id != null) { if (!ids.includes(id)) ids.push(id); } else unknown.set(nm, (unknown.get(nm) || 0) + 1); }
+        if (ids.length) { opSetRoleParties(r.id, col, ids); set++; }
+      });
+      opNotes.push(`Set ${ROLE_NAMES[col]} on ${set} row${set === 1 ? "" : "s"}.`);
+      if (unknown.size) opNotes.push(`Not on the roster: ${[...unknown].map(([nm, k]) => `${nm} (${k} row${k === 1 ? "" : "s"})`).join(", ")}. Add them on the People page, then paste again.`);
+      return overNote();
+    }
+    // Description and the other columns: each line goes through the same op as typing into the cell.
+    const skipped = []; let done = 0;
+    list.forEach((r, i) => {
+      const l = lines[i];
+      if (!l && col !== "notes" && col !== "start" && col !== "pred") return;
+      run("SAVEPOINT paste_row");
+      try { col === "pred" ? opSetPredText(r.id, l) : opSetField(r.id, col, l); run("RELEASE paste_row"); done++; }
+      catch (x) { run("ROLLBACK TO paste_row"); run("RELEASE paste_row"); dateGraphCache = null; skipped.push(`${r.wbs} (${shortText(x.message, 32)})`); }
+    });
+    opNotes.push(`Pasted ${done} value${done === 1 ? "" : "s"} into ${label}.`);
+    if (skipped.length) opNotes.push(`Skipped ${skipped.length} row${skipped.length === 1 ? "" : "s"}: ${skipped.slice(0, 3).join(", ")}${skipped.length > 3 ? ` and ${skipped.length - 3} more` : ""}.`);
+    overNote();
+  });
+  if (!ok || !affected.length) return ok;
+  const live = affected.filter(id => M.tasks.has(id));
+  UI.selId = live.at(-1) ?? null; UI.anchorId = live.length > 1 ? live[0] : null;
+  if (UI.selId != null) revealTask(UI.selId);
+  redraw("rows", "form");
+  return ok;
+}
 
 // ---------- Grid events ----------
 let lastDown = null;
@@ -2659,16 +2922,18 @@ function initGrid() {
     if (e.target.closest("[data-open]")) { e.preventDefault(); openRecord(id); return; }
     if (e.target.closest("[data-caret]")) { toggleCollapse(id); return; }
     const col = cell?.dataset.col;
+    if (e.shiftKey) { e.preventDefault(); selectTask(id, { scroll: false, extend: true }); return; } // a block, not a drag or an edit
     if (col === "wbs") { beginRowDrag(e, id); }
     const now = performance.now();
     const dbl = lastDown && lastDown.id === id && lastDown.col === col && now - lastDown.t < 450;
     lastDown = { id, col, t: now };
     const wasSel = UI.selId === id && UI.col === col;
-    if (!wasSel) selectTask(id, { scroll: false, col: col && col !== "wbs" ? col : UI.col });
+    if (!wasSel || UI.anchorId != null) selectTask(id, { scroll: false, col: col || UI.col });
     // Deferred so the browser's own mousedown focus handling can't steal focus from the editor/picker.
     if (col && col !== "wbs" && (dbl || (wasSel && colByKey(col)?.edit === "party"))) { e.preventDefault(); lastDown = null; setTimeout(() => startEdit(col), 0); }
   });
   body.addEventListener("keydown", gridKey);
+  body.addEventListener("paste", gridPaste);
 }
 
 function gridKey(e) {
@@ -2682,25 +2947,27 @@ function gridKey(e) {
   if (e.key === "ArrowLeft" && e.altKey) { e.preventDefault(); if (t?.isSummary) toggleCollapse(t.id, true); return; }
   if (e.key === "ArrowRight" && e.altKey) { e.preventDefault(); if (t?.isSummary) toggleCollapse(t.id, false); return; }
   switch (e.key) {
-    case "ArrowDown": e.preventDefault(); return moveSel(1);
-    case "ArrowUp": e.preventDefault(); return moveSel(-1);
+    case "ArrowDown": e.preventDefault(); return moveSel(1, { extend: e.shiftKey && !e.altKey });
+    case "ArrowUp": e.preventDefault(); return moveSel(-1, { extend: e.shiftKey && !e.altKey });
     case "ArrowLeft": e.preventDefault(); return moveCol(-1);
     case "ArrowRight": e.preventDefault(); return moveCol(1);
     case "PageDown": e.preventDefault(); return moveSel(Math.floor($("gridBody").clientHeight / ROW));
     case "PageUp": e.preventDefault(); return moveSel(-Math.floor($("gridBody").clientHeight / ROW));
     case "Home": if (ctrl) { e.preventDefault(); return UI.rows[0] && selectTask(UI.rows[0].id); } return;
     case "End": if (ctrl) { e.preventDefault(); return UI.rows.length && selectTask(UI.rows.at(-1).id); } return;
-    case "Tab": if (!t) return; e.preventDefault(); return cmdStructure(e.shiftKey ? "outdent" : "indent"); // no selection: Tab leaves the grid
+    // Tab moves along the row as in a spreadsheet, and past the last (or first) cell it leaves the grid. It no longer
+    // indents: Enter-then-Tab used to restructure the plan by accident (DECISIONS #72). Alt+Shift+→/← indent.
+    case "Tab": { if (!t) return; const c = colIndex(UI.col) + (e.shiftKey ? -1 : 1); if (c < 1 || c >= COLS.length) return; e.preventDefault(); return moveCol(e.shiftKey ? -1 : 1); }
     case "Enter": case "F2": e.preventDefault(); return startEdit();
     case "Insert": e.preventDefault(); return cmdAdd("task", ctrl);
     case "Delete": e.preventDefault(); return cmdDelete();
-    case "Escape": if (!UI.form && t) selectTask(null); return;
+    case "Escape": if (UI.anchorId != null) { UI.anchorId = null; redraw("gridRows", "ganttRows"); } else if (!UI.form && t) selectTask(null); return;
   }
   const altGr = e.getModifierState?.("AltGraph"); // AltGr arrives as Ctrl+Alt on Windows: "@" or "{" on many layouts
   if ((altGr || (!ctrl && !e.altKey)) && e.key.length === 1 && t) {
     const c = colByKey(UI.col);
     if (c?.edit === "text" || c?.edit === "date") { e.preventDefault(); startEdit(UI.col, e.key); }
-    else if (c?.edit === "party" || c?.edit === "select") { e.preventDefault(); startEdit(UI.col); }
+    else if (c?.edit === "party" || c?.edit === "select" || c?.edit === "record") { e.preventDefault(); startEdit(UI.col); } // the key itself isn't typed in
   }
 }
 
@@ -2812,6 +3079,7 @@ function buildScale(grain, width, tasks) {
   return { origin: a, end: b, px, hg, width: (b - a) * px };
 }
 const xOf = (sc, day) => (day - sc.origin) * sc.px;
+const dayAt = (sc, x) => Math.floor(x / sc.px) + sc.origin; // the day under an x position
 
 function headerSvg(sc) {
   const [[topU, topF], [botU, botF]] = TIERS[sc.hg];
@@ -2854,7 +3122,7 @@ function anchor(sc, t, side, y) {
   return { x: xOf(sc, side === "S" ? t.S : t.F + 1), y };
 }
 function barSvg(sc, t, y, opts = {}) {
-  if (t.S == null) return "";
+  if ((opts.S ?? t.S) == null) return ""; // opts.S: a preview of a task that has no dates yet
   const S = opts.S ?? t.S, F = opts.F ?? t.F;
   const sel = t.id === UI.selId ? " sel" : "";
   const cy = y + ROW / 2;
@@ -2919,8 +3187,11 @@ function renderGanttRows() {
   const first = Math.max(0, Math.floor(body.scrollTop / ROW) - 6);
   const last = Math.min(UI.rows.length, Math.ceil((body.scrollTop + body.clientHeight) / ROW) + 6);
   setHtml($("gBg"), backgroundSvg(SC, H, body.scrollLeft, body.scrollLeft + body.clientWidth));
-  const sel = selTask();
-  setHtml($("gSel"), sel && UI.rows[sel.row] === sel ? html`<rect class="g-rowsel" x="0" y="${sel.row * ROW}" width="${SC.width}" height="${ROW}"/>` : html``);
+  const sel = selTask(), block = selBlock().filter(t => UI.rows[t.row] === t && t.row >= first && t.row < last);
+  // An undated task has no bar to drag, so its selected row says how to draw one (DECISIONS #87).
+  const draw = sel && UI.rows[sel.row] === sel && sel.S == null && !sel.isSummary
+    ? html`<rect class="g-draw" x="0" y="${sel.row * ROW}" width="${SC.width}" height="${ROW}"/><text class="g-hint" x="${body.scrollLeft + 8}" y="${sel.row * ROW + ROW / 2 + 4}">Drag across this row to set dates</text>` : "";
+  setHtml($("gSel"), html`${block.map(t => html`<rect class="g-rowsel" x="0" y="${t.row * ROW}" width="${SC.width}" height="${ROW}"/>`)}${draw}`);
   const bars = [];
   for (let i = first; i < last; i++) bars.push(barSvg(SC, UI.rows[i], i * ROW));
   setHtml($("gBars"), html`${bars}`);
@@ -2959,8 +3230,9 @@ function initGantt() {
     UI.selDep = null;
     const barEl = e.target.closest(".bar");
     if (!barEl) {
-      const row = Math.floor(svgPoint(e).y / ROW);
-      if (UI.rows[row]) selectTask(UI.rows[row].id, { scroll: false });
+      const t = UI.rows[Math.floor(svgPoint(e).y / ROW)];
+      if (t && !e.shiftKey && !t.isSummary && t.S == null) { selectTask(t.id, { scroll: false }); return beginBarDraw(e, t); }
+      if (t) selectTask(t.id, { scroll: false, extend: e.shiftKey });
       else redraw("ganttRows");
       return;
     }
@@ -3015,6 +3287,34 @@ function beginBarDrag(e, t, mode, barEl) {
     cancel: () => { hideTip(); redraw("ganttRows"); }, // Escape puts the bar back
   });
 }
+// Drag across an undated task's empty row to draw its first bar. Days snap like resizing (calendar days); a milestone
+// lands where the pointer is let go. A click without a drag only selects the row.
+function beginBarDraw(e, t) {
+  const svg = $("ganttSvg"), start = svgPoint(e), a = dayAt(SC, start.x), y = t.row * ROW;
+  if (UI.editing) commitEdit(0, 0, true);
+  try { svg.setPointerCapture(e.pointerId); } catch { } // a synthetic pointer (tests) can't be captured
+  let moved = false, S = a, F = a;
+  const move = ev => {
+    const p = svgPoint(ev);
+    if (!moved && Math.abs(p.x - start.x) < 3) return;
+    moved = true;
+    const b = dayAt(SC, p.x);
+    if (t.isMilestone) S = F = b; else [S, F] = a <= b ? [a, b] : [b, a];
+    $("gBars").querySelector(".bar.drawing")?.remove();
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g"); setHtml(g, html`${barSvg(SC, t, y, { S, F, noLabel: true })}`);
+    g.firstElementChild?.classList.add("drawing"); $("gBars").append(...g.childNodes);
+    showTip(ev, t.isMilestone ? fmtShort(S) : `${fmtShort(S)} → ${fmtShort(F)}  ·  ${workdays(S, F)}d`);
+  };
+  trackDrag(svg, {
+    move,
+    drop: () => {
+      hideTip();
+      if (moved) mutate(`Scheduled “${t.name}” ${fmtYMD(S)}${t.isMilestone ? "" : " → " + fmtYMD(F)}`, () => opSetField(t.id, "dates", { start: S, finish: F }));
+      else redraw("ganttRows");
+    },
+    cancel: () => { hideTip(); redraw("ganttRows"); }, // Escape draws nothing
+  });
+}
 // Our own double-click detection: bars are re-rendered between clicks, so native dblclick can't find them.
 let lastBarClick = null;
 function barClicked(t) {
@@ -3065,7 +3365,50 @@ Object.assign(UI, {
   form: false, formTab: lsGet("pm.formTab", "children"), mgAll: lsGet("pm.mgAll", false),
   notesWithSub: lsGet("pm.notesWithSub", true), noteDrafts: new Map(), editNote: null,
   secClosed: new Set(lsGet("pm.formClosed", [])),
+  formFocus: null, // one-shot: the data-f field to focus (and select) when the panel next draws
+  hist: [], histCur: null, histMode: null, flashRel: null, // Back history (DECISIONS #81)
 });
+
+// ---------- Back history ----------
+// Every record a panel shows is recorded as it draws, so every way of opening one is caught in one place. Entries are
+// { kind: "task" | "risk" | "mitigant", id, projectId, tab }. histMode is one-shot: "back" (going back, don't record
+// the record being left) or "replace" (stepping through the outline with the keyboard replaces the current entry).
+const HIST_MAX = 50;
+function noteVisit(entry) {
+  const cur = UI.histCur, mode = UI.histMode; UI.histMode = null;
+  entry.projectId = M.projectId;
+  if (cur && cur.kind === entry.kind && cur.id === entry.id) { cur.tab = entry.tab; return; }
+  if (cur && !mode) { UI.hist.push(cur); if (UI.hist.length > HIST_MAX) UI.hist.splice(0, UI.hist.length - HIST_MAX); }
+  UI.histCur = entry;
+}
+const histValid = e => e.projectId === M.projectId && (e.kind === "task" ? M.tasks.has(e.id) : !!recOf(e)) && !(UI.histCur && UI.histCur.kind === e.kind && UI.histCur.id === e.id);
+const backTarget = () => { for (let i = UI.hist.length - 1; i >= 0; i--) if (histValid(UI.hist[i])) return UI.hist[i]; return null; };
+function clearHistory() { UI.hist = []; UI.histCur = null; UI.histMode = null; UI.flashRel = null; }
+const recordPanelOpen = () => (UI.form && formViews.has(UI.view)) || (UI.view === "risks" && !!UI.riskForm);
+function goBack() {
+  let e;
+  while ((e = UI.hist.pop()) && !histValid(e));
+  if (!e) { redraw("formForce", "risks"); return; } // nothing valid left: the button goes
+  UI.flashRel = UI.histCur && { kind: UI.histCur.kind, id: UI.histCur.id };
+  UI.histMode = "back";
+  if (e.kind === "task") { if (e.tab) UI.formTab = e.tab; openRecord(e.id); }
+  else openRiskRecord(e.kind, e.id);
+}
+function histLabel(e) {
+  if (e.kind === "task") { const t = M.tasks.get(e.id); return shortText(`${t.wbs} ${t.name}`, 32); }
+  return shortText(`${e.kind === "risk" ? "Risk" : "Mitigant"}: ${recLabel(recOf(e))}`, 32);
+}
+function backButton() {
+  const e = backTarget(); if (!e) return null;
+  const label = histLabel(e);
+  return h("button", { class: "f-back", "data-back": "", title: `Back to ${label} (Alt+←, or your mouse's Back button)`, onclick: goBack }, "← ", label);
+}
+// After going Back, flash the row of the record just left if the panel lists it (a new subtask under its phase).
+function flashRelRow(pane) {
+  const f = UI.flashRel; UI.flashRel = null; if (!f) return;
+  const row = pane.querySelector(f.kind === "task" ? `tr[data-id="${f.id}"]` : `tr[data-mit="${f.id}"]`);
+  if (row) { row.classList.add("flash"); row.scrollIntoView({ block: "nearest" }); setTimeout(() => row.classList.remove("flash"), 1400); }
+}
 // Collapsible section header; open/closed state is remembered per browser.
 function secHead(key, title, ...extras) {
   const closed = UI.secClosed.has(key);
@@ -3087,7 +3430,7 @@ const formHost = () => UI.view === "raci" ? $("raciSplit") : $("split");
 const formViews = new Set(["plan", "raci"]);
 function openRecord(id) {
   if (!M.tasks.has(id)) return;
-  if (!formViews.has(UI.view)) switchView("plan");
+  if (!formViews.has(UI.view)) { UI.form = false; switchView("plan"); } // closed while the page switches, so the old record isn't drawn (and recorded) first
   UI.form = true;
   if (UI.selId !== id) { UI.editNote = null; selectTask(id); } // selectTask re-renders the form
   else redraw("formForce");
@@ -3153,11 +3496,18 @@ function renderForm(force = false) {
     return;
   }
   if (UI.editNote && !one("SELECT 1 FROM note WHERE id=? AND created_at=?", [UI.editNote.id, UI.editNote.created])) UI.editNote = null;
+  if (UI.formFocus && UI.secClosed.has("details")) { UI.secClosed.delete("details"); lsSet("pm.formClosed", [...UI.secClosed]); } // the field to focus lives there
+  noteVisit({ kind: "task", id: t.id, tab: UI.formTab }); // first, so the Back button below already leaves this record out
   pane.append(formHeader(t), formFields(t));
   if (t.isSummary) pane.append(miniGanttSection(t));
   pane.append(notesSection(t), relatedSection(t));
   pane.scrollTop = scroll;
   refocus(pane, mark, { typed: same }); // typing never follows you to another record
+  flashRelRow(pane);
+  if (UI.formFocus) {
+    const el = pane.querySelector(`[data-f="${UI.formFocus}"]`); UI.formFocus = null;
+    if (el) { el.focus(); el.select?.(); }
+  }
 }
 
 // Another view changed the task while a form field has focus: update the other fields, keep the one being typed in.
@@ -3179,7 +3529,7 @@ function formHeader(t) {
   const crumbs = [];
   for (let x = t.parent; x; x = x.parent) crumbs.unshift(h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(x.id); } }, `${x.wbs} ${x.name}`), h("span", { class: "sep" }, "›"));
   const proj = M.projects.find(p => p.id === M.projectId);
-  return h("div", { class: "f-head" },
+  return h("div", { class: "f-head" }, backButton(),
     h("div", { class: "f-title" },
       h("div", { class: "f-crumbs" }, h("span", {}, proj?.name || ""), h("span", { class: "sep" }, "›"), ...crumbs),
       h("h2", {}, h("span", { class: "f-kind" }, recordLabel(t)), h("span", { class: "f-wbs" }, t.wbs), t.name)),
@@ -3345,7 +3695,7 @@ function noteEntry(o, n) {
       const focus = () => { const ta = $(o.pane).querySelector(".n-edit"); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } };
       focus(); setTimeout(focus, 0); // again once a render held for the click (holdFormRender) has run
     } }, "Edit"),
-    editing ? null : h("button", { class: "link danger", onclick: () => { if (confirm("Delete this work note? (Undo is available.)")) mutate(`${label}: deleted a work note`, () => opDeleteNote(n.id)); } }, "Delete"));
+    editing ? null : h("button", { class: "link danger", onclick: () => { if (mutate(`${label}: deleted a work note`, () => opDeleteNote(n.id))) toast("Deleted a work note", "", { undo: true }); } }, "Delete"));
   let body;
   if (editing) {
     const ta = h("textarea", { class: "n-edit", "data-keep": "note-edit", rows: Math.min(10, n.body.split("\n").length + 1) });
@@ -3389,12 +3739,11 @@ const relTable = (heads, rows, empty) => rows.length
 function relChildren(t) {
   const add = h("button", {
     onclick: () => {
-      const last = t.children.at(-1);
       UI.collapsed.delete(t.id); saveCollapsed();
-      if (mutate("Added subtask", () => opAddTask({ parentId: t.id, name: "New task", ...newTaskDefaults(last || t) }))) toast("Subtask added. Click it to open its record and rename it");
+      let id; if (mutate("Added subtask", () => { id = opAddTask({ parentId: t.id, name: "New task", ...newTaskDefaults() }); })) { UI.formFocus = "name"; openRecord(id); }
     }
   }, "＋ New subtask");
-  const rows = t.children.map(c => h("tr", { class: "click" + (c.isSummary ? " summary" : ""), onclick: () => openRecord(c.id) },
+  const rows = t.children.map(c => h("tr", { class: "click" + (c.isSummary ? " summary" : ""), "data-id": c.id, onclick: () => openRecord(c.id) },
     h("td", {}, c.wbs), h("td", {}, (c.isMilestone ? "◆ " : "") + c.name), h("td", {}, fmtShort(c.S)), h("td", {}, fmtShort(c.F)),
     h("td", {}, c.P + "%"), h("td", { html: html`<span class="st ${stClass(c.ST)}">${c.ST}</span>` }),
     h("td", { html: html`<span class="chips">${rChips(c)}</span>` }),
@@ -3410,18 +3759,16 @@ function relDeps(t, dir) {
     const lag = h("input", { type: "number", value: d.lag, title: "Lag in working days (negative = lead)", style: { width: "64px" } });
     const ch = () => mutate(`Link ${M.tasks.get(d.pred_id).wbs} → ${M.tasks.get(d.succ_id).wbs}: ${type.value} ${lag.value}d`, () => opUpdateDep(d.id, type.value, +lag.value));
     type.addEventListener("change", ch); lag.addEventListener("change", ch);
-    return h("tr", {}, h("td", {}, h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(o.id); } }, o.wbs)), h("td", {}, o.name),
+    return h("tr", { "data-id": o.id }, h("td", {}, h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(o.id); } }, o.wbs)), h("td", {}, o.name),
       h("td", {}, type), h("td", {}, lag), h("td", { title: d.violated ? "Dates conflict with this link. Dates are never moved automatically." : "" }, d.violated ? "⚠ conflict" : "OK"),
-      h("td", {}, h("button", { class: "x", title: "Remove link", onclick: () => mutate("Removed link", () => opRemoveDep(d.id)) }, "✕")));
+      h("td", {}, h("button", { class: "x", title: "Remove link", onclick: () => { if (mutate("Removed link", () => opRemoveDep(d.id))) toast(`Removed link ${M.tasks.get(d.pred_id)?.wbs ?? ""} → ${M.tasks.get(d.succ_id)?.wbs ?? ""}`, "", { undo: true }); } }, "✕")));
   });
   const linked = new Set(list.map(d => dir === "in" ? d.pred_id : d.succ_id));
-  const add = h("select", {}, h("option", { value: "" }, dir === "in" ? "＋ Add predecessor…" : "＋ Add successor…"),
-    ...M.order.filter(x => x !== t && !isAncestor(x, t) && !isAncestor(t, x) && !linked.has(x.id)).map(x => h("option", { value: x.id }, `${x.wbs} ${x.name}`)));
-  add.addEventListener("change", () => {
-    const oid = +add.value; if (!oid) return;
-    const [p, s] = dir === "in" ? [oid, t.id] : [t.id, oid];
-    mutate(`Linked ${M.tasks.get(p).wbs} → ${M.tasks.get(s).wbs}`, () => opAddDep(p, s, "FS", null));
-  });
+  const add = h("button", { onclick: () => openTaskPicker(add.getBoundingClientRect(), {
+    title: `${dir === "in" ? "Predecessor" : "Successor"} of ${t.wbs} ${shortText(t.name, 40)}`,
+    exclude: new Set(M.order.filter(x => x === t || isAncestor(x, t) || isAncestor(t, x) || linked.has(x.id)).map(x => x.id)),
+    onPick: oid => { const [p, s] = dir === "in" ? [oid, t.id] : [t.id, oid]; mutate(`Linked ${M.tasks.get(p).wbs} → ${M.tasks.get(s).wbs}`, () => opAddDep(p, s, "FS", null)); },
+  }) }, dir === "in" ? "＋ Add predecessor…" : "＋ Add successor…");
   return h("div", {}, h("div", { class: "rel-bar" }, add),
     relTable([dir === "in" ? "Predecessor" : "Successor", "Name", "Type", "Lag (d)", "Dates", ""], rows, dir === "in" ? "Nothing has to happen before this task." : "Nothing waits on this task."));
 }
@@ -3446,10 +3793,11 @@ function relRaci(t) {
 }
 function relRisks(t) {
   const list = M.mitByTask.get(t.id) || [];
-  const rows = list.map(m => h("tr", { class: "click", onclick: () => openRiskRecord("mitigant", m.id) },
+  const rows = list.map(m => h("tr", { class: "click", "data-mit": m.id, onclick: () => openRiskRecord("mitigant", m.id) },
     h("td", {}, m.risk.name), h("td", {}, m.text), h("td", {}, m.eff + (m.is_control ? " · control" : "")), h("td", {}, m.achieved ? "✓" : "—"),
     h("td", {}, h("button", { class: "x", title: "Unlink", onclick: e => { e.stopPropagation(); mutate(`Unlinked ${t.wbs} from a mitigant`, () => opUnlinkTask(m.id, t.id)); } }, "✕"))));
-  return h("div", {}, h("div", { class: "hint", style: { margin: "0 0 6px" } }, "Mitigants this task implements. Link more by dragging a mitigant onto this task on the Risks page."),
+  const add = h("button", { onclick: () => openMitigantPicker(add.getBoundingClientRect(), t) }, "＋ Link a mitigant…");
+  return h("div", {}, h("div", { class: "rel-bar" }, add, h("span", { class: "hint" }, "Mitigants this task implements. You can also drag a mitigant onto this task on the Risks page.")),
     relTable(["Risk", "Mitigant", "Status", "Achieved", ""], rows, "This task doesn't implement any mitigant."));
 }
 function relIssues(t) {
@@ -3561,6 +3909,7 @@ function riskRowEl(r) {
     else if (e.key === "Escape") { name.value = r.name; name.blur(); }
     e.stopPropagation();
   });
+  name.addEventListener("paste", e => riskPaste(e, r, null));
   const sel = (field, title) => { const s = h("select", { class: "rk-lmh", title }, ...Object.entries(LMH).map(([k, v]) => h("option", { value: k, selected: r[field] === k }, k || "–"))); s.addEventListener("change", () => mutate(`Risk ${title} → ${LMH[s.value]}`, () => opUpdateRisk(r.id, { [field]: s.value }))); return s; };
   const tr = h("tr", { class: "rk-risk" + (isSel(r) ? " sel" : ""), "data-risk": r.id },
     h("td", { class: "rk-drag", title: "Drag onto a task in the plan" }, "⠿"),
@@ -3587,6 +3936,7 @@ function mitRowEl(m) {
     } else if (e.key === "Escape") { ta.value = m.text; ta.blur(); }
     e.stopPropagation();
   });
+  ta.addEventListener("paste", e => riskPaste(e, m.risk, m));
   const st = statusSelect(m, "rk-st");
   const ctl = h("input", { type: "checkbox", checked: !!m.is_control, title: "Control: achieved only when Tested" });
   ctl.addEventListener("change", () => mutate(`Mitigant ${ctl.checked ? "is" : "is not"} a control`, () => opUpdateMitigant(m.id, { is_control: ctl.checked })));
@@ -3623,18 +3973,25 @@ function statusSelect(m, cls = "") {
 const openBtn = (kind, id) => h("button", { class: "open-rec rk-open", title: "Open record", onclick: e => { e.stopPropagation(); openRiskRecord(kind, id); } }, "↗");
 const isSel = rec => UI.riskSel && UI.riskSel.kind === rec.kind && UI.riskSel.id === rec.id;
 function focusRisk(key, select) { UI.riskFocus = { key, select }; redraw("risks"); }
+// Deletes at once and offers Undo, like tasks.
 function deleteRiskRec(r) {
   const n = r.mitigants.length;
-  if (n && !confirm(`Delete risk “${r.name}” and its ${n} mitigant${n > 1 ? "s" : ""}? (Undo is available.)`)) return;
-  mutate(`Deleted risk “${r.name}”`, () => opDeleteRisk(r.id));
+  if (mutate(`Deleted risk “${r.name}”`, () => opDeleteRisk(r.id))) toast(`Deleted risk “${shortText(r.name, 40)}”${n ? ` and its ${n} mitigant${n > 1 ? "s" : ""}` : ""}`, "", { undo: true });
 }
 function deleteMitRec(m) {
-  if (m.tasks.length && !confirm(`Delete this mitigant? It is linked to ${m.tasks.length} task(s); the tasks stay. (Undo is available.)`)) return;
-  mutate("Deleted mitigant", () => opDeleteMitigant(m.id));
+  const n = m.tasks.length;
+  if (mutate("Deleted mitigant", () => opDeleteMitigant(m.id))) toast(`Deleted mitigant${n ? `; its ${n} linked task${n > 1 ? "s stay" : " stays"} in the plan` : ""}`, "", { undo: true });
 }
-function quickTask(m, place) {
+// ＋ Task opens the new task's record on the Plan page, and Back comes home to the mitigant (DECISIONS #89). Dragging a
+// mitigant between tasks (place) keeps the small naming pop-up, so several can be linked in a row without leaving the page.
+function quickTask(m, place, { open = !place } = {}) {
   let id;
   if (mutate(`Created a task for a mitigant`, () => { id = opTaskFromMitigant(m.id, place); })) {
+    if (open) {
+      if (UI.view === "risks") noteVisit({ kind: "mitigant", id: m.id, tab: null }); // from the grid with no record open: Back still has somewhere to go
+      UI.formFocus = "name"; openRecord(id);
+      return;
+    }
     // After the (possibly deferred) re-render: flash it in the plan and offer an inline rename.
     setTimeout(() => {
       flashPlanRow(id);
@@ -3745,11 +4102,70 @@ function chooseMitigant(ev, r, suggested, then) {
   openPop(ev.clientX, ev.clientY, box);
 }
 
+// From a task's record: link one of the project's mitigants without the drag (mitigants and tasks are many-to-many).
+function openMitigantPicker(rect, t) {
+  const items = M.risks.flatMap(r => r.mitigants.filter(m => !m.tasks.includes(t)).map(m => ({ id: m.id, label: `${shortText(r.name, 40)} › ${shortText(m.text, 70)}`, text: (r.name + " " + m.text).toLowerCase() })));
+  openSearchPicker(rect, { title: `Mitigant that ${t.wbs} implements`, placeholder: "Search risks and mitigants…", items, match: (x, s) => x.text.includes(s), empty: M.risks.length ? "Every mitigant is already linked." : "No risks yet. Add them on the Risks page.", onPick: mid => linkMit(mid, t.id) });
+}
+
+// ---------- Column paste in the grid (DECISIONS #84) ----------
+// More than one line pasted into a risk name or a mitigant asks what to do; one line pastes as usual.
+function riskPaste(e, r, m) {
+  const text = e.clipboardData?.getData("text/plain") ?? "", { lines, cols } = parseClipColumn(text);
+  if (lines.length < 2) return;
+  e.preventDefault();
+  const el = e.target, rect = el.getBoundingClientRect(), caret = [el.selectionStart, el.selectionEnd];
+  const n = lines.filter(Boolean).length;
+  if (!m) {
+    const shown = M.risks.filter(riskMatches), from = shown.findIndex(x => x.id === r.id), room = shown.length - from;
+    openPasteChooser(rect, { title: `Paste ${lines.length} lines into Risk name`, lines, cols, key: "paste.risk", options: [
+      { id: "fill", label: "Fill down risk names", sub: `Overwrite names from this risk down${lines.length > room ? `; adds ${lines.slice(room).filter(Boolean).length} new risks past the end` : ""}`, run: () => cmdRiskPaste("fill", r.id, null, lines) },
+      { id: "add", label: "Add as new risks below this one", sub: `${n} new risk${n === 1 ? "" : "s"}`, run: () => cmdRiskPaste("add", r.id, null, lines) },
+    ] });
+    return;
+  }
+  openPasteChooser(rect, { title: `Paste ${lines.length} lines into a mitigant`, lines, cols, key: "paste.mit", options: [
+    { id: "add", label: "Add as mitigants of this risk", sub: `${n} new mitigant${n === 1 ? "" : "s"} after this one`, run: () => cmdRiskPaste("add", r.id, m.id, lines) },
+    { id: "fill", label: "Fill down this risk's mitigants", sub: "Overwrite this and the following mitigants; adds new ones past the end", run: () => cmdRiskPaste("fill", r.id, m.id, lines) },
+    { id: "text", label: "Keep it as text in this mitigant", sub: "Paste the lines into this one cell", run: () => {
+      const ta = $("view-risks").querySelector(`[data-keep="m${m.id}:text"]`); if (!ta) return;
+      ta.focus(); try { ta.setSelectionRange(...caret); } catch { }
+      ta.setRangeText(text.replace(/\r\n?/g, "\n").replace(/\n$/, ""), ta.selectionStart, ta.selectionEnd, "end"); autoGrow(ta);
+    } },
+  ] });
+}
+// mode "fill" | "add"; mitId null means risk names. One change, one undo step, a message with Undo.
+function cmdRiskPaste(mode, riskId, mitId, lines) {
+  let last = null;
+  const ok = mutate(`Pasted ${lines.length} ${mitId ? "mitigants" : "risk names"}`, () => {
+    if (!mitId) {
+      const shown = M.risks.filter(riskMatches), rows = mode === "fill" ? shown.slice(shown.findIndex(x => x.id === riskId)) : [];
+      let after = mode === "fill" ? (shown.at(-1)?.id ?? riskId) : riskId, renamed = 0, added = 0;
+      lines.forEach((l, i) => {
+        const r = rows[i];
+        if (r) { last = r.id; if (l && l !== r.name) { opUpdateRisk(r.id, { name: l }); renamed++; } }
+        else if (l) { after = last = opAddRisk({ name: l, afterId: after }); added++; }
+      });
+      opNotes.push(mode === "fill" ? `Pasted ${lines.length} risk names: ${renamed} renamed, ${added} new risk${added === 1 ? "" : "s"}.` : `Added ${added} risk${added === 1 ? "" : "s"}.`);
+      return;
+    }
+    const r = M.riskById.get(riskId), mits = r.mitigants, rows = mode === "fill" ? mits.slice(mits.findIndex(x => x.id === mitId)) : [];
+    let after = mode === "fill" ? mits.at(-1).id : mitId, changed = 0, added = 0;
+    lines.forEach((l, i) => {
+      const m = rows[i];
+      if (m) { last = m.id; if (l && l !== m.text) { opUpdateMitigant(m.id, { text: l }); changed++; } }
+      else if (l) { after = last = opAddMitigant(riskId, l, after); added++; }
+    });
+    opNotes.push(mode === "fill" ? `Pasted ${lines.length} mitigants: ${changed} changed, ${added} new.` : `Added ${added} mitigant${added === 1 ? "" : "s"} to “${shortText(r.name, 40)}”.`);
+  });
+  if (ok && last != null) focusRisk(mitId ? `m${last}:text` : `r${last}:name`);
+  return ok;
+}
+
 // ---------- Record panel (same slide-out pattern as tasks) ----------
 function openRiskRecord(kind, id) {
-  if (UI.view !== "risks") switchView("risks");
-  UI.riskSel = { kind, id }; UI.riskForm = true; UI.editNote = null;
-  redraw("risks");
+  UI.riskSel = { kind, id }; UI.riskForm = true; UI.editNote = null; // before switching, so the page draws this record and no other
+  if (UI.view !== "risks") switchView("risks"); else redraw("risks");
 }
 function sizeRiskForm() {
   const split = $("riskSplit").clientWidth || innerWidth;
@@ -3768,7 +4184,8 @@ function renderRiskForm() {
   const proj = M.projects.find(p => p.id === M.projectId);
   const crumbs = [h("span", {}, proj?.name || ""), h("span", { class: "sep" }, "›"), h("span", {}, "Risks")];
   if (rec.kind === "mitigant") crumbs.push(h("span", { class: "sep" }, "›"), h("a", { href: "#", onclick: e => { e.preventDefault(); openRiskRecord("risk", rec.risk_id); } }, shortText(rec.risk.name, 40)));
-  pane.append(h("div", { class: "f-head" },
+  noteVisit({ kind: rec.kind, id: rec.id, tab: null }); // first, so the Back button below already leaves this record out
+  pane.append(h("div", { class: "f-head" }, backButton(),
     h("div", { class: "f-title" }, h("div", { class: "f-crumbs" }, ...crumbs),
       h("h2", {}, h("span", { class: "f-kind" }, rec.kind === "risk" ? "Risk" : rec.is_control ? "Control" : "Mitigant"), shortText(recLabel(rec), 90))),
     h("div", { class: "f-acts" }, h("button", { class: "icon", title: "Close (Esc)", onclick: closeRiskForm }, "✕"))));
@@ -3779,6 +4196,7 @@ function renderRiskForm() {
     empty: "No work notes yet.", post: body => mutate(`${rec.kind === "risk" ? "Risk" : "Mitigant"}: added a work note`, () => opAddRecNote(rec.kind, rec.id, body)),
   }));
   pane.scrollTop = scroll;
+  flashRelRow(pane);
 }
 function recField(label, el, cls = "") { return h("div", { class: "f-field " + cls }, h("label", {}, label), el); }
 function recText(rec, field, multi, attrs = {}) {
@@ -3832,7 +4250,7 @@ function mitFields(m) {
 }
 function riskMitList(r) {
   const add = h("button", { onclick: () => { let id; if (mutate("Added mitigant", () => { id = opAddMitigant(r.id); })) openRiskRecord("mitigant", id); } }, "＋ Mitigant");
-  const rows = r.mitigants.map(m => h("tr", { class: "click", onclick: () => openRiskRecord("mitigant", m.id) },
+  const rows = r.mitigants.map(m => h("tr", { class: "click", "data-mit": m.id, onclick: () => openRiskRecord("mitigant", m.id) },
     h("td", {}, m.text), h("td", {}, m.eff), h("td", {}, m.is_control ? "Control" : ""), h("td", {}, m.achieved ? "✓" : "✗"),
     h("td", {}, m.tasks.map(t => t.wbs).join(", "))));
   return h("section", { class: "f-sec" }, h("div", { class: "f-sec-h" }, h("h3", {}, "Mitigants"), h("span", { class: "hint" }, r.response === "accept" ? "Accepted risk" : `${r.achievedCount} of ${r.mitigants.length} achieved`), h("span", { class: "spacer" }), add),
@@ -3840,13 +4258,12 @@ function riskMitList(r) {
 }
 function mitTaskList(m) {
   const linked = new Set(m.tasks.map(t => t.id));
-  const addSel = h("select", {}, h("option", { value: "" }, "＋ Link a task…"), ...M.order.filter(t => !linked.has(t.id)).map(t => h("option", { value: t.id }, `${t.wbs} ${t.name}`)));
-  addSel.addEventListener("change", () => { const id = +addSel.value; if (id) linkMit(m.id, id); });
-  const rows = m.tasks.map(t => h("tr", {},
+  const addBtn = h("button", { onclick: () => openTaskPicker(addBtn.getBoundingClientRect(), { title: `Task that implements “${shortText(m.text, 40)}”`, exclude: linked, onPick: id => linkMit(m.id, id) }) }, "＋ Link a task…");
+  const rows = m.tasks.map(t => h("tr", { "data-id": t.id },
     h("td", {}, h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(t.id); } }, t.wbs)), h("td", {}, t.name),
     h("td", {}, fmtShort(t.S)), h("td", {}, fmtShort(t.F)), h("td", { html: html`<span class="st ${stClass(t.ST)}">${t.ST}</span>` }),
     h("td", {}, h("button", { class: "x", title: "Unlink", onclick: () => mutate(`Unlinked ${t.wbs}`, () => opUnlinkTask(m.id, t.id)) }, "✕"))));
-  return h("section", { class: "f-sec" }, h("div", { class: "f-sec-h" }, h("h3", {}, "Implemented by"), h("span", { class: "spacer" }), addSel, h("button", { onclick: () => quickTask(m) }, "＋ Task")),
+  return h("section", { class: "f-sec" }, h("div", { class: "f-sec-h" }, h("h3", {}, "Implemented by"), h("span", { class: "spacer" }), addBtn, h("button", { onclick: () => quickTask(m) }, "＋ Task")),
     relTable(["WBS", "Task", "Start", "Finish", "Status", ""], rows, "No tasks yet. Drag this mitigant onto a task, or click ＋ Task."));
 }
 
@@ -4153,6 +4570,73 @@ function openPartyPickerFor(rect, o) {
   openPop(rect.left, rect.bottom + 4, box, save);
 }
 
+// ---------- Paste chooser (DECISIONS #84) ----------
+// Asks what a multi-line paste should do. The preview shows what was copied, so it opens even with one option.
+// options: [{ id, label, sub, run() }]; key remembers the last choice per column ("paste.name"), highlighted next time.
+function openPasteChooser(rect, { title, lines, cols = 1, options, key }) {
+  const saved = lsGet("pm.pasteChoice", {});
+  let cur = Math.max(0, options.findIndex(o => o.id === saved[key]));
+  const pick = i => {
+    const o = options[i]; if (!o) return;
+    closePop(); lsSet("pm.pasteChoice", { ...lsGet("pm.pasteChoice", {}), [key]: o.id });
+    o.run();
+  };
+  const btns = options.map((o, i) => h("button", { class: "pick-btn", "data-opt": o.id, onclick: () => pick(i), onfocus: () => { cur = i; mark(); } },
+    h("kbd", {}, String(i + 1)), " ", o.label, o.sub ? h("span", { class: "sub" }, o.sub) : null));
+  const mark = () => btns.forEach((b, i) => { b.classList.toggle("on", i === cur); b.setAttribute("aria-selected", String(i === cur)); });
+  const box = h("div", { class: "paste-pick", tabindex: "-1", role: "dialog", "aria-label": title },
+    h("h4", {}, title),
+    h("ol", { class: "paste-prev" }, ...lines.slice(0, 5).map(l => h("li", {}, l ? shortText(l, 80) : h("i", { class: "hint" }, "(blank)")))),
+    lines.length > 5 ? h("div", { class: "hint" }, `…and ${lines.length - 5} more`) : null,
+    cols > 1 ? h("div", { class: "msg warn" }, `You copied ${cols} columns. Only the first is used. Copy one column at a time.`) : null,
+    h("div", { class: "pick" }, ...btns));
+  box.addEventListener("keydown", e => {
+    if (e.key === "Escape") return; // the global handler closes the popover
+    const n = /^[1-9]$/.test(e.key) ? +e.key : 0;
+    if (n && n <= options.length) pick(n - 1);
+    else if (e.key === "ArrowDown" || e.key === "ArrowUp") { cur = (cur + (e.key === "ArrowDown" ? 1 : options.length - 1)) % options.length; mark(); }
+    else if (e.key === "Enter") pick(cur);
+    else return;
+    e.preventDefault(); e.stopPropagation();
+  });
+  mark();
+  openPop(rect.left, rect.bottom + 4, box);
+  box.focus();
+  return box;
+}
+
+// ---------- Searchable pickers (DECISIONS #88) ----------
+// items: [{ id, label, depth? }], match(item, lowercased search). Type to filter, ↑/↓ and Enter or a click to pick.
+function openSearchPicker(rect, { title, placeholder, items, match, onPick, empty = "Nothing to pick." }) {
+  const search = h("input", { type: "search", placeholder, style: { width: "100%" } });
+  const list = h("div", { class: "pick" });
+  let shown = [], cur = 0;
+  const mark = () => list.querySelectorAll(".pick-btn").forEach((b, i) => { b.classList.toggle("on", i === cur); b.setAttribute("aria-selected", String(i === cur)); });
+  const pick = i => { const x = shown[i]; if (!x) return; closePop(); onPick(x.id); };
+  const draw = () => {
+    const s = search.value.trim().toLowerCase(), all = s ? items.filter(x => match(x, s)) : items;
+    shown = all.slice(0, 300); cur = 0;
+    list.replaceChildren(...shown.map((x, i) => h("button", { class: "pick-btn", "data-id": x.id, style: x.depth ? { paddingLeft: 8 + x.depth * 14 + "px" } : null, onclick: () => pick(i) }, x.label)));
+    if (!shown.length) list.append(h("div", { class: "hint", style: { padding: "6px" } }, items.length ? "No match." : empty));
+    if (all.length > shown.length) list.append(h("div", { class: "hint", style: { padding: "6px" } }, `${all.length - shown.length} more. Type to narrow down`));
+    mark();
+  };
+  search.addEventListener("input", draw);
+  search.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); cur = clamp(cur + (e.key === "ArrowDown" ? 1 : -1), 0, Math.max(0, shown.length - 1)); mark(); list.querySelectorAll(".pick-btn")[cur]?.scrollIntoView({ block: "nearest" }); }
+    else if (e.key === "Enter") { e.preventDefault(); pick(cur); }
+  });
+  draw();
+  openPop(rect.left, rect.bottom + 4, h("div", { class: "search-pick" }, h("h4", {}, title), search, list));
+  search.focus();
+}
+// The project's tasks in outline order; search by name or WBS (equal or a prefix, as the outline filter does).
+function openTaskPicker(rect, { title, exclude = new Set(), onPick }) {
+  const items = M.order.filter(t => !exclude.has(t.id)).map(t => ({ id: t.id, label: `${t.wbs} ${t.name}`, depth: t.depth, t }));
+  openSearchPicker(rect, { title, placeholder: "Search by name or WBS…", items, onPick, empty: "No other tasks to pick.",
+    match: (x, s) => x.t.name.toLowerCase().includes(s) || x.t.wbs === s || x.t.wbs.startsWith(s + ".") });
+}
+
 // ---------- Dependency editor popover ----------
 function openDepEditor(depId, x, y) {
   const d = M.deps.find(z => z.id === depId); if (!d) return;
@@ -4166,16 +4650,20 @@ function openDepEditor(depId, x, y) {
     h("div", { class: "hint" }, `${p.wbs} ${p.name}`), h("div", { class: "hint" }, `→ ${s.wbs} ${s.name}`),
     h("div", { class: "frm", style: { marginTop: "8px" } }, h("label", {}, "Type"), type, h("label", {}, "Lag (days)"), h("div", {}, lag, h("span", { class: "hint" }, "  negative = lead"))),
     d.violated ? h("div", { class: "msg warn" }, "Dates currently conflict with this link. Dates are never moved automatically.") : null,
-    h("div", { class: "acts" }, h("button", { class: "danger", onclick: () => { closePop(); UI.selDep = null; mutate(`Removed link ${p.wbs} → ${s.wbs}`, () => opRemoveDep(d.id)); } }, "Delete link"), h("button", { onclick: closePop }, "Close")));
+    h("div", { class: "acts" }, h("button", { class: "danger", onclick: () => { closePop(); UI.selDep = null; if (mutate(`Removed link ${p.wbs} → ${s.wbs}`, () => opRemoveDep(d.id))) toast(`Removed link ${p.wbs} → ${s.wbs}`, "", { undo: true }); } }, "Delete link"), h("button", { onclick: closePop }, "Close")));
   openPop(x + 8, y + 8, box);
 }
 
 // ---------- RACI matrix ----------
 // By team (default): columns are teams; each cell shows the team's own role plus its members' roles (home team).
-// Click cycles the team's own role; the small + hands that role to one of the team's members (DECISIONS #61).
+// Click opens a picker for the team's own role; the small + hands that role to one of the team's members (DECISIONS #61).
+// The matrix is a keyboard grid too (DECISIONS #78): arrows move, R A C I set a role, Shift+A sets A/R, Delete clears,
+// Enter opens the picker, + opens the member picker. Alt+click keeps the old one-step cycle.
 UI.raciBy = lsGet("pm.raciBy", "team");
 const RACI_SEQ = ["", "R", "A", "A/R", "C", "I", ""];
 const roleLabel = (t, role) => role === "A" && t.r_is_a ? "A/R" : role;
+const roleTitle = r => r === "A/R" ? "Accountable and Responsible" : ROLE_NAMES[r] || "No role";
+let raciCur = ""; // data-* selector of the cell that holds the grid's one tab stop
 // The matrix is drawn like the outline (DECISIONS #77): only the rows near the viewport, between two spacer rows
 // that keep the scrollbar honest, so a big plan costs no more per click or scroll than a small one.
 let RX = null; // { cls, head, rows, rowHtml(t), cols, rowH }
@@ -4188,18 +4676,20 @@ function renderRaciRows(whole = false) {
   const wrap = $("raciWrap"), body = wrap.querySelector("tbody"); if (!RX?.rows || (!whole && !body)) return;
   const { scrollTop, scrollLeft } = wrap, rowH = RX.rowH, top = scrollTop - (wrap.querySelector("thead")?.offsetHeight ?? 60);
   const first = Math.max(0, Math.floor(top / rowH) - 10), last = Math.min(RX.rows.length, Math.ceil((top + wrap.clientHeight) / rowH) + 10);
-  const pad = n => n > 0 ? html`<tr class="pad"><td colspan="${RX.cols + 2}" style="height:${n * rowH}px;padding:0;border:0"></td></tr>` : "";
+  const pad = n => n > 0 ? html`<tr class="pad" aria-hidden="true"><td colspan="${RX.cols + 2}" style="height:${n * rowH}px;padding:0;border:0"></td></tr>` : "";
   const rows = html`${pad(first)}${RX.rows.slice(first, last).map(RX.rowHtml)}${pad(RX.rows.length - last)}`;
-  if (whole) setHtml(wrap, html`<table class="${RX.cls}"><thead>${RX.head}</thead><tbody>${rows}</tbody></table>`); else setHtml(body, rows);
+  if (whole) setHtml(wrap, html`<table class="${RX.cls}" role="grid" aria-label="RACI matrix" aria-rowcount="${RX.rows.length + 1}"><thead>${RX.head}</thead><tbody>${rows}</tbody></table>`); else setHtml(body, rows);
   wrap.scrollTop = scrollTop; wrap.scrollLeft = scrollLeft;
+  // Roving tab stop: Tab enters the grid at the last cell used (or the first drawn one), arrows do the rest.
+  (raciCur && wrap.querySelector("td.cell" + raciCur) || wrap.querySelector("td.cell"))?.setAttribute("tabindex", "0");
   const real = wrap.querySelector("tbody tr:not(.pad)")?.offsetHeight; // measured once the first rows are on screen
   if (real && real !== rowH) { RX.rowH = real; renderRaciRows(); }
 }
 function renderRaci() {
   $$("#raciBySeg button").forEach(b => b.classList.toggle("on", b.dataset.by === UI.raciBy));
   $("raciHint").textContent = UI.raciBy === "team"
-    ? "Click a cell to cycle the team's role: — R A A/R C I. Use + to hand it to a team member. Click a task to open its record"
-    : "Click a cell to cycle: — R A A/R C I. Click a task to open its record";
+    ? "Click a cell to pick the team's role; + hands it to a member. Keys: arrows, R A C I, Shift+A for A/R, Delete, +"
+    : "Click a cell to pick a role. Keys: arrows, R A C I, Shift+A for A/R, Delete clears";
   $("raciOnlyUsed").parentElement.lastChild.textContent = UI.raciBy === "team" ? " Only teams with assignments" : " Only people/teams with assignments";
   RX = RX && { rowH: RX.rowH };
   if (UI.raciBy === "team") return renderRaciTeams();
@@ -4218,7 +4708,7 @@ function renderRaci() {
       const r = map.get(p.id) || "";
       const ghost = !r && inh.inherited && inh.list.some(a => a.party_id === p.id);
       const ar = t.r_is_a && (r === "A" || ghost); // Responsible = Accountable
-      return html`<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" title="${p.name}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? r + (ar ? "/R" : "") : ghost ? html`<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
+      return html`<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" role="gridcell" tabindex="-1" title="${p.name}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? r + (ar ? "/R" : "") : ghost ? html`<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
     });
     return html`<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
   };
@@ -4243,9 +4733,9 @@ function renderRaciTeams() {
       const ownL = own ? roleLabel(t, own.role) : "";
       const top = ownL || (mem[0] ? roleLabel(t, mem[0].role) : "");
       const tip = [own ? `${c.name} (team): ${ownL}` : "", ...mem.map(r => `${partyName(r.party_id)}: ${roleLabel(t, r.role)}`)].filter(Boolean).join("\n") || `${c.name}: none`;
-      const chips = mem.map(r => html`<span class="mr r-${r.role}" data-p="${r.party_id}">${roleLabel(t, r.role)}·${initials(partyName(r.party_id))}</span>`);
-      const plus = c.team && (M.members.get(c.id) || []).length ? html`<button class="plus" data-plus="${c.id}" title="Give this to a member of ${c.name}">+</button>` : "";
-      return html`<td class="cell tcell ${top[0] || ""}" data-t="${t.id}" data-team="${c.id}" title="${tip}">${ownL ? html`<b>${ownL}</b>` : ""}${chips}${plus}</td>`;
+      const chips = mem.map(r => html`<span class="mr r-${r.role}" data-p="${r.party_id}" title="${partyName(r.party_id)}: ${roleTitle(roleLabel(t, r.role))}">${roleLabel(t, r.role)}·${initials(partyName(r.party_id))}</span>`);
+      const plus = c.team && (M.members.get(c.id) || []).length ? html`<button class="plus" data-plus="${c.id}" tabindex="-1" title="Give this to a member of ${c.name} (key: +)">+</button>` : "";
+      return html`<td class="cell tcell ${top[0] || ""}" data-t="${t.id}" data-team="${c.id}" role="gridcell" tabindex="-1" title="${tip}">${ownL ? html`<b>${ownL}</b>` : ""}${chips}${plus}</td>`;
     });
     return html`<tr class="${t.isSummary ? "summary" : ""}${t.id === UI.selId && UI.form ? " sel" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
   };
@@ -4271,25 +4761,83 @@ function teamMemberPicker(anchor, tid, teamId) {
   box.append(list);
   openPop(anchor.left, anchor.bottom + 4, box);
 }
+const raciCellRole = td => { const tid = +td.dataset.t, pid = +(td.dataset.team || td.dataset.p); return roleLabel(M.tasks.get(tid), rolesOf(tid).find(r => r.party_id === pid)?.role || ""); };
+// One change, one undo step. A/R = Accountable plus the task's "Responsible same as Accountable" switch (DECISIONS #48).
+function setRaciRole(td, next) {
+  if (td.dataset.team === "0") return; // "No team" column: display only
+  const tid = +td.dataset.t, pid = +(td.dataset.team || td.dataset.p), t = M.tasks.get(tid), cur = raciCellRole(td);
+  if (next === cur) return;
+  mutate(`RACI ${t.wbs}: ${partyName(pid)} → ${next || "none"}`, () => {
+    if (next === "A/R") { opSetRole(tid, pid, "A"); opSetRIsA(tid, true); return; }
+    if (cur === "A/R") opSetRIsA(tid, false);
+    opSetRole(tid, pid, next || null);
+  });
+}
+// The picker under a cell: every role in one click, and in the team view who of the team has which role, by full name.
+function raciPicker(td) {
+  const tid = +td.dataset.t, team = td.dataset.team, pid = +(team ?? td.dataset.p), t = M.tasks.get(tid), cur = raciCellRole(td);
+  const box = h("div", { class: "raci-pick" }, h("h4", {}, `${team === "0" ? "No team" : partyName(pid) + (team ? " (team)" : "")} · ${t.wbs} ${t.name}`));
+  if (team !== "0") {
+    const btns = h("div", { class: "roles" }, ...RACI_SEQ.slice(0, -1).map(r => h("button", {
+      class: "role-btn" + (r ? " r-" + r[0] : ""), "aria-pressed": String(r === cur), title: roleTitle(r),
+      onclick: () => { closePop(); setRaciRole(td, r); },
+    }, r || "—")));
+    btns.addEventListener("keydown", e => {
+      const all = [...btns.children], i = all.indexOf(document.activeElement);
+      if (e.key === "ArrowRight" || e.key === "ArrowLeft") { e.preventDefault(); all[(i + (e.key === "ArrowRight" ? 1 : all.length - 1)) % all.length].focus(); }
+    });
+    box.append(btns);
+  }
+  if (team) {
+    const mem = rolesOf(tid).filter(r => M.parties.get(r.party_id)?.kind === "person" && (homeTeam(r.party_id) ?? 0) === pid);
+    if (mem.length) box.append(h("div", { class: "pick" }, ...mem.map(r => h("div", { class: "hint" }, `${partyName(r.party_id)}: ${roleTitle(roleLabel(t, r.role))}`))));
+    if (team !== "0" && (M.members.get(pid) || []).length) box.append(h("div", { class: "acts" }, h("button", { onclick: () => { const a = td.getBoundingClientRect(); closePop(); teamMemberPicker(a, tid, pid); } }, `Give to a member of ${partyName(pid)}… (+)`)));
+  }
+  box.append(h("div", { class: "hint" }, "On a cell: R A C I, Shift+A for A/R, Delete clears, arrows move. Alt+click cycles."));
+  const a = td.getBoundingClientRect(); openPop(a.left, a.bottom + 4, box);
+  ($("pop").querySelector('[aria-pressed="true"]') || $("pop").querySelector("button"))?.focus();
+}
+// Move focus to another cell. Rows off screen aren't drawn, so scroll there and draw them first.
+function raciMove(td, dr, dc) {
+  const wrap = $("raciWrap"), cells = [...td.parentElement.querySelectorAll("td.cell")];
+  const ci = clamp(dc === -Infinity ? 0 : dc === Infinity ? cells.length - 1 : cells.indexOf(td) + dc, 0, cells.length - 1);
+  const ri = clamp(RX.rows.findIndex(t => t.id === +td.dataset.t) + dr, 0, RX.rows.length - 1), tid = RX.rows[ri].id;
+  const rowOf = () => wrap.querySelector(`td.cell[data-t="${tid}"]`)?.parentElement;
+  if (!rowOf()) { wrap.scrollTop = ri * RX.rowH - wrap.clientHeight / 2; renderRaciRows(); }
+  const el = rowOf()?.querySelectorAll("td.cell")[ci]; if (!el) return;
+  el.focus({ preventScroll: true });
+  // Bring it into view clear of the sticky header row and task column.
+  const head = wrap.querySelector("thead").offsetHeight, side = el.parentElement.querySelector(".tn").offsetWidth;
+  if (el.offsetTop - head < wrap.scrollTop) wrap.scrollTop = el.offsetTop - head;
+  else if (el.offsetTop + el.offsetHeight > wrap.scrollTop + wrap.clientHeight) wrap.scrollTop = el.offsetTop + el.offsetHeight - wrap.clientHeight;
+  if (el.offsetLeft - side < wrap.scrollLeft) wrap.scrollLeft = el.offsetLeft - side;
+  else if (el.offsetLeft + el.offsetWidth > wrap.scrollLeft + wrap.clientWidth) wrap.scrollLeft = el.offsetLeft + el.offsetWidth - wrap.clientWidth;
+}
 function initRaci() {
   $("raciWrap").addEventListener("click", e => {
     const link = e.target.closest("[data-open]"); if (link) { e.preventDefault(); openRecord(+link.dataset.open); redraw("raci"); return; }
     const plus = e.target.closest("[data-plus]");
     if (plus) { const td = plus.closest("td.cell"); teamMemberPicker(plus.getBoundingClientRect(), +td.dataset.t, +plus.dataset.plus); return; }
     const td = e.target.closest("td.cell"); if (!td) return;
-    if (td.dataset.team === "0") return; // "No team" column: display only
-    const tid = +td.dataset.t, pid = +(td.dataset.team || td.dataset.p), t = M.tasks.get(tid);
-    const role = rolesOf(tid).find(r => r.party_id === pid)?.role || "";
-    const cur = role === "A" && t.r_is_a ? "A/R" : role;
-    // A/R = Accountable plus the task's "Responsible same as Accountable" switch (DECISIONS #48).
-    const next = RACI_SEQ[RACI_SEQ.indexOf(cur) + 1];
-    const keep = $("raciWrap").scrollTop, keepL = $("raciWrap").scrollLeft;
-    mutate(`RACI ${t.wbs}: ${partyName(pid)} → ${next || "none"}`, () => {
-      if (next === "A/R") { opSetRole(tid, pid, "A"); opSetRIsA(tid, true); return; }
-      if (cur === "A/R") opSetRIsA(tid, false);
-      opSetRole(tid, pid, next || null);
-    });
-    $("raciWrap").scrollTop = keep; $("raciWrap").scrollLeft = keepL;
+    if (e.altKey) setRaciRole(td, RACI_SEQ[RACI_SEQ.indexOf(raciCellRole(td)) + 1]); // the old one-step cycle
+    else raciPicker(td);
+  });
+  $("raciWrap").addEventListener("focusin", e => {
+    const td = e.target.closest("td.cell"); if (!td) return;
+    for (const x of $("raciWrap").querySelectorAll('td.cell[tabindex="0"]')) if (x !== td) x.tabIndex = -1;
+    td.tabIndex = 0; raciCur = dataSel(td);
+  });
+  $("raciWrap").addEventListener("keydown", e => {
+    const td = e.target.closest("td.cell"); if (!td || e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key, page = Math.max(1, Math.floor($("raciWrap").clientHeight / RX.rowH) - 1);
+    const move = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1], Home: [0, -Infinity], End: [0, Infinity], PageUp: [-page, 0], PageDown: [page, 0] }[k];
+    const role = { r: "R", a: e.shiftKey ? "A/R" : "A", c: "C", i: "I" }[k.toLowerCase()] ?? (k === "Delete" || k === "Backspace" ? "" : null);
+    if (move) raciMove(td, ...move);
+    else if (role != null) setRaciRole(td, role);
+    else if (k === "Enter" || k === " " || k === "F2") raciPicker(td);
+    else if (k === "+" && td.querySelector("[data-plus]")) teamMemberPicker(td.getBoundingClientRect(), +td.dataset.t, +td.dataset.team);
+    else return;
+    e.preventDefault();
   });
   $$("#raciBySeg button").forEach(b => b.addEventListener("click", () => { UI.raciBy = b.dataset.by; lsSet("pm.raciBy", UI.raciBy); redraw("raci"); }));
   $("raciOnlyUsed").addEventListener("change", () => redraw("raci"));
@@ -4299,30 +4847,103 @@ function initRaci() {
 
 // ---------- People & teams ----------
 function assignmentCounts() { const c = new Map(); for (const r of q("SELECT party_id, COUNT(*) n FROM (SELECT party_id FROM raci UNION ALL SELECT party_id FROM risk_party UNION ALL SELECT party_id FROM mitigant_party) GROUP BY party_id")) c.set(r.party_id, r.n); return c; }
+// Two tables edited in place, like the Risks grid (DECISIONS #92). Rows carry data-party and inputs data-f, so focus
+// survives the redraw after every change; UI.peopleFocus ("id:field") puts the cursor in a new row once.
+UI.peopleFocus = null;
 function renderPeople() {
-  const counts = assignmentCounts();
-  const pl = $("peopleList"), tl = $("teamList"); pl.innerHTML = ""; tl.innerHTML = "";
-  if (!M.people.length) pl.append(h("div", { class: "hint", style: { padding: "8px" } }, "No people yet."));
-  for (const p of M.people) {
-    const teams = (M.teamsOf.get(p.id) || []).map(partyName);
-    pl.append(h("div", { class: "prow" + (p.active ? "" : " inactive") },
-      h("div", { class: "avatar", style: { background: avatarColor(p) } }, initials(p.name)),
-      h("div", { class: "info" }, h("div", { class: "nm" }, p.name + (p.active ? "" : " (inactive)")),
-        h("div", { class: "meta" }, [p.title, p.email, teams.length ? "Teams: " + teams.join(", ") : ""].filter(Boolean).join(" · ") || "—")),
-      h("span", { class: "hint", title: "Assignments across all projects" }, `${counts.get(p.id) || 0} tasks`),
-      h("button", { onclick: () => showInvolvement(p.id) }, "Involvement"),
-      h("button", { onclick: () => editParty(p.id) }, "Edit")));
+  const counts = assignmentCounts(), focus = UI.peopleFocus; UI.peopleFocus = null;
+  const txt = (p, f, ph) => {
+    const el = bindText(h("input", { value: p[f] || "", "data-f": f, placeholder: ph }), p[f] || "",
+      v => { if (!mutate(`${p.kind === "team" ? "Team" : "Person"} ${p.name}: ${f} → “${v.trim()}”`, () => opUpdateParty(p.id, { [f]: v }))) el.value = p[f] || ""; });
+    el.addEventListener("keydown", e => {
+      if (e.key === "Enter") { // like a spreadsheet: save and go to the same column in the next row (Shift: the row above)
+        e.preventDefault(); el._commit();
+        const tr = el.closest("tr"), next = (e.shiftKey ? tr.previousElementSibling : tr.nextElementSibling)?.querySelector(`[data-f="${f}"]`);
+        if (next) { next.focus(); next.select(); }
+      } else if (e.key === "Escape") { el.value = p[f] || ""; el._cancel(); el.blur(); }
+    });
+    return el;
+  };
+  const active = p => { const cb = h("input", { type: "checkbox", checked: !!p.active, "data-f": "active", title: "Can be assigned to tasks" }); cb.addEventListener("change", () => mutate(`${p.name} ${cb.checked ? "active" : "inactive"}`, () => opUpdateParty(p.id, { active: cb.checked }))); return cb; };
+  const acts = p => h("td", { class: "pt-acts" }, h("button", { onclick: () => showInvolvement(p.id) }, "Involvement"), h("button", { onclick: () => editParty(p.id) }, "Edit…"));
+  const tasks = p => h("td", { class: "num", title: "Assignments across all projects" }, String(counts.get(p.id) || 0));
+  const people = M.people.map(p => {
+    const team = h("select", { "data-f": "team" }, h("option", { value: "" }, "— no team —"), ...M.teams.map(tm => h("option", { value: tm.id, selected: homeTeam(p.id) === tm.id }, tm.name)));
+    team.addEventListener("change", () => mutate(`${p.name}: team → ${team.value ? partyName(+team.value) : "none"}`, () => opSetPersonTeam(p.id, +team.value || null)));
+    return h("tr", { "data-party": p.id, class: p.active ? "" : "inactive" },
+      h("td", {}, txt(p, "name", "Name")), h("td", {}, txt(p, "email", "name@company.com")), h("td", {}, txt(p, "title", "Role or job title")),
+      h("td", {}, team), h("td", { class: "c" }, active(p)), tasks(p), acts(p));
+  });
+  const teams = M.teams.map(p => h("tr", { "data-party": p.id, class: p.active ? "" : "inactive" },
+    h("td", {}, txt(p, "name", "Name")), h("td", { class: "pt-mem" }, (M.members.get(p.id) || []).map(partyName).join(", ") || h("span", { class: "hint" }, "No members")),
+    h("td", { class: "c" }, active(p)), tasks(p), acts(p)));
+  const table = (kind, heads, rows, empty) => rows.length
+    ? h("table", { class: "ptable", "data-kind": kind }, h("thead", {}, h("tr", {}, ...heads.map(x => h("th", {}, x)))), h("tbody", {}, ...rows))
+    : h("div", { class: "hint", style: { padding: "8px" } }, empty);
+  $("peopleList").replaceChildren(table("person", ["Name", "Email", "Title", "Team", "Active", "Tasks", ""], people, "No people yet. Click ＋ Person, or add one and paste a column of names into it."));
+  $("teamList").replaceChildren(table("team", ["Name", "Members", "Active", "Tasks", ""], teams, "No teams yet."));
+  if (focus) {
+    const [id, f] = focus.split(":"), el = $("view-people").querySelector(`tr[data-party="${id}"] [data-f="${f}"]`);
+    if (el) { el.focus(); el.select?.(); }
   }
-  if (!M.teams.length) tl.append(h("div", { class: "hint", style: { padding: "8px" } }, "No teams yet."));
-  for (const p of M.teams) {
-    const mem = (M.members.get(p.id) || []).map(partyName);
-    tl.append(h("div", { class: "prow" + (p.active ? "" : " inactive") },
-      h("div", { class: "avatar team", style: { background: avatarColor(p) } }, initials(p.name)),
-      h("div", { class: "info" }, h("div", { class: "nm" }, p.name + (p.active ? "" : " (inactive)")), h("div", { class: "meta" }, mem.length ? mem.join(", ") : "No members")),
-      h("span", { class: "hint" }, `${counts.get(p.id) || 0} tasks`),
-      h("button", { onclick: () => showInvolvement(p.id) }, "Involvement"),
-      h("button", { onclick: () => editParty(p.id) }, "Edit")));
-  }
+}
+// Multi-line paste into a People or Teams column: the same chooser as the outline. Fill down follows the rows as shown
+// when the paste started.
+function peoplePaste(e) {
+  const el = e.target.closest?.("[data-f]"), tr = e.target.closest?.("tr[data-party]"); if (!el || !tr) return;
+  const f = el.dataset.f; if (!["name", "email", "title", "team"].includes(f)) return;
+  const { lines, cols } = parseClipColumn(e.clipboardData?.getData("text/plain") ?? "");
+  if (lines.length < 2) return;
+  e.preventDefault();
+  if (el._cancel) { el._cancel(); el.value = el._orig; } // the paste replaces whatever was half-typed
+  const table = tr.closest("table"), kind = table.dataset.kind, rows = [...table.querySelectorAll("tr[data-party]")].map(x => +x.dataset.party);
+  const from = rows.indexOf(+tr.dataset.party), order = rows.slice(from), nouns = kind === "team" ? "teams" : "people";
+  const label = { name: "Name", email: "Email", title: "Title", team: "Team" }[f];
+  const run = mode => () => cmdPeoplePaste(kind, f, mode, order, lines);
+  const past = lines.slice(order.length).filter(Boolean).length;
+  const options = [{ id: "fill", label: f === "name" ? "Fill down names" : "Fill down", sub: f === "name" ? `Overwrite names from this row down${past ? `; adds ${past} new ${past === 1 ? (kind === "team" ? "team" : "person") : nouns} past the end` : ""}` : f === "team" ? "Match team names; a team that doesn't exist yet is created" : `Overwrite ${label.toLowerCase()} from this row down`, run: run("fill") }];
+  if (f === "name") options.push({ id: "add", label: `Add as new ${nouns}`, sub: "Names already on the roster are skipped", run: run("add") });
+  openPasteChooser(el.getBoundingClientRect(), { title: `Paste ${lines.length} lines into ${kind === "team" ? "Teams" : "People"} › ${label}`, lines, cols, key: `paste.${kind}.${f}`, options });
+}
+// rows: party ids in the order shown, from the row pasted into. One change, one undo step, a message with Undo.
+function cmdPeoplePaste(kind, f, mode, rows, lines) {
+  let last = null;
+  const noun = kind === "team" ? "team" : "person", nouns = kind === "team" ? "teams" : "people", many = (n, a, b) => `${n} ${n === 1 ? a : b}`;
+  const ok = mutate(`Pasted ${lines.length} lines into ${nouns}: ${f}`, () => {
+    const byName = new Map([...M.parties.values()].filter(p => p.kind === kind).map(p => [p.name.trim().toLowerCase(), p.id]));
+    if (mode === "add") {
+      const dup = []; let added = 0;
+      for (const l of lines) {
+        if (!l) continue;
+        if (byName.has(l.toLowerCase())) { dup.push(l); continue; }
+        last = opAddParty(kind, l); byName.set(l.toLowerCase(), last); added++;
+      }
+      opNotes.push(`Added ${many(added, noun, nouns)}.`);
+      if (dup.length) opNotes.push(`Already on the roster: ${dup.join(", ")}.`);
+      return;
+    }
+    const teams = new Map(M.teams.map(t => [t.name.trim().toLowerCase(), t.id])), created = [];
+    let changed = 0, added = 0, over = 0;
+    lines.forEach((l, i) => {
+      const id = rows[i];
+      if (id == null) { if (f === "name" && l) { last = opAddParty(kind, l); added++; } else if (l) over++; return; }
+      last = id;
+      if (f === "name") { if (l) { opUpdateParty(id, { name: l }); changed++; } }
+      else if (f === "team") { // one team per person still holds (DECISIONS #60)
+        let tid = null;
+        if (l) { tid = teams.get(l.toLowerCase()); if (tid == null) { tid = opAddParty("team", l); teams.set(l.toLowerCase(), tid); created.push(l); } }
+        opSetPersonTeam(id, tid); changed++;
+      } else { opUpdateParty(id, { [f]: l }); changed++; }
+    });
+    opNotes.push(f === "name" ? `Pasted ${lines.length} names: ${changed} renamed, ${many(added, "new " + noun, "new " + nouns)}.` : `Pasted ${f} into ${many(changed, "row", "rows")}.`);
+    if (created.length) opNotes.push(`Created teams: ${created.join(", ")}.`);
+    if (over) opNotes.push(`${many(over, "line", "lines")} didn't fit below the last row.`);
+  });
+  if (ok && last != null) UI.peopleFocus = `${last}:${f}`;
+  return ok;
+}
+function addPartyRow(kind) {
+  let id; if (mutate(kind === "team" ? "Added team" : "Added person", () => { id = opAddParty(kind, kind === "team" ? "New team" : "New person"); })) UI.peopleFocus = `${id}:name`;
 }
 function editParty(id, kind) {
   const p = id ? M.parties.get(id) : { kind, name: "", email: "", title: "", active: 1 };
@@ -4418,7 +5039,7 @@ function renderProjectMenu() {
 }
 function switchProject(id) {
   M.projectId = id; lsSet("pm.project", id);
-  UI.selId = null; UI.selDep = null;
+  UI.selId = null; UI.anchorId = null; UI.selDep = null; clearHistory();
   refresh(); loadCollapsed(); computeRows(); redraw("all");
   const b = $("ganttBody"); const r = projectRange(); if (SC) scrollGanttTo(r.lo, 0.05); b.scrollTop = 0;
 }
@@ -4477,20 +5098,21 @@ async function showBackups() {
 // ---------- Help ----------
 function showHelp() {
   const rows = [
-    ["Insert", "New task below"], ["Ctrl+Insert", "New subtask"], ["Tab / Shift+Tab", "Indent / outdent (also Alt+Shift+→ / ←)"], ["Alt+Shift+↑/↓", "Move task up / down"],
-    ["Alt+← / Alt+→", "Collapse / expand"], ["Enter or F2", "Edit cell (Enter again to save)"], ["Type", "Start editing the cell"], ["Esc", "Cancel edit, or clear the selection so Tab moves on"],
-    ["Delete", "Delete task (and subtasks)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+I", "Open / close the record form"], ["Arrows, PgUp/PgDn", "Move around"],
+    ["Insert", "New task below (with the record open, it opens the new record)"], ["Ctrl+Insert", "New subtask"], ["Shift+click / Shift+↑↓", "Select a block of rows; ⇤ ⇥ and Delete then work on the whole block"],
+    ["Ctrl+V", "Paste a column copied from Excel: choose fill down, add as subtasks or add below. # (WBS) nests rows by the pasted numbers"], ["Tab / Shift+Tab", "Next / previous cell (past the row's end, out of the outline)"], ["Alt+Shift+→ / Alt+Shift+←", "Indent / outdent"], ["Alt+Shift+↑/↓", "Move task up / down"],
+    ["Alt+← / Alt+→", "Collapse / expand"], ["Enter or F2", "Edit cell (Enter again to save)"], ["Type", "Start editing the cell"], ["Esc", "Cancel edit, or clear the selection"],
+    ["Delete", "Delete task and subtasks (Undo appears in the message)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+I", "Open / close the record form"], ["Alt+← (in the record)", "Back to the record you came from (or the mouse's Back button)"], ["Arrows, PgUp/PgDn", "Move around"],
   ];
   const body = h("div", { class: "modal-b" },
     h("h3", { style: { marginTop: 0 } }, "Keyboard (outline grid)"),
     h("div", { class: "help-grid" }, ...rows.flatMap(([k, v]) => [h("div", {}, ...k.split(" / ").flatMap((x, i) => i ? [" / ", h("kbd", {}, x)] : [h("kbd", {}, x)])), h("div", {}, v)])),
     h("h3", {}, "Gantt"),
-    h("ul", {}, h("li", {}, "Drag a bar to move it; drag its left or right edge to change dates."),
+    h("ul", {}, h("li", {}, "Drag a bar to move it; drag its left or right edge to change dates. A new task has no dates: drag across its empty row to draw its bar."),
       h("li", {}, "Hover a bar to see link handles (○). Drag from a handle onto another bar: the end you start from and the half of the target you drop on decide the type (Finish→Start, Start→Start, …)."),
       h("li", {}, "Click an arrow to change its type and lag, or delete it. Red arrows mean the dates conflict with the link; dates are never moved automatically."),
       h("li", {}, "Double-click a bar, or click ↗ next to a task name, to open its record form.")),
     h("h3", {}, "Record form"),
-    h("p", {}, "Shows every field of a task, a mini Gantt of a summary task's subtasks, its work notes (dated, editable) and related records in tabs. It slides in over the outline; the Gantt stays visible, and clicking a bar switches records. Esc or ✕ closes it. ", h("kbd", {}, "Ctrl+Enter"), " posts a note."),
+    h("p", {}, "Shows every field of a task, a mini Gantt of a summary task's subtasks, its work notes (dated, editable) and related records in tabs. It slides in over the outline; the Gantt stays visible, and clicking a bar switches records. ", h("b", {}, "← Back"), " returns to the record you were on before, even across pages. Esc or ✕ closes it. ", h("kbd", {}, "Ctrl+Enter"), " posts a note."),
     h("h3", {}, "Predecessors cell"),
     h("p", {}, "Type WBS numbers separated by commas, with an optional type and lag: ", h("kbd", {}, "1.2"), " ", h("kbd", {}, "3FS+2d"), " ", h("kbd", {}, "2.1SS-1d"), " ", h("kbd", {}, "4FF+1w")),
     h("h3", {}, "Saving"),
@@ -5414,6 +6036,7 @@ function initToolbar() {
   $("addTaskBtn").onclick = () => cmdAdd("task");
   $("addSubBtn").onclick = () => { if (!selTask()) return toast("Select the task that should get a subtask"); cmdAdd("task", true); };
   $("addMsBtn").onclick = () => cmdAdd("milestone");
+  $("pasteBtn").onclick = pasteFromClipboard;
   $("indentBtn").onclick = () => cmdStructure("indent");
   $("outdentBtn").onclick = () => cmdStructure("outdent");
   $("upBtn").onclick = () => cmdStructure("up");
@@ -5437,8 +6060,9 @@ function initToolbar() {
     $("fileMenu").hidden = true;
     ({ new: newPlanFile, open: openPlanFile, copy: saveCopy, reconnect, import: startImport, riskImport: startRiskImport, xlsx: exportXlsx, csv: exportCsv, print: () => { if (UI.view !== "plan") switchView("plan"); printPlan(); }, help: showHelp, backups: showBackups })[act]?.();
   });
-  $("addPersonBtn").onclick = () => editParty(null, "person");
-  $("addTeamBtn").onclick = () => editParty(null, "team");
+  $("addPersonBtn").onclick = () => addPartyRow("person");
+  $("addTeamBtn").onclick = () => addPartyRow("team");
+  $("peopleList").addEventListener("paste", peoplePaste); $("teamList").addEventListener("paste", peoplePaste);
   $$("#issueSeg button").forEach(b => b.addEventListener("click", () => { issueFilter = b.dataset.f; $$("#issueSeg button").forEach(x => x.classList.toggle("on", x === b)); redraw("issues"); }));
   $("modalBack").addEventListener("pointerdown", e => { if (e.target === $("modalBack")) closeModal(); });
   // Committing a form field blurs it first, so the re-render after the change isn't skipped.
@@ -5459,9 +6083,14 @@ function initToolbar() {
   });
   let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "risks") { if (UI.riskForm) sizeRiskForm(); $$("#riskBody textarea").forEach(autoGrow); } if (UI.view === "plan") { if (UI.form) relayoutForm(); else if (lsGet("pm.split", null) == null) pane.style.width = gridFullWidth() + "px"; redraw("gridRows", "gantt"); } }, 120); });
 
+  // The mouse's Back button goes Back in the record panel, and never takes the browser away from the app (DECISIONS #81).
+  for (const type of ["pointerup", "mouseup"]) addEventListener(type, e => { if (e.button === 3 && recordPanelOpen()) { e.preventDefault(); if (type === "pointerup") goBack(); } }, true);
+  addEventListener("auxclick", e => { if (e.button === 3) e.preventDefault(); }, true);
+
   document.addEventListener("keydown", e => {
     const ctrl = e.ctrlKey || e.metaKey;
     const typing = e.target.matches("input,textarea,select") && !e.target.matches("[type=checkbox]");
+    if (e.altKey && !e.shiftKey && !ctrl && e.key === "ArrowLeft" && ($("formPane").contains(e.target) || $("riskFormPane").contains(e.target))) { e.preventDefault(); goBack(); return; }
     if (e.key === "Escape") { if (!$("pop").hidden) { closePop(); return; } if (modalOpen()) { closeModal(); return; } $("logPanel").hidden = true; if (!typing && !modalOpen()) { if (UI.view === "risks" && UI.riskForm) { closeRiskForm(); return; } if (UI.form && (UI.view === "plan" || UI.view === "raci")) { toggleForm(false); return; } } }
     if (modalOpen() || typing) return;
     if (ctrl && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
@@ -5473,7 +6102,7 @@ function initToolbar() {
 hooks.onChange = onDataChanged;
 hooks.onSaveState = () => redraw("save");
 hooks.onReadOnly = () => { $("roText").textContent = readOnlyWhy; $("roBanner").hidden = false; };
-hooks.onReplace = () => { UI.selId = null; UI.noteDrafts.clear(); UI.editNote = null; UI.riskSel = null; UI.riskForm = false; UI.riskFocus = null; }; // ids from another file mean nothing here
+hooks.onReplace = () => { UI.selId = null; UI.anchorId = null; clearHistory(); UI.noteDrafts.clear(); UI.editNote = null; UI.riskSel = null; UI.riskForm = false; UI.riskFocus = null; }; // ids from another file mean nothing here
 setInterval(() => { if (fileHandle) redraw("save"); }, 15000); // "saved 2 min ago" ages
 
 (async () => {
@@ -5501,19 +6130,20 @@ setInterval(() => { if (fileHandle) redraw("save"); }, 15000); // "saved 2 min a
   const drawn = fn => (...a) => { try { return fn(...a); } finally { drawNow(); } }; // console/test calls see the result drawn
   window.PM = {
     M, UI, q, run, one, scalar, undo: drawn(undo), redo: drawn(redo), flushSaves, refresh, redraw, drawNow, notesFor,
-    mutate: drawn(mutate), selectTask: drawn(selectTask), switchView: drawn(switchView), switchProject: drawn(switchProject), openRecord: drawn(openRecord), toggleForm: drawn(toggleForm),
+    mutate: drawn(mutate), selectTask: drawn(selectTask), goBack: drawn(goBack), selBlock, blockTops, switchView: drawn(switchView), switchProject: drawn(switchProject), openRecord: drawn(openRecord), toggleForm: drawn(toggleForm),
     renderAll: drawn(() => redraw("all")), renderForm: drawn(force => redraw(force ? "formForce" : "form")),
     op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote, opSetRIsA,
-      opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote },
-    risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport: drawn(loadRiskImport), riskImportItems, doRiskImport: drawn(doRiskImport), openRiskRecord: drawn(openRiskRecord), closeRiskForm: drawn(closeRiskForm), renderRisks: drawn(() => redraw("risks")), get RI() { return RI; }, recNotes, toLMH },
-    util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml, markFocus, refocus },
+      opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote, opNestByWbs },
+    risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport: drawn(loadRiskImport), riskImportItems, doRiskImport: drawn(doRiskImport), openRiskRecord: drawn(openRiskRecord), closeRiskForm: drawn(closeRiskForm), quickTask: drawn(quickTask), cmdRiskPaste: drawn(cmdRiskPaste), linkMit: drawn(linkMit), renderRisks: drawn(() => redraw("risks")), get RI() { return RI; }, recNotes, toLMH },
+    util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml, markFocus, refocus, parseClipColumn, wbsLevels },
     io: { loadImportFile, buildPlan, doImport: drawn(doImport), collectPeople, exportWorkbook, csvText, autoMap, riskPreviewText, get W() { return W; } },
     db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get historyBytes() { return historyBytes(); }, set undoBudget(n) { undoBudget = n; trimUndo(); }, get undoBudget() { return undoBudget; }, get mirrorRev() { return mirrorRev; },
       get diskRev() { return diskRev; }, get readOnly() { return readOnly; }, get fileId() { return readFileId(db); },
       // test aid: attach a stand-in file handle without a picker
       attach(h, base = null) { fileHandle = h; filePerm = !!h; diskRev = base; }, endReadOnly() { readOnly = false; readOnlyWhy = ""; $("roBanner").hidden = true; } },
     gantt: { buildScale, get SC() { return SC; }, setGrain },
-    cmd: Object.fromEntries(Object.entries({ cmdAdd, cmdStructure, cmdDelete, startEdit, commitEdit, gridKey, toggleCollapse, showLevel, startImport, printPlan }).map(([k, f]) => [k, drawn(f)])),
+    ui: { openPasteChooser, openTaskPicker, openMitigantPicker, closePop: drawn(closePop) },
+    cmd: Object.fromEntries(Object.entries({ cmdAdd, cmdStructure, cmdDelete, startEdit, commitEdit, gridKey, toggleCollapse, showLevel, startImport, printPlan, cmdPaste, cmdPeoplePaste, addPartyRow, openGridPaste }).map(([k, f]) => [k, drawn(f)])),
     reset: drawn(() => { installDb(null); M.projectId = null; UI.selId = null; refresh(); loadCollapsed(); computeRows(); redraw("all"); }),
     get XLSX() { return XLSX; }, get SQL() { return SQL; },
   };

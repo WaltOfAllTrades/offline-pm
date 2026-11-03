@@ -305,7 +305,27 @@ window.runPmTests = async function () {
     P.selectTask(a, { col: "pred" });
     P.cmd.cmdAdd("task"); const ed2 = document.querySelector(".cell-editor"); ok(ed2, "new task editor"); ed2.value = "second"; P.cmd.commitEdit(0, 0);
     eq(P.M.order.map(t => t.name), ["after", "second"]);
-    P.selectTask(P.M.order[1].id); P.cmd.gridKey(new KeyboardEvent("keydown", { key: "Tab" })); eq(P.M.order[1].wbs, "1.1", "Tab indents");
+    P.selectTask(P.M.order[1].id, { col: "name" }); P.cmd.gridKey(new KeyboardEvent("keydown", { key: "Tab" }));
+    eq([P.M.order[1].wbs, P.UI.col], ["2", "start"], "Tab moves to the next cell and doesn't indent");
+  });
+  await test("grid", "Tab past the last cell leaves the grid; Shift+Tab past the first one too", () => {
+    fresh(); const a = T("A"); P.switchView("plan");
+    const gb = document.getElementById("gridBody"), key = (o = {}) => { const ev = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true, ...o }); gb.dispatchEvent(ev); return ev.defaultPrevented; };
+    P.selectTask(a, { col: "notes" }); ok(!key(), "not captured on the last column (Description)");
+    P.selectTask(a, { col: "name" }); ok(!key({ shiftKey: true }), "not captured going back from the first column");
+    ok(key(), "captured in the middle"); eq(P.UI.col, "start");
+  });
+  await test("undo", "delete offers Undo in the message; it stops working once something else changes", async () => {
+    fresh(); const a = T("A"), b = T("B"); P.switchView("plan");
+    P.selectTask(a); P.cmd.cmdDelete();
+    eq(P.M.order.map(t => t.name), ["B"], "deleted without a question");
+    const btn = () => document.querySelector("#toast .t-undo");
+    ok(btn(), "Undo offered"); btn().click(); P.drawNow();
+    eq(P.M.order.map(t => t.name), ["A", "B"], "Undo brought it back");
+    P.selectTask(b); P.cmd.cmdDelete(); const stale = btn();
+    m(() => O.opSetField(a, "name", "A2"));
+    stale.click(); P.drawNow();
+    eq(P.M.order.map(t => t.name), ["A2"], "a later change isn't undone by an old Undo");
   });
 
   await test("gantt", "grains and fit build sane scales", () => {
@@ -472,16 +492,20 @@ window.runPmTests = async function () {
     P.openRecord(b);
     const tab = k => inForm(`.rel-tab[data-tab=${k}]`);
     tab("pred").click();
-    let sel = inForm(".rel-body select"); sel.value = String(a); sel.dispatchEvent(new Event("change"));
+    // The searchable task picker (DECISIONS #88) replaced the long dropdowns.
+    const pickTask = (label, id) => { btnInForm(label).click(); const b2 = document.querySelector(`#pop .pick-btn[data-id="${id}"]`); ok(b2, "task offered in the picker"); b2.click(); };
+    pickTask("＋ Add predecessor…", a);
     eq(P.M.depsIn.get(b).map(d => d.pred_id), [a], "predecessor added");
     eq(tab("pred").querySelector(".cnt").textContent, "1", "count badge");
-    tab("succ").click(); sel = inForm(".rel-body select"); sel.value = String(c); sel.dispatchEvent(new Event("change"));
+    tab("succ").click(); pickTask("＋ Add successor…", c);
     eq(P.M.depsOut.get(b).map(d => d.succ_id), [c], "successor added");
-    ok(![...inForm(".rel-body select").options].some(o => o.value === String(c)), "linked task not offered again");
+    btnInForm("＋ Add successor…").click(); ok(!document.querySelector(`#pop .pick-btn[data-id="${c}"]`), "linked task not offered again"); P.ui.closePop();
+    let sel;
     tab("raci").click(); sel = allInForm(".rel-body select")[1]; sel.value = String(ana); sel.dispatchEvent(new Event("change"));
     eq(P.M.raci.get(b).map(r => [r.party_id, r.role]), [[ana, "R"]], "RACI added as R");
     tab("children").click(); btnInForm("＋ New subtask").click();
-    eq(task(b).children.length, 1, "subtask added"); ok(inForm(".mg"), "now a summary with mini gantt");
+    eq(task(b).children.length, 1, "subtask added"); eq(P.UI.selId, task(b).children[0].id, "the new subtask's record opens (DECISIONS #90)");
+    P.goBack(); eq(P.UI.selId, b, "Back to the parent"); ok(inForm(".mg"), "now a summary with mini gantt");
     eq(allInForm(".rel-body tbody tr").length, 1);
     tab("raid").click(); ok(inForm(".rel-soon"), "RAID placeholder"); eq(P.UI.formTab, "raid");
     tab("children").click(); P.toggleForm(false);
@@ -683,6 +707,8 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     document.querySelector('#riskSeg button[data-f="all"]').click();
     [...document.querySelectorAll(`tr[data-mit="${newId}"] button`)].find(b => b.textContent === "＋ Task").click();
     eq(mt(newId).tasks.length, 1, "＋ Task linked a new task");
+    eq([P.UI.view, P.UI.form, P.UI.selId], ["plan", true, mt(newId).tasks[0].id], "＋ Task opens the new task's record (DECISIONS #89)");
+    P.toggleForm(false); P.switchView("risks");
     ok(document.querySelector(`#riskPlanList .rp-row[data-id="${mt(newId).tasks[0].id}"] .sh`), "plan pane shows the shield");
     P.switchView("plan");
   });
@@ -725,7 +751,7 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     eq(R.recNotes("risk", r).map(n => n.body), ["Raised at steering"]);
     const mid = rk(r).mitigants[0].id; R.openRiskRecord("mitigant", mid);
     ok(fp2.querySelector(".f-kind").textContent === "Mitigant");
-    const sel = [...fp2.querySelectorAll("select")].find(s => s.options[0]?.textContent === "＋ Link a task…"); sel.value = String(t1); sel.dispatchEvent(new Event("change"));
+    [...fp2.querySelectorAll("button")].find(b => b.textContent === "＋ Link a task…").click(); document.querySelector(`#pop .pick-btn[data-id="${t1}"]`).click();
     eq(mt(mid).tasks.map(t => t.id), [t1], "linked from the record");
     document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     ok(!fp2.classList.contains("open"), "Esc closes");
@@ -863,22 +889,25 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     P.db.installDb(P.db.exportBytes()); eq([P.UI.riskSel, P.UI.riskForm], [null, false]);
     P.refresh(); P.switchView("plan");
   });
-  await test("raci-ra", "matrix cycle includes A/R; task names open the record", () => {
+  // RACI cells: a click opens the role picker, Alt+click cycles (DECISIONS #78).
+  const altClick = el => el.dispatchEvent(new MouseEvent("click", { bubbles: true, altKey: true }));
+  const pickRole = (el, r) => { el.click(); [...document.querySelectorAll("#pop .role-btn")].find(b => b.textContent === (r || "—")).click(); };
+  await test("raci-ra", "matrix Alt+click cycle includes A/R; task names open the record", () => {
     fresh(); const a = T("Build"); let ana;
     m(() => { ana = O.opAddParty("person", "Ana"); });
     P.UI.raciBy = "person"; P.switchView("raci"); document.getElementById("raciOnlyUsed").checked = false; P.renderAll();
     const cell = () => document.querySelector(`#raciWrap td.cell[data-t="${a}"][data-p="${ana}"]`);
-    const seen = []; for (let i = 0; i < 6; i++) { cell().click(); seen.push(cell().textContent); }
+    const seen = []; for (let i = 0; i < 6; i++) { altClick(cell()); seen.push(cell().textContent); }
     eq(seen, ["R", "A", "A/R", "C", "I", ""]);
-    cell().click(); cell().click(); cell().click(); eq([cell().textContent, task(a).r_is_a], ["A/R", 1]);
-    cell().click(); eq([cell().textContent, task(a).r_is_a], ["C", 0], "leaving A/R turns the switch off");
+    altClick(cell()); altClick(cell()); altClick(cell()); eq([cell().textContent, task(a).r_is_a], ["A/R", 1]);
+    altClick(cell()); eq([cell().textContent, task(a).r_is_a], ["C", 0], "leaving A/R turns the switch off");
     document.querySelector(`#raciWrap [data-open="${a}"]`).click();
     eq([P.UI.view, P.UI.selId, P.UI.form], ["raci", a, true], "task link opens its record on the RACI page");
     const fp3 = document.getElementById("formPane"); ok(fp3.classList.contains("open") && document.getElementById("raciSplit").contains(fp3), "panel slides out beside the matrix");
     P.toggleForm(false); P.switchView("plan"); ok(document.getElementById("split").contains(fp3) || !fp3.classList.contains("open"), "panel not left open on the RACI page");
     document.getElementById("raciOnlyUsed").checked = true;
   });
-  await test("raci-team", "one team per person; team view rolls up members; click cycles the team; + hands the role to a member", () => {
+  await test("raci-team", "one team per person; team view rolls up members; picker sets the team's role; + hands the role to a member", () => {
     fresh(); const a = T("Build"); let ana, ben, eng, ops;
     m(() => { ana = O.opAddParty("person", "Ana Ruiz"); ben = O.opAddParty("person", "Ben Okafor"); eng = O.opAddParty("team", "Eng"); ops = O.opAddParty("team", "Ops"); O.opSetMembers(eng, [ana, ben]); });
     m(() => O.opSetMembers(ops, [ben])); eq([P.M.teamsOf.get(ben), P.M.members.get(eng)], [[ops], [ana]], "joining Ops moved Ben out of Eng");
@@ -886,13 +915,39 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     P.UI.raciBy = "team"; P.switchView("raci"); document.getElementById("raciOnlyUsed").checked = true; P.renderAll();
     const cell = tm => document.querySelector(`#raciWrap td.tcell[data-t="${a}"][data-team="${tm}"]`);
     eq([cell(eng).querySelector(".mr").textContent, cell(ops).querySelector(".mr").textContent], ["R·AR", "C·BO"], "members roll up under their team");
-    cell(eng).click(); eq(P.M.raci.get(a).find(r => r.party_id === eng)?.role, "R", "click cycles the team's own role");
-    cell(eng).click(); cell(eng).click(); eq([cell(eng).querySelector("b").textContent, task(a).r_is_a], ["A/R", 1]);
+    eq(cell(eng).querySelector(".mr").title, "Ana Ruiz: Responsible", "chip tooltip has the full name");
+    cell(eng).click(); ok([...document.querySelectorAll("#pop .hint")].some(d => d.textContent === "Ana Ruiz: Responsible"), "picker lists members by full name");
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    pickRole(cell(eng), "R"); eq(P.M.raci.get(a).find(r => r.party_id === eng)?.role, "R", "picker sets the team's own role");
+    const steps = P.db.undoDepth; pickRole(cell(eng), "A/R"); eq([cell(eng).querySelector("b").textContent, task(a).r_is_a, P.db.undoDepth - steps], ["A/R", 1, 1], "straight to A/R in one undo step");
     cell(eng).querySelector(".plus").click();
     [...document.querySelectorAll("#pop .pick-btn")].find(b => b.textContent.startsWith("Ana Ruiz")).click();
     eq(P.M.raci.get(a).map(r => [P.M.parties.get(r.party_id).name, r.role]).sort(), [["Ana Ruiz", "A"], ["Ben Okafor", "C"]], "team's A moved to Ana (A/R switch kept)");
     eq(task(a).r_is_a, 1);
     P.switchView("plan");
+  });
+
+  await test("raci-keys", "RACI matrix is a keyboard grid: one tab stop, arrows move, letters set roles, Enter opens the picker", () => {
+    fresh(); const a = T("Build"), b = T("Test"); let ana, ben;
+    m(() => { ana = O.opAddParty("person", "Ana"); ben = O.opAddParty("person", "Ben"); });
+    const by = P.UI.raciBy, only = document.getElementById("raciOnlyUsed"), wasOnly = only.checked;
+    P.UI.raciBy = "person"; only.checked = false; P.switchView("raci");
+    const wrap = document.getElementById("raciWrap"), cell = (t, p) => wrap.querySelector(`td.cell[data-t="${t}"][data-p="${p}"]`);
+    const key = (k, o = {}) => document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...o }));
+    eq(wrap.querySelector("table").getAttribute("role"), "grid");
+    eq(wrap.querySelectorAll('td.cell[tabindex="0"]').length, 1, "exactly one tab stop");
+    cell(a, ana).focus(); key("r"); eq(P.M.raci.get(a).map(r => [r.party_id, r.role]), [[ana, "R"]], "R sets Responsible");
+    eq(document.activeElement, cell(a, ana), "focus stays on the redrawn cell");
+    key("ArrowRight"); eq(document.activeElement, cell(a, ben), "ArrowRight");
+    key("A", { shiftKey: true }); eq([P.M.raci.get(a).find(r => r.party_id === ben).role, task(a).r_is_a], ["A", 1], "Shift+A sets A/R");
+    key("ArrowDown"); eq(document.activeElement, cell(b, ben), "ArrowDown"); key("c"); key("Delete");
+    eq(P.M.raci.get(b) || [], [], "Delete clears");
+    key("Home"); eq(document.activeElement, cell(b, ana), "Home");
+    eq(wrap.querySelectorAll('td.cell[tabindex="0"]').length, 1, "tab stop follows focus");
+    key("Enter"); ok(!document.getElementById("pop").hidden && document.activeElement.closest("#pop"), "Enter opens the picker, focused");
+    document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    ok(document.getElementById("pop").hidden && document.activeElement === cell(b, ana), "Escape closes it and focus returns to the cell");
+    P.UI.raciBy = by; only.checked = wasOnly; P.switchView("plan");
   });
 
   // ---------- Trust boundary and save safety (DECISIONS #29, #62–#64) ----------
@@ -1193,7 +1248,7 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     wrap.scrollTop = wrap.scrollHeight; wrap.dispatchEvent(new Event("scroll"));
     const lastTask = P.M.order.at(-1), cell = wrap.querySelector(`td.cell[data-t="${lastTask.id}"][data-p="${ana}"]`);
     ok(cell, "last row drawn after scrolling to the bottom");
-    cell.click(); eq(P.M.raci.get(lastTask.id)?.[0]?.role, "R", "click on a far row assigns");
+    pickRole(cell, "R"); eq(P.M.raci.get(lastTask.id)?.[0]?.role, "R", "click on a far row assigns");
     ok(wrap.querySelector(`td.cell[data-t="${lastTask.id}"][data-p="${ana}"]`)?.classList.contains("R"), "redrawn in place, still scrolled down");
     P.UI.raciBy = by; only.checked = wasOnly; P.switchView("plan");
   });
@@ -1244,6 +1299,240 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     P.cmd.toggleCollapse(p, true); ok(P.UI.collapsed.has(p));
     P.run("UPDATE meta SET value='another-file' WHERE key='file_id'"); P.renderAll(); P.refresh();
     m(() => {}); ok(!P.UI.collapsed.has(p), "another file id: fresh collapse state");
+  });
+  // ---------- Interaction plan (reports/Requirements - interaction plan.md, DECISIONS #80–#92) ----------
+  const toastText = () => document.getElementById("toast").textContent;
+  const popEl = () => document.getElementById("pop");
+  const keyOn = (el, key, o = {}) => el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...o }));
+  const pasteOn = (el, text) => { const dt = new DataTransfer(); dt.setData("text/plain", text); el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true })); };
+  const undated = id => { const r = P.one("SELECT start, finish FROM task WHERE id=?", [id]); return r.start === null && r.finish === null; };
+
+  await test("ui-plan", "new tasks start with no dates; a summary of undated subtasks draws", () => {
+    fresh(); const a = T("A"); P.switchView("plan"); P.toggleForm(false);
+    P.selectTask(a); P.cmd.cmdAdd("task"); P.cmd.commitEdit(0, 0); ok(undated(P.UI.selId), "＋ Task");
+    P.selectTask(a); P.cmd.cmdAdd("milestone"); P.cmd.commitEdit(0, 0); ok(undated(P.UI.selId), "◆ Milestone");
+    P.selectTask(a); P.cmd.cmdAdd("task", true); P.cmd.commitEdit(0, 0); const kid = P.UI.selId; ok(undated(kid), "＋ Subtask");
+    eq([task(a).S, task(a).F, task(a).dur], [null, null, null], "the summary rolls up no dates");
+    P.renderAll(); eq(document.querySelector(`#gr-${a} .c-start`).textContent, "", "empty Start cell"); ok(!document.querySelector(`#gBars .bar[data-id="${a}"]`), "no bar");
+    P.openRecord(a); inForm(".rel-tab[data-tab=children]").click(); btnInForm("＋ New subtask").click(); ok(undated(P.UI.selId), "＋ New subtask"); P.toggleForm(false);
+    let r, mi, t1, t2; m(() => { r = O.opAddRisk({ name: "R" }); mi = O.opAddMitigant(r, "M"); t1 = O.opTaskFromMitigant(mi); t2 = O.opTaskFromMitigant(mi, { targetId: a, where: "after" }); });
+    ok(undated(t1) && undated(t2), "＋ Task from a mitigant, both forms");
+    m(() => O.opSetField(kid, "start", "2026-03-04")); eq([U.fmtYMD(task(kid).S), U.fmtYMD(task(kid).F)], ["2026-03-04", "2026-03-04"], "typing a start gives one working day");
+  });
+
+  await test("ui-plan", "Back history: related rows, links, keyboard steps replace, duplicates, deleted records, closing, project switch, cap", () => {
+    fresh(); const a = T("A"), b = T("B", a), c = T("C"), d = T("D"), e2 = T("E");
+    m(() => { O.opAddDep(c, d); O.opAddDep(d, e2); });
+    P.switchView("plan"); P.openRecord(a); ok(!inForm(".f-back"), "no history, no button");
+    inForm(".rel-tab[data-tab=children]").click(); inForm(`.rel-body tr[data-id="${b}"]`).click();
+    eq(P.UI.selId, b); ok(inForm(".f-back").textContent.includes("1 A"), "the button names where it goes");
+    inForm(".f-back").click();
+    eq([P.UI.selId, P.UI.formTab], [a, "children"], "R2.1 back to A on its Subtasks tab"); ok(inForm(`tr[data-id="${b}"]`).classList.contains("flash"), "B flashes");
+    P.openRecord(c); inForm(".rel-tab[data-tab=succ]").click(); inForm(`.rel-body tr[data-id="${d}"] a`).click(); inForm(`.rel-body tr[data-id="${e2}"] a`).click();
+    eq(P.UI.selId, e2); P.goBack(); eq(P.UI.selId, d); P.goBack(); eq(P.UI.selId, c, "R2.2 two steps back");
+    const hl = P.UI.hist.length; P.openRecord(c); eq(P.UI.hist.length, hl, "R2.5 the same record twice adds nothing");
+    P.cmd.gridKey(new KeyboardEvent("keydown", { key: "ArrowDown" })); P.cmd.gridKey(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+    eq(P.UI.selId, e2); eq(P.UI.hist.length, hl, "R2.4 keyboard steps replace the entry");
+    P.openRecord(d); P.openRecord(b); m(() => O.opDelete(d)); P.goBack(); eq(P.UI.selId, e2, "R2.6 a deleted record is skipped");
+    P.toggleForm(false); P.toggleForm(true); ok(inForm(".f-back"), "R2.7 closing keeps the history");
+    for (let i = 0; i < 60; i++) P.openRecord(i % 2 ? a : c);
+    eq(P.UI.hist.length, 50, "R2.8 capped at 50");
+    let p2; m(() => { p2 = O.opAddProject("P2"); }); const p1 = P.M.projectId; P.switchProject(p2);
+    eq([P.UI.hist.length, P.UI.histCur], [0, null], "another project clears it"); P.switchProject(p1); P.toggleForm(false);
+  });
+
+  await test("ui-plan", "Back across pages: ＋ Task from a mitigant opens the task, Back returns to the mitigant", () => {
+    fresh(); T("A"); let r, mi; m(() => { r = O.opAddRisk({ name: "R" }); mi = O.opAddMitigant(r, "Do it"); });
+    R.openRiskRecord("mitigant", mi);
+    const fp2 = document.getElementById("riskFormPane");
+    [...fp2.querySelectorAll("button")].find(b => b.textContent === "＋ Task").click();
+    const tid = mt(mi).tasks[0].id;
+    eq([P.UI.view, P.UI.form, P.UI.selId], ["plan", true, tid], "the new task's record");
+    ok(inForm(".f-back").textContent.includes("Mitigant"), "Back names the mitigant"); ok(document.activeElement === inForm('[data-f="name"]'), "name focused");
+    P.goBack(); eq(P.UI.view, "risks"); eq(P.UI.riskSel, { kind: "mitigant", id: mi }); ok(fp2.classList.contains("open"), "the mitigant's record is open");
+    ok(fp2.querySelector(`tr[data-id="${tid}"]`).classList.contains("flash"), "the new task flashes in Implemented by");
+    R.closeRiskForm(); [...document.querySelectorAll(`tr[data-mit="${mi}"] button`)].find(b => b.textContent === "＋ Task").click();
+    eq(P.UI.view, "plan"); P.goBack(); eq([P.UI.view, P.UI.riskForm, P.UI.riskSel.id], ["risks", true, mi], "from the grid too, Back opens the mitigant's record");
+    P.switchView("plan"); P.toggleForm(false);
+  });
+
+  await test("ui-plan", "＋ New subtask and ＋ Task open the new record with the name selected", () => {
+    fresh(); const a = T("A"); P.switchView("plan"); P.openRecord(a);
+    inForm(".rel-tab[data-tab=children]").click(); btnInForm("＋ New subtask").click();
+    const nid = task(a).children[0].id, nm = inForm('[data-f="name"]');
+    eq([P.UI.selId, P.UI.form], [nid, true]); ok(document.activeElement === nm, "Name focused"); eq([nm.selectionStart, nm.selectionEnd], [0, 8], "its text selected");
+    P.goBack(); eq(P.UI.selId, a, "R3.2"); ok(inForm(`tr[data-id="${nid}"]`).classList.contains("flash"), "new row flashes");
+    P.cmd.cmdAdd("task"); ok(P.UI.form && P.UI.selId !== a && !document.querySelector(".cell-editor"), "R3.3 panel open: ＋ Task opens the record");
+    ok(document.activeElement === inForm('[data-f="name"]'), "with the name focused");
+    P.toggleForm(false); P.selectTask(a); P.cmd.cmdAdd("task"); ok(document.querySelector(".cell-editor"), "panel closed: the inline editor"); P.cmd.commitEdit(0, 0);
+  });
+
+  await test("ui-plan", "block select: Shift+click, Shift+arrows; a plain arrow, Esc or a hidden anchor ends it", () => {
+    fresh(); const ids = ["A", "B", "C", "D", "E", "F"].map(n => T(n)); P.switchView("plan"); P.toggleForm(false);
+    P.selectTask(ids[1]); P.selectTask(ids[5], { extend: true });
+    eq(P.selBlock().map(t => t.name), ["B", "C", "D", "E", "F"], "R4.1");
+    eq([...document.querySelectorAll("#gridRows .grow.sel")].map(r => +r.dataset.id), ids.slice(1)); eq(document.querySelector(`#gr-${ids[3]}`).getAttribute("aria-selected"), "true");
+    ok(document.querySelector(`#gr-${ids[5]} .cur`) && !document.querySelector(`#gr-${ids[1]} .cur`), "only the active row has the cursor cell");
+    eq(document.getElementById("selCount").textContent, "5 rows"); eq(document.querySelectorAll("#gSel .g-rowsel").length, 5, "R4.5 the Gantt highlights every row");
+    const key = (k, o = {}) => P.cmd.gridKey(new KeyboardEvent("keydown", { key: k, ...o }));
+    P.selectTask(ids[1]); key("ArrowDown", { shiftKey: true }); key("ArrowDown", { shiftKey: true }); key("ArrowDown", { shiftKey: true });
+    eq(P.selBlock().map(t => t.name), ["B", "C", "D", "E"], "R4.2"); key("ArrowUp", { shiftKey: true }); eq(P.selBlock().length, 3, "Shift+↑ shrinks it");
+    key("ArrowDown"); eq(P.selBlock().length, 1, "R4.3 a plain arrow ends it");
+    P.selectTask(ids[0], { extend: true }); ok(P.selBlock().length > 1); key("Escape"); eq(P.selBlock().length, 1, "Esc ends it");
+    P.selectTask(ids[0]); document.querySelector(`#gr-${ids[2]} .c-name`).dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, shiftKey: true, button: 0 }));
+    eq(P.selBlock().length, 3, "Shift+click");
+    document.querySelector(`#gr-${ids[4]} .c-name`).dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 })); eq(P.selBlock().length, 1, "a plain click ends it");
+    const p = T("P"), k1 = T("k1", p); T("k2", p);
+    P.selectTask(k1); P.selectTask(ids[5], { extend: true }); ok(P.UI.anchorId === k1);
+    P.cmd.toggleCollapse(p, true); eq(P.UI.anchorId, null, "R4.4 collapsing hides the anchor and ends the block"); P.cmd.toggleCollapse(p, false);
+  });
+
+  await test("ui-plan", "block indent, outdent and delete in one undo step; up/down refused", () => {
+    fresh(); const [a, b, c, d] = ["A", "B", "C", "D"].map(n => T(n)); P.switchView("plan"); P.toggleForm(false);
+    P.selectTask(b); P.selectTask(c, { extend: true });
+    let u = P.db.undoDepth; P.cmd.cmdStructure("indent");
+    eq(task(a).children.map(t => t.name), ["B", "C"], "R5.1 B and C become A's last children"); eq(P.db.undoDepth, u + 1, "one undo step");
+    eq(P.selBlock().map(t => t.name), ["B", "C"], "R5.4 the block stays selected");
+    P.cmd.cmdStructure("outdent"); eq(P.M.roots.map(t => t.name), ["A", "B", "C", "D"], "R5.3 outdent puts them back");
+    u = P.db.undoDepth; P.cmd.cmdStructure("outdent"); eq(P.db.undoDepth, u, "refused at the top level"); ok(/already at the top level/.test(toastText()), toastText());
+    P.selectTask(a); P.selectTask(b, { extend: true }); P.cmd.cmdStructure("indent"); eq(P.M.roots.length, 4, "R5.2 nothing above the first row: refused"); ok(/Nothing above/.test(toastText()));
+    P.cmd.cmdStructure("up"); ok(/one row at a time/.test(toastText()), "R5.6"); eq(P.M.roots.map(t => t.name), ["A", "B", "C", "D"]);
+    m(() => O.opAddNote(c, "n")); T("c1", c);
+    P.selectTask(b); P.selectTask(c, { extend: true }); u = P.db.undoDepth; P.cmd.cmdDelete();
+    eq(P.M.order.map(t => t.name), ["A", "D"], "R5.5"); eq(P.db.undoDepth, u + 1); ok(toastText().includes("Deleted 2 tasks with 1 subtask and 1 work note"), toastText()); eq(P.UI.selId, d, "selection moves past the block");
+    P.undo(); eq(P.M.order.map(t => t.name), ["A", "B", "C", "c1", "D"], "one Undo brings them all back");
+    P.selectTask(c); P.cmd.cmdStructure("indent"); eq(task(c).parent?.name, "B", "R5.7 one row works as before");
+  });
+
+  await test("ui-plan", "parseClipColumn and wbsLevels", () => {
+    eq(U.parseClipColumn("a\nb\n").lines, ["a", "b"]);
+    eq(U.parseClipColumn("a\r\n\r\nb\r\n").lines, ["a", "", "b"]);
+    eq(U.parseClipColumn('"x\ny"\tz\nw\t1\n'), { lines: ["x\ny", "w"], cols: 2 });
+    eq(U.parseClipColumn("just one").lines, ["just one"]); eq(U.parseClipColumn('"say ""hi"""\n').lines, ['say "hi"']);
+    eq(U.wbsLevels(["1", "1.1", "2"]), { levels: [0, 1, 0], bad: 0 });
+    eq(U.wbsLevels(["1", "1.1.1", "1.2"]), { levels: [0, 1, 1], bad: 0 }, "a skipped level drops to the lowest open one");
+    eq(U.wbsLevels(["2", "x", "2.1"]), { levels: [0, 0, 1], bad: 1 });
+    eq(U.wbsLevels(["3.2", "3.2.1", "3.3."]).levels, [0, 1, 0], "relative to the first line");
+  });
+
+  await test("ui-plan", "paste into Name: fill down adds past the end, add as subtasks, add below; one undo step each", () => {
+    fresh(); const [a, b] = ["1", "2", "3"].map(n => T(n)); P.switchView("plan"); P.toggleForm(false);
+    P.selectTask(b, { col: "name" }); let u = P.db.undoDepth;
+    P.cmd.cmdPaste("fill", "name", ["x", "y", "z", "w"]);
+    eq(P.M.order.map(t => t.name), ["1", "x", "y", "z", "w"], "R7.1"); eq(P.db.undoDepth, u + 1, "one undo step");
+    ok(P.M.order.slice(3).every(t => undated(t.id)), "new rows undated"); ok(toastText().includes("Pasted 4 names: 2 renamed, 2 new tasks."), toastText());
+    eq(P.selBlock().map(t => t.name), ["x", "y", "z", "w"], "D11 the pasted rows are selected");
+    P.undo(); eq(P.M.order.map(t => t.name), ["1", "2", "3"], "Undo in one step");
+    P.selectTask(a, { col: "name" }); P.cmd.cmdPaste("fill", "name", ["p", "", "q"]); eq(P.M.order.map(t => t.name), ["p", "2", "q"], "a blank line keeps the name and uses up the row"); P.undo();
+    P.selectTask(b, { col: "name" }); P.cmd.cmdPaste("child", "name", ["c1", "", "c2"]); eq(task(b).children.map(t => t.name), ["c1", "c2"], "R7.2"); eq(P.selBlock().map(t => t.name), ["c1", "c2"]); P.undo();
+    P.selectTask(a, { col: "name" }); P.cmd.cmdPaste("below", "name", ["n1", "n2"]); eq(P.M.order.map(t => t.name), ["1", "n1", "n2", "2", "3"], "R7.3"); P.undo();
+    P.selectTask(a, { col: "name" }); pasteOn(document.getElementById("gridBody"), "x\ny\n");
+    const box = popEl().querySelector(".paste-pick"); ok(box, "Ctrl+V with two lines opens the chooser"); eq(box.querySelectorAll(".pick-btn").length, 3, "Name offers three choices");
+    keyOn(box, "1"); eq(P.M.order.map(t => t.name), ["x", "y", "3"], "1 = fill down");
+  });
+
+  await test("ui-plan", "paste into Description, R/A, the other columns, and WBS (the owner's example)", () => {
+    fresh(); const a = T("A"), b = T("B"), c = T("C"); let ana, ben; m(() => { ana = O.opAddParty("person", "Ana"); ben = O.opAddParty("person", "Ben"); });
+    P.switchView("plan"); P.toggleForm(false);
+    P.selectTask(a, { col: "notes" }); P.cmd.cmdPaste("fill", "notes", ["d1", "", "d3", "d4"]);
+    eq([task(a).notes, task(b).notes, task(c).notes], ["d1", "", "d3"], "R7.4"); ok(toastText().includes("1 line didn't fit below the last row."), toastText());
+    P.selectTask(a, { col: "R" }); P.cmd.cmdPaste("fill", "R", ["ana", "Ben, Zed"]);
+    eq(P.M.raci.get(a).map(r => [r.party_id, r.role]), [[ana, "R"]], "R7.5 matched case-insensitively"); eq(P.M.raci.get(b).map(r => r.party_id), [ben]);
+    ok(toastText().includes("Not on the roster: Zed (1 row)"), toastText()); eq(P.M.people.length, 2, "D8 nobody created");
+    P.selectTask(a, { col: "start" }); P.cmd.cmdPaste("fill", "start", ["2026-04-01", "not a date", "2026-04-03"]);
+    eq([U.fmtYMD(task(a).S), U.fmtYMD(task(b).S), U.fmtYMD(task(c).S)], ["2026-04-01", "2026-03-02", "2026-04-03"], "R7.7 the bad row is skipped, the others applied");
+    ok(/Skipped 1 row: 2 \(/.test(toastText()), toastText());
+    fresh(); T("one"); T("two"); const three = T("three"); T("a1", three); const s2 = T("s2", three); P.switchView("plan");
+    P.selectTask(s2, { col: "name" }); P.cmd.cmdPaste("child", "name", ["a", "b", "c"]);
+    eq(task(s2).children.map(t => t.wbs), ["3.2.1", "3.2.2", "3.2.3"]);
+    const byName = n => P.M.order.find(t => t.name === n);
+    P.selectTask(byName("a").id, { col: "wbs" }); let u = P.db.undoDepth; P.cmd.cmdPaste("nest", "wbs", ["1", "1.1", "2"]);
+    eq(["a", "b", "c"].map(n => byName(n).wbs), ["3.2.1", "3.2.1.1", "3.2.2"], "R7.6 the owner's example"); eq(P.db.undoDepth, u + 1);
+    P.undo(); P.selectTask(byName("a").id, { col: "wbs" }); P.cmd.cmdPaste("nest", "wbs", ["1", "1.1.1", "1.2"]);
+    eq(["a", "b", "c"].map(n => byName(n).wbs), ["3.2.1", "3.2.1.1", "3.2.1.2"], "a gap falls to the lowest level");
+  });
+
+  await test("ui-plan", "paste chooser: number keys pick, Enter runs the remembered one, Esc runs nothing, preview of 5", () => {
+    fresh(); T("A"); P.switchView("plan");
+    let ran = null; const opts = [1, 2, 3].map(i => ({ id: "o" + i, label: "Option " + i, run: () => { ran = i; } }));
+    const open = () => P.ui.openPasteChooser({ left: 100, bottom: 100 }, { title: "Paste 7 lines", lines: ["a", "b", "", "d", "e", "f", "g"], cols: 2, options: opts, key: "test.chooser" });
+    localStorage.removeItem("pm.pasteChoice");
+    let box = open(); eq(box.querySelectorAll(".paste-prev li").length, 5, "at most 5 lines"); ok(box.textContent.includes("…and 2 more")); ok(box.querySelector(".msg.warn"), "warns about the 2 columns");
+    keyOn(box, "2"); eq(ran, 2, "2 runs option 2"); ok(popEl().hidden, "and closes");
+    ran = null; box = open(); eq(box.querySelector(".pick-btn.on").dataset.opt, "o2", "the last choice is highlighted");
+    keyOn(box, "Enter"); eq(ran, 2, "Enter runs it");
+    ran = null; box = open(); keyOn(box, "Escape"); ok(popEl().hidden && ran === null, "Esc runs nothing");
+  });
+
+  await test("ui-plan", "Description column: first line in the cell; Enter or a key opens the record in Description", () => {
+    fresh(); const a = T("A"); m(() => O.opSetField(a, "notes", "Line one\nLine two")); P.switchView("plan"); P.toggleForm(false);
+    P.selectTask(a, { col: "notes" });
+    const cell = document.querySelector(`#gr-${a} .c-notes`); eq(cell.textContent, "Line one", "R8.1"); ok(cell.querySelector("[title]").title.includes("Line two"), "full text in the tooltip");
+    P.cmd.gridKey(new KeyboardEvent("keydown", { key: "Enter" }));
+    ok(P.UI.form, "R8.2 the record opens"); ok(document.activeElement === inForm('[data-f="notes"]'), "with the cursor in Description");
+    P.toggleForm(false); P.selectTask(a, { col: "notes" }); P.cmd.gridKey(new KeyboardEvent("keydown", { key: "x" }));
+    eq(inForm('[data-f="notes"]').value, "Line one\nLine two", "the typed key isn't inserted"); P.toggleForm(false);
+  });
+
+  await test("ui-plan", "draw a bar across an undated row; a click saves nothing; Esc cancels", () => {
+    fresh(); T("A"); let u2; m(() => { u2 = O.opAddTask({ name: "Undated", start: null }); }); P.switchView("plan"); P.toggleForm(false); P.gantt.setGrain("day");
+    P.selectTask(u2); ok(document.querySelector("#gSel .g-hint"), "R9.5 the hint on the selected undated row");
+    const svg = document.getElementById("ganttSvg"), SC = P.gantt.SC, x = d => svg.getBoundingClientRect().left + (d - SC.origin) * SC.px + SC.px / 2;
+    const y = () => svg.getBoundingClientRect().top + task(u2).row * 30 + 15, d0 = SC.origin + 10, d1 = SC.origin + 14;
+    const ev = (type, cx) => svg.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, clientX: cx, clientY: y(), pointerId: 1 }));
+    ev("pointerdown", x(d0)); ev("pointerup", x(d0)); ok(undated(u2), "R9.4 a click saves nothing");
+    ev("pointerdown", x(d0)); ev("pointermove", x(d1)); document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); ev("pointerup", x(d1)); ok(undated(u2), "Esc cancels");
+    let u = P.db.undoDepth; ev("pointerdown", x(d1)); ev("pointermove", x(d0 + 1)); ev("pointermove", x(d0)); ev("pointerup", x(d0));
+    eq([task(u2).S, task(u2).F], [d0, d1], "R9.1/R9.2 dragged left: start is the smaller day"); eq(P.db.undoDepth, u + 1, "one undo step");
+    P.gantt.setGrain("week");
+  });
+
+  await test("ui-plan", "task picker: filter by name and by WBS, Enter picks the highlighted row", () => {
+    fresh(); const a = T("Alpha"), a1 = T("Sub one", a), b = T("Beta"); let picked = null;
+    P.ui.openTaskPicker({ left: 50, bottom: 50 }, { title: "Pick", exclude: new Set([b]), onPick: id => picked = id });
+    const s = popEl().querySelector("input"), ids = () => [...popEl().querySelectorAll(".pick-btn")].map(x => +x.dataset.id);
+    eq(ids(), [a, a1], "outline order, exclusions left out");
+    s.value = "sub"; s.dispatchEvent(new Event("input")); eq(ids(), [a1], "by name");
+    s.value = "1"; s.dispatchEvent(new Event("input")); eq(ids(), [a, a1], "by WBS, equal or prefix");
+    keyOn(s, "ArrowDown"); keyOn(s, "Enter"); eq(picked, a1, "Enter picks the highlighted one"); ok(popEl().hidden);
+  });
+
+  await test("ui-plan", "risks: multi-line paste adds mitigants and risks; mitigants and tasks are many-to-many everywhere", () => {
+    fresh(); const t = T("T"), u = T("U"); let r, m1, m2;
+    m(() => { r = O.opAddRisk({ name: "R" }); m1 = O.opAddMitigant(r, "M1"); m2 = O.opAddMitigant(r, "M2"); });
+    P.switchView("risks");
+    const ta = document.querySelector(`[data-keep="m${m1}:text"]`); ta.focus(); let d = P.db.undoDepth;
+    pasteOn(ta, "x\n\ny\nz\n"); const box = popEl().querySelector(".paste-pick"); ok(box, "chooser"); keyOn(box, "1");
+    eq(rk(r).mitigants.map(x => x.text), ["M1", "x", "y", "z", "M2"], "R11.1 option 1 adds them after this one, in order"); eq(P.db.undoDepth, d + 1, "one undo step");
+    R.cmdRiskPaste("fill", r, null, ["R renamed", "R2 new"]); eq(P.M.risks.map(x => x.name), ["R renamed", "R2 new"], "fill down risk names, adding past the end");
+    m(() => { O.opLinkTask(m1, t); O.opLinkTask(m2, t); O.opLinkTask(m1, u); });
+    eq(P.M.mitByTask.get(t).map(x => x.id).sort(), [m1, m2].sort(), "a task carries several mitigants"); eq(mt(m1).tasks.map(x => x.id), [t, u], "a mitigant has several tasks");
+    eq(document.querySelectorAll(`tr[data-mit="${m1}"] .tchip`).length, 2, "grid chips");
+    P.openRecord(t); inForm(".rel-tab[data-tab=risks]").click(); eq(allInForm(".rel-body tr[data-mit]").length, 2, "the task's Risks tab");
+    let m3; m(() => { m3 = O.opAddMitigant(r, "M3"); });
+    btnInForm("＋ Link a mitigant…").click(); ok(!popEl().querySelector(`.pick-btn[data-id="${m1}"]`), "already linked ones left out");
+    popEl().querySelector(`.pick-btn[data-id="${m3}"]`).click(); ok(mt(m3).tasks.some(x => x.id === t), "linked from the task's record");
+    m(() => O.opUnlinkTask(m1, t)); eq(mt(m1).tasks.map(x => x.id), [u], "unlinking one leaves the others");
+    P.toggleForm(false);
+  });
+
+  await test("ui-plan", "people table: ＋ Person focuses Name; paste names (fill, add, duplicates); Team paste creates teams", () => {
+    fresh(); P.switchView("people");
+    document.getElementById("addPersonBtn").click(); P.drawNow();
+    const nm = document.activeElement; ok(nm && nm.dataset.f === "name" && nm.value === "New person", "R12.2 Name focused"); eq([nm.selectionStart, nm.selectionEnd], [0, 10], "and selected");
+    const pid = +nm.closest("tr").dataset.party;
+    P.cmd.cmdPeoplePaste("person", "name", "fill", [pid], ["Ana", "Ben", "Cy"]); eq(P.M.people.map(p => p.name), ["Ana", "Ben", "Cy"], "R12.3 fill down, adding past the end");
+    P.cmd.cmdPeoplePaste("person", "name", "add", [], ["ben", "Dee", ""]); eq(P.M.people.map(p => p.name), ["Ana", "Ben", "Cy", "Dee"]); ok(toastText().includes("Already on the roster: ben."), toastText());
+    const ids = P.M.people.map(p => p.id);
+    P.cmd.cmdPeoplePaste("person", "team", "fill", ids, ["QA", "qa", "", "Ops"]);
+    eq(P.M.teams.map(x => x.name), ["Ops", "QA"], "R12.5 missing teams created"); ok(toastText().includes("Created teams: QA, Ops."), toastText());
+    const qa = P.M.teams.find(x => x.name === "QA").id; eq([P.M.teamsOf.get(ids[0]), P.M.teamsOf.get(ids[1]), P.M.teamsOf.get(ids[2]) ?? null], [[qa], [qa], null]);
+    const email = document.querySelector(`#peopleList tr[data-party="${ids[0]}"] [data-f="email"]`); email.focus();
+    pasteOn(email, "a@x.com\nb@x.com\n"); keyOn(popEl().querySelector(".paste-pick"), "1");
+    eq(P.M.people.slice(0, 2).map(p => p.email), ["a@x.com", "b@x.com"], "R12.4 paste through the table");
+    const ben = document.querySelector(`#peopleList tr[data-party="${ids[1]}"] [data-f="title"]`); ben.focus(); ben.value = "Lead"; keyOn(ben, "Enter");
+    eq(P.M.parties.get(ids[1]).title, "Lead", "R12.1 Enter saves"); eq(document.activeElement.closest("tr")?.dataset.party, String(ids[2]), "and moves down a row");
+    P.switchView("plan");
   });
   P.reset();
   } finally { shims.forEach(undo => undo()); }

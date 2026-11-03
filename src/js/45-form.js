@@ -4,7 +4,50 @@ Object.assign(UI, {
   form: false, formTab: lsGet("pm.formTab", "children"), mgAll: lsGet("pm.mgAll", false),
   notesWithSub: lsGet("pm.notesWithSub", true), noteDrafts: new Map(), editNote: null,
   secClosed: new Set(lsGet("pm.formClosed", [])),
+  formFocus: null, // one-shot: the data-f field to focus (and select) when the panel next draws
+  hist: [], histCur: null, histMode: null, flashRel: null, // Back history (DECISIONS #81)
 });
+
+// ---------- Back history ----------
+// Every record a panel shows is recorded as it draws, so every way of opening one is caught in one place. Entries are
+// { kind: "task" | "risk" | "mitigant", id, projectId, tab }. histMode is one-shot: "back" (going back, don't record
+// the record being left) or "replace" (stepping through the outline with the keyboard replaces the current entry).
+const HIST_MAX = 50;
+function noteVisit(entry) {
+  const cur = UI.histCur, mode = UI.histMode; UI.histMode = null;
+  entry.projectId = M.projectId;
+  if (cur && cur.kind === entry.kind && cur.id === entry.id) { cur.tab = entry.tab; return; }
+  if (cur && !mode) { UI.hist.push(cur); if (UI.hist.length > HIST_MAX) UI.hist.splice(0, UI.hist.length - HIST_MAX); }
+  UI.histCur = entry;
+}
+const histValid = e => e.projectId === M.projectId && (e.kind === "task" ? M.tasks.has(e.id) : !!recOf(e)) && !(UI.histCur && UI.histCur.kind === e.kind && UI.histCur.id === e.id);
+const backTarget = () => { for (let i = UI.hist.length - 1; i >= 0; i--) if (histValid(UI.hist[i])) return UI.hist[i]; return null; };
+function clearHistory() { UI.hist = []; UI.histCur = null; UI.histMode = null; UI.flashRel = null; }
+const recordPanelOpen = () => (UI.form && formViews.has(UI.view)) || (UI.view === "risks" && !!UI.riskForm);
+function goBack() {
+  let e;
+  while ((e = UI.hist.pop()) && !histValid(e));
+  if (!e) { redraw("formForce", "risks"); return; } // nothing valid left: the button goes
+  UI.flashRel = UI.histCur && { kind: UI.histCur.kind, id: UI.histCur.id };
+  UI.histMode = "back";
+  if (e.kind === "task") { if (e.tab) UI.formTab = e.tab; openRecord(e.id); }
+  else openRiskRecord(e.kind, e.id);
+}
+function histLabel(e) {
+  if (e.kind === "task") { const t = M.tasks.get(e.id); return shortText(`${t.wbs} ${t.name}`, 32); }
+  return shortText(`${e.kind === "risk" ? "Risk" : "Mitigant"}: ${recLabel(recOf(e))}`, 32);
+}
+function backButton() {
+  const e = backTarget(); if (!e) return null;
+  const label = histLabel(e);
+  return h("button", { class: "f-back", "data-back": "", title: `Back to ${label} (Alt+←, or your mouse's Back button)`, onclick: goBack }, "← ", label);
+}
+// After going Back, flash the row of the record just left if the panel lists it (a new subtask under its phase).
+function flashRelRow(pane) {
+  const f = UI.flashRel; UI.flashRel = null; if (!f) return;
+  const row = pane.querySelector(f.kind === "task" ? `tr[data-id="${f.id}"]` : `tr[data-mit="${f.id}"]`);
+  if (row) { row.classList.add("flash"); row.scrollIntoView({ block: "nearest" }); setTimeout(() => row.classList.remove("flash"), 1400); }
+}
 // Collapsible section header; open/closed state is remembered per browser.
 function secHead(key, title, ...extras) {
   const closed = UI.secClosed.has(key);
@@ -26,7 +69,7 @@ const formHost = () => UI.view === "raci" ? $("raciSplit") : $("split");
 const formViews = new Set(["plan", "raci"]);
 function openRecord(id) {
   if (!M.tasks.has(id)) return;
-  if (!formViews.has(UI.view)) switchView("plan");
+  if (!formViews.has(UI.view)) { UI.form = false; switchView("plan"); } // closed while the page switches, so the old record isn't drawn (and recorded) first
   UI.form = true;
   if (UI.selId !== id) { UI.editNote = null; selectTask(id); } // selectTask re-renders the form
   else redraw("formForce");
@@ -92,11 +135,18 @@ function renderForm(force = false) {
     return;
   }
   if (UI.editNote && !one("SELECT 1 FROM note WHERE id=? AND created_at=?", [UI.editNote.id, UI.editNote.created])) UI.editNote = null;
+  if (UI.formFocus && UI.secClosed.has("details")) { UI.secClosed.delete("details"); lsSet("pm.formClosed", [...UI.secClosed]); } // the field to focus lives there
+  noteVisit({ kind: "task", id: t.id, tab: UI.formTab }); // first, so the Back button below already leaves this record out
   pane.append(formHeader(t), formFields(t));
   if (t.isSummary) pane.append(miniGanttSection(t));
   pane.append(notesSection(t), relatedSection(t));
   pane.scrollTop = scroll;
   refocus(pane, mark, { typed: same }); // typing never follows you to another record
+  flashRelRow(pane);
+  if (UI.formFocus) {
+    const el = pane.querySelector(`[data-f="${UI.formFocus}"]`); UI.formFocus = null;
+    if (el) { el.focus(); el.select?.(); }
+  }
 }
 
 // Another view changed the task while a form field has focus: update the other fields, keep the one being typed in.
@@ -118,7 +168,7 @@ function formHeader(t) {
   const crumbs = [];
   for (let x = t.parent; x; x = x.parent) crumbs.unshift(h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(x.id); } }, `${x.wbs} ${x.name}`), h("span", { class: "sep" }, "›"));
   const proj = M.projects.find(p => p.id === M.projectId);
-  return h("div", { class: "f-head" },
+  return h("div", { class: "f-head" }, backButton(),
     h("div", { class: "f-title" },
       h("div", { class: "f-crumbs" }, h("span", {}, proj?.name || ""), h("span", { class: "sep" }, "›"), ...crumbs),
       h("h2", {}, h("span", { class: "f-kind" }, recordLabel(t)), h("span", { class: "f-wbs" }, t.wbs), t.name)),
@@ -284,7 +334,7 @@ function noteEntry(o, n) {
       const focus = () => { const ta = $(o.pane).querySelector(".n-edit"); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } };
       focus(); setTimeout(focus, 0); // again once a render held for the click (holdFormRender) has run
     } }, "Edit"),
-    editing ? null : h("button", { class: "link danger", onclick: () => { if (confirm("Delete this work note? (Undo is available.)")) mutate(`${label}: deleted a work note`, () => opDeleteNote(n.id)); } }, "Delete"));
+    editing ? null : h("button", { class: "link danger", onclick: () => { if (mutate(`${label}: deleted a work note`, () => opDeleteNote(n.id))) toast("Deleted a work note", "", { undo: true }); } }, "Delete"));
   let body;
   if (editing) {
     const ta = h("textarea", { class: "n-edit", "data-keep": "note-edit", rows: Math.min(10, n.body.split("\n").length + 1) });
@@ -328,12 +378,11 @@ const relTable = (heads, rows, empty) => rows.length
 function relChildren(t) {
   const add = h("button", {
     onclick: () => {
-      const last = t.children.at(-1);
       UI.collapsed.delete(t.id); saveCollapsed();
-      if (mutate("Added subtask", () => opAddTask({ parentId: t.id, name: "New task", ...newTaskDefaults(last || t) }))) toast("Subtask added. Click it to open its record and rename it");
+      let id; if (mutate("Added subtask", () => { id = opAddTask({ parentId: t.id, name: "New task", ...newTaskDefaults() }); })) { UI.formFocus = "name"; openRecord(id); }
     }
   }, "＋ New subtask");
-  const rows = t.children.map(c => h("tr", { class: "click" + (c.isSummary ? " summary" : ""), onclick: () => openRecord(c.id) },
+  const rows = t.children.map(c => h("tr", { class: "click" + (c.isSummary ? " summary" : ""), "data-id": c.id, onclick: () => openRecord(c.id) },
     h("td", {}, c.wbs), h("td", {}, (c.isMilestone ? "◆ " : "") + c.name), h("td", {}, fmtShort(c.S)), h("td", {}, fmtShort(c.F)),
     h("td", {}, c.P + "%"), h("td", { html: html`<span class="st ${stClass(c.ST)}">${c.ST}</span>` }),
     h("td", { html: html`<span class="chips">${rChips(c)}</span>` }),
@@ -349,18 +398,16 @@ function relDeps(t, dir) {
     const lag = h("input", { type: "number", value: d.lag, title: "Lag in working days (negative = lead)", style: { width: "64px" } });
     const ch = () => mutate(`Link ${M.tasks.get(d.pred_id).wbs} → ${M.tasks.get(d.succ_id).wbs}: ${type.value} ${lag.value}d`, () => opUpdateDep(d.id, type.value, +lag.value));
     type.addEventListener("change", ch); lag.addEventListener("change", ch);
-    return h("tr", {}, h("td", {}, h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(o.id); } }, o.wbs)), h("td", {}, o.name),
+    return h("tr", { "data-id": o.id }, h("td", {}, h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(o.id); } }, o.wbs)), h("td", {}, o.name),
       h("td", {}, type), h("td", {}, lag), h("td", { title: d.violated ? "Dates conflict with this link. Dates are never moved automatically." : "" }, d.violated ? "⚠ conflict" : "OK"),
-      h("td", {}, h("button", { class: "x", title: "Remove link", onclick: () => mutate("Removed link", () => opRemoveDep(d.id)) }, "✕")));
+      h("td", {}, h("button", { class: "x", title: "Remove link", onclick: () => { if (mutate("Removed link", () => opRemoveDep(d.id))) toast(`Removed link ${M.tasks.get(d.pred_id)?.wbs ?? ""} → ${M.tasks.get(d.succ_id)?.wbs ?? ""}`, "", { undo: true }); } }, "✕")));
   });
   const linked = new Set(list.map(d => dir === "in" ? d.pred_id : d.succ_id));
-  const add = h("select", {}, h("option", { value: "" }, dir === "in" ? "＋ Add predecessor…" : "＋ Add successor…"),
-    ...M.order.filter(x => x !== t && !isAncestor(x, t) && !isAncestor(t, x) && !linked.has(x.id)).map(x => h("option", { value: x.id }, `${x.wbs} ${x.name}`)));
-  add.addEventListener("change", () => {
-    const oid = +add.value; if (!oid) return;
-    const [p, s] = dir === "in" ? [oid, t.id] : [t.id, oid];
-    mutate(`Linked ${M.tasks.get(p).wbs} → ${M.tasks.get(s).wbs}`, () => opAddDep(p, s, "FS", null));
-  });
+  const add = h("button", { onclick: () => openTaskPicker(add.getBoundingClientRect(), {
+    title: `${dir === "in" ? "Predecessor" : "Successor"} of ${t.wbs} ${shortText(t.name, 40)}`,
+    exclude: new Set(M.order.filter(x => x === t || isAncestor(x, t) || isAncestor(t, x) || linked.has(x.id)).map(x => x.id)),
+    onPick: oid => { const [p, s] = dir === "in" ? [oid, t.id] : [t.id, oid]; mutate(`Linked ${M.tasks.get(p).wbs} → ${M.tasks.get(s).wbs}`, () => opAddDep(p, s, "FS", null)); },
+  }) }, dir === "in" ? "＋ Add predecessor…" : "＋ Add successor…");
   return h("div", {}, h("div", { class: "rel-bar" }, add),
     relTable([dir === "in" ? "Predecessor" : "Successor", "Name", "Type", "Lag (d)", "Dates", ""], rows, dir === "in" ? "Nothing has to happen before this task." : "Nothing waits on this task."));
 }
@@ -385,10 +432,11 @@ function relRaci(t) {
 }
 function relRisks(t) {
   const list = M.mitByTask.get(t.id) || [];
-  const rows = list.map(m => h("tr", { class: "click", onclick: () => openRiskRecord("mitigant", m.id) },
+  const rows = list.map(m => h("tr", { class: "click", "data-mit": m.id, onclick: () => openRiskRecord("mitigant", m.id) },
     h("td", {}, m.risk.name), h("td", {}, m.text), h("td", {}, m.eff + (m.is_control ? " · control" : "")), h("td", {}, m.achieved ? "✓" : "—"),
     h("td", {}, h("button", { class: "x", title: "Unlink", onclick: e => { e.stopPropagation(); mutate(`Unlinked ${t.wbs} from a mitigant`, () => opUnlinkTask(m.id, t.id)); } }, "✕"))));
-  return h("div", {}, h("div", { class: "hint", style: { margin: "0 0 6px" } }, "Mitigants this task implements. Link more by dragging a mitigant onto this task on the Risks page."),
+  const add = h("button", { onclick: () => openMitigantPicker(add.getBoundingClientRect(), t) }, "＋ Link a mitigant…");
+  return h("div", {}, h("div", { class: "rel-bar" }, add, h("span", { class: "hint" }, "Mitigants this task implements. You can also drag a mitigant onto this task on the Risks page.")),
     relTable(["Risk", "Mitigant", "Status", "Achieved", ""], rows, "This task doesn't implement any mitigant."));
 }
 function relIssues(t) {

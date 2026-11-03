@@ -21,7 +21,7 @@ Each story lists its acceptance criteria. A tag in brackets after a criterion na
 
 ## C. WBS outline
 - **C1 Hierarchy** of any depth. The WBS number (1.2.3.4) is calculated from position, never stored. [wbs]
-- **C2 Edit structure.** Add a task (sibling below), add a subtask, indent (Tab), outdent (Shift+Tab), move up/down (Alt+Shift+↑/↓), drag a row to reorder or to nest it under another, and delete a task with its subtree. [wbs-ops]
+- **C2 Edit structure.** Add a task (sibling below), add a subtask, indent (Alt+Shift+→), outdent (Alt+Shift+←), move up/down (Alt+Shift+↑/↓), drag a row to reorder or to nest it under another, and delete a task with its subtree. Tab moves to the next cell, never restructures. Deleting offers **Undo** in the message instead of asking first. [wbs-ops] [grid] [undo]
 - **C3 Inline editing** in spreadsheet style: name, start, finish, duration, % complete, status, predecessors, responsible, accountable.
 - **C4 Summary rollups.** A summary task's start is its earliest child start and its finish is its latest child finish. % complete is weighted by duration. Status is derived from the children. These summary fields are read-only. [rollup]
 - **C5 Milestones.** A milestone is a zero-duration task, drawn as a diamond. [milestone]
@@ -66,7 +66,7 @@ Each story lists its acceptance criteria. A tag in brackets after a criterion na
 - **I3 Fields.** Two columns, labels above: Name; Type/Status; Start/Finish; Duration/% complete; Accountable/Responsible; Parent/WBS code; Description. Accountable shows as inherited when it comes from a parent. A **Same as Accountable** switch makes Responsible follow the Accountable (shown as A/R in the matrix). [form] [raci-ra] It uses the same edit rules as the outline. Rolled-up fields are read-only on summary tasks. [form]
 - **I4 Mini Gantt for parents.** A summary task's record shows a small Gantt of its subtasks, scaled to fit, with % complete fill, status colours, milestones, a today line, the parent's date range shaded, and links between the subtasks (conflicts in red). It shows direct subtasks by default; an "All levels" toggle shows the whole subtree, up to 80 rows. Clicking a subtask's bar or label opens its record. [form] [mini-gantt]
 - **I5 Work notes.** A journal made only of notes, newest first. Each note shows a small blank person avatar, the yellow work-note bar, the date and time (absolute, plus relative such as "3 h ago"), and "(edited)" after a change. Notes carry no name. Post with the Post button or Ctrl+Enter. [notes] [form]
-  - Notes can be edited inline (Ctrl+Enter saves, Esc cancels) and deleted, with confirmation and undo.
+  - Notes can be edited inline (Ctrl+Enter saves, Esc cancels) and deleted, with an Undo button in the message that follows.
   - An unposted draft is kept for each record while you move between records.
   - Note text is shown exactly as written, and http(s) links are clickable.
 - **I6 Subtask notes on parents.** A summary task's stream includes its subtasks' notes by default, each labelled with a link to its subtask. A toggle switches to the parent's own notes only. [form]
@@ -106,3 +106,18 @@ Each story lists its acceptance criteria. A tag in brackets after a criterion na
 - **J11 Import.** **Import risks…** reads a risk register from Excel/CSV: it finds the header row, auto-maps columns (risk, owner, likelihood, impact, mitigation plan, response), matches owner names to people (or adds them), converts Low/Medium/High or 1–5 values, and optionally splits each plan into mitigants. [risks]
 - **J12 Round trip.** Excel export of the plan includes **Risk register** and **Mitigants** sheets with IDs. Importing the workbook brings back the risks, mitigants, their people and their task links; in Update mode, edits made in Excel update them by ID without duplicates. [roundtrip, import-update]
 
+
+## K. Interaction plan (branch `ui-review`)
+- **K1 Undated new tasks.** A task or milestone you create has no dates until you type them or draw its bar; import and the sample keep theirs. Issues lists it as "No dates set". [ui-plan]
+- **K2 Back.** Every record panel you open is remembered; **← name** at the top of the panel, Alt+← or the mouse's Back button returns to the previous one, across the Plan and Risks pages, and the row you left flashes. Arrowing through the outline replaces the entry; duplicates and deleted records are skipped; closing the panel keeps the history; 50 entries; another project clears it. [ui-plan]
+- **K3 New records open.** ＋ New subtask, and ＋ Task with the panel open, open the new record with the name selected. [ui-plan]
+- **K4 Block select.** Shift+click (outline or Gantt) or Shift+↑/↓ selects a block of visible rows; the toolbar shows "N selected"; a click or Esc ends it. [ui-plan]
+- **K5 Block indent, outdent, delete.** ⇤ ⇥ (or Alt+Shift+← / →) move the whole block in one undo step; a top-level row isn't outdented and the message says so. 🗑 / Delete removes the block, with one Undo. [ui-plan]
+- **K6 Paste chooser.** Pasting several lines (Ctrl+V or 📋 Paste) opens a chooser at the cell with the choices that fit the column; number keys pick, the last choice per column comes first, and extra columns are warned about. One line fills the cell directly. [ui-plan]
+- **K7 Paste into the outline.** On Name: fill down, add as subtasks or add below. On other columns: fill down the visible rows (collapsed subtrees skipped, filter cleared), skipping and listing values that don't fit, as one undo step. In R and A only known names are set; unknown ones are listed. Pasted rows end up selected as a block. [ui-plan]
+- **K8 Nest by WBS.** A WBS column pasted on # nests the rows: levels relative to the first line, skipped levels drop to the lowest open one, numbers discarded, order kept. [ui-plan]
+- **K9 Description column.** The last outline column shows the first line of the task's notes; editing opens the record on Description; paste fills it down. [ui-plan]
+- **K10 Draw a bar.** A selected undated task's empty Gantt row invites a drag; dragging sets its start and finish (a milestone's single date), a click only selects, Esc cancels. [ui-plan]
+- **K11 Task picker.** Predecessors, successors and a mitigant's tasks are linked through a searchable picker (type, ↑/↓, Enter) that leaves out tasks already linked; a task's Risks tab can link a mitigant the same way. [ui-plan]
+- **K12 Risks.** ＋ Task on a mitigant opens the new task's record with Back to the mitigant. Pasting lines into a risk name fills names or adds risks; into a mitigant, adds or fills mitigants. [ui-plan]
+- **K13 People tables.** People and teams are edited in tables (Enter / Shift+Enter move down / up; ＋ Person / ＋ Team focus the new name). Pasting names fills or adds rows, skipping duplicates; pasting team names creates missing teams and says so. [ui-plan]

@@ -50,16 +50,18 @@
   <section id="view-plan" class="view">
     <div class="toolbar">
       <div class="grp">
-        <button id="addTaskBtn" class="primary" title="New task below (Insert)">＋ Task</button>
+        <button id="addTaskBtn" class="primary" title="New task below (Insert). With the record open, the new record opens">＋ Task</button>
         <button id="addSubBtn" title="New subtask (Ctrl+Insert)">＋ Subtask</button>
         <button id="addMsBtn" title="New milestone">◆ Milestone</button>
+        <button id="pasteBtn" title="Paste a column copied from Excel into the selected cell (or click a cell and press Ctrl+V)">📋 Paste</button>
       </div>
       <div class="grp">
-        <button id="outdentBtn" class="icon" title="Outdent (Shift+Tab)">⇤</button>
-        <button id="indentBtn" class="icon" title="Indent (Tab)">⇥</button>
+        <button id="outdentBtn" class="icon" title="Outdent the selected rows (Alt+Shift+←). Shift+click selects a block">⇤</button>
+        <button id="indentBtn" class="icon" title="Indent the selected rows (Alt+Shift+→). Shift+click selects a block">⇥</button>
         <button id="upBtn" class="icon" title="Move up (Alt+Shift+↑)">↑</button>
         <button id="downBtn" class="icon" title="Move down (Alt+Shift+↓)">↓</button>
-        <button id="delBtn" class="icon" title="Delete task (Delete)">🗑</button>
+        <button id="delBtn" class="icon" title="Delete the selected rows (Delete)">🗑</button>
+        <span id="selCount" class="hint" hidden></span>
       </div>
       <div class="grp">
         <select id="levelSel" title="Show outline levels">
@@ -127,7 +129,7 @@
   <section id="view-people" class="view" hidden>
     <div class="people-cols">
       <div class="card">
-        <div class="card-h"><h2>People</h2><button id="addPersonBtn" class="primary">＋ Person</button></div>
+        <div class="card-h"><h2>People</h2><button id="addPersonBtn" class="primary" title="Add a row; paste a column of names into it to add many">＋ Person</button></div>
         <div id="peopleList"></div>
       </div>
       <div class="card">
