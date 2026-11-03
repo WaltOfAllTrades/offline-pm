@@ -40,6 +40,7 @@
       <button data-act="csv">Export tasks (.csv)</button>
       <hr>
       <button data-act="print">Print / save as PDF…</button>
+      <button data-act="warnIcons" id="mWarnIcons">Hide warning icons</button>
       <button data-act="help">Help &amp; shortcuts</button>
     </div>
   </div>
@@ -53,14 +54,14 @@
         <button id="addTaskBtn" class="primary" title="New task below (Insert). With the record open, the new record opens">＋ Task</button>
         <button id="addSubBtn" title="New subtask (Ctrl+Insert)">＋ Subtask</button>
         <button id="addMsBtn" title="New milestone">◆ Milestone</button>
-        <button id="pasteBtn" title="Paste a column copied from Excel into the selected cell (or click a cell and press Ctrl+V)">📋 Paste</button>
+        <button id="pasteBtn" title="Paste a column copied from Excel into the selected cell (or click a cell and press Ctrl+V)"><span class="ico">📋</span> Paste</button>
       </div>
       <div class="grp">
         <button id="outdentBtn" class="icon" title="Outdent the selected rows (Alt+Shift+←). Shift+click selects a block">⇤</button>
         <button id="indentBtn" class="icon" title="Indent the selected rows (Alt+Shift+→). Shift+click selects a block">⇥</button>
         <button id="upBtn" class="icon" title="Move up (Alt+Shift+↑)">↑</button>
         <button id="downBtn" class="icon" title="Move down (Alt+Shift+↓)">↓</button>
-        <button id="delBtn" class="icon" title="Delete the selected rows (Delete)">🗑</button>
+        <button id="delBtn" class="icon" title="Delete the selected rows (Delete)"><span class="ico">🗑</span></button>
         <span id="selCount" class="hint" hidden></span>
       </div>
       <div class="grp">
@@ -73,7 +74,7 @@
       </div>
       <div class="spacer"></div>
       <div class="grp">
-        <button id="detailsBtn" title="Open the record form for the selected task (Ctrl+I)">📄 Record</button>
+        <button id="detailsBtn" title="Open the record form for the selected task (Ctrl+I)"><span class="ico">📄</span> Record</button>
       </div>
       <div class="grp seg" id="grainSeg">
         <button data-grain="day">Day</button><button data-grain="week" class="on">Week</button>
@@ -102,7 +103,6 @@
       <div class="grp seg" id="riskSeg"><button data-f="all" class="on">All</button><button data-f="gaps" title="Risks with something not covered">Gaps</button></div>
       <div class="grp"><input id="riskSearch" type="search" placeholder="Filter risks…" size="16"></div>
       <div class="spacer"></div>
-      <span class="hint">Drag ⠿ onto a task to link it, or between tasks to create one</span>
       <div class="grp"><button id="riskImportBtn">Import risks…</button><button id="closeoutBtn">Closeout report</button></div>
     </div>
     <div class="split" id="riskSplit">

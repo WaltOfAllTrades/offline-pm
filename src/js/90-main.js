@@ -87,6 +87,7 @@ function initToolbar() {
   $$("#grainSeg button").forEach(b => b.addEventListener("click", () => setGrain(b.dataset.grain)));
   $("todayBtn").onclick = () => scrollGanttTo(todayNum(), 0.3);
   $("undoBtn").onclick = undo; $("redoBtn").onclick = redo;
+  setWarnIcons(lsGet("pm.hideWarn", false));
   $("savePill").onclick = () => { $("logPanel").hidden = !$("logPanel").hidden; redraw("save"); };
   $("logClose").onclick = () => $("logPanel").hidden = true;
   $("slowMo").onchange = e => slowSaves = e.target.checked;
@@ -95,7 +96,7 @@ function initToolbar() {
   $("fileMenu").addEventListener("click", e => {
     const act = e.target.closest("button")?.dataset.act; if (!act) return;
     $("fileMenu").hidden = true;
-    ({ new: newPlanFile, open: openPlanFile, copy: saveCopy, reconnect, import: startImport, riskImport: startRiskImport, xlsx: exportXlsx, csv: exportCsv, print: () => { if (UI.view !== "plan") switchView("plan"); printPlan(); }, help: showHelp, backups: showBackups })[act]?.();
+    ({ new: newPlanFile, open: openPlanFile, copy: saveCopy, reconnect, import: startImport, riskImport: startRiskImport, xlsx: exportXlsx, csv: exportCsv, print: () => { if (UI.view !== "plan") switchView("plan"); printPlan(); }, help: showHelp, backups: showBackups, warnIcons: () => setWarnIcons(!document.body.classList.contains("no-warn")) })[act]?.();
   });
   $("addPersonBtn").onclick = () => addPartyRow("person");
   $("addTeamBtn").onclick = () => addPartyRow("team");
@@ -172,14 +173,14 @@ setInterval(() => { if (fileHandle) redraw("save"); }, 15000); // "saved 2 min a
     op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote, opSetRIsA,
       opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote, opNestByWbs },
     risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport: drawn(loadRiskImport), riskImportItems, doRiskImport: drawn(doRiskImport), openRiskRecord: drawn(openRiskRecord), closeRiskForm: drawn(closeRiskForm), quickTask: drawn(quickTask), cmdRiskPaste: drawn(cmdRiskPaste), linkMit: drawn(linkMit), renderRisks: drawn(() => redraw("risks")), get RI() { return RI; }, recNotes, toLMH },
-    util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml, markFocus, refocus, parseClipColumn, wbsLevels },
+    util: { parseYMD, fmtYMD, fmtShort, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml, markFocus, refocus, parseClipColumn, wbsLevels },
     io: { loadImportFile, buildPlan, doImport: drawn(doImport), collectPeople, exportWorkbook, csvText, autoMap, riskPreviewText, get W() { return W; } },
     db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get historyBytes() { return historyBytes(); }, set undoBudget(n) { undoBudget = n; trimUndo(); }, get undoBudget() { return undoBudget; }, get mirrorRev() { return mirrorRev; },
       get diskRev() { return diskRev; }, get readOnly() { return readOnly; }, get fileId() { return readFileId(db); },
       // test aid: attach a stand-in file handle without a picker
       attach(h, base = null) { fileHandle = h; filePerm = !!h; diskRev = base; }, endReadOnly() { readOnly = false; readOnlyWhy = ""; $("roBanner").hidden = true; } },
     gantt: { buildScale, get SC() { return SC; }, setGrain },
-    ui: { openPasteChooser, openTaskPicker, openMitigantPicker, closePop: drawn(closePop) },
+    ui: { setWarnIcons, openPasteChooser, openTaskPicker, openMitigantPicker, closePop: drawn(closePop) },
     cmd: Object.fromEntries(Object.entries({ cmdAdd, cmdStructure, cmdDelete, startEdit, commitEdit, gridKey, toggleCollapse, showLevel, startImport, printPlan, cmdPaste, cmdPeoplePaste, addPartyRow, openGridPaste }).map(([k, f]) => [k, drawn(f)])),
     reset: drawn(() => { installDb(null); M.projectId = null; UI.selId = null; refresh(); loadCollapsed(); computeRows(); redraw("all"); }),
     get XLSX() { return XLSX; }, get SQL() { return SQL; },

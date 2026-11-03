@@ -135,7 +135,13 @@ function finishFor(start, dur) { const s = wdIndex(start); return wdDay(s + Math
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function ymdParts(n) { const d = new Date(n * DAY); return { y: d.getUTCFullYear(), m: d.getUTCMonth(), d: d.getUTCDate() }; }
-function fmtShort(n) { if (n == null) return ""; const p = ymdParts(n); return `${MONTHS[p.m]} ${p.d}, ${String(p.y).slice(2)}`; }
+// "23 Oct", with the year only when it isn't this year: "23 Oct 27" (DECISIONS #94). year: always add it (print, which
+// outlives the year it was made in). Typed and stored dates stay YYYY-MM-DD.
+function fmtShort(n, year = false) {
+  if (n == null) return "";
+  const p = ymdParts(n);
+  return `${p.d} ${MONTHS[p.m]}${year || p.y !== new Date().getFullYear() ? " " + String(p.y).slice(2) : ""}`;
+}
 const dayOf = (y, m, d) => Math.round(Date.UTC(y, m, d) / DAY);
 
 // Duration text "5d", "2w", "3 days", "4" → working days (null if unparseable).

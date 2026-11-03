@@ -79,7 +79,7 @@ function renderRiskGrid() {
     for (const m of r.mitigants) tb.append(mitRowEl(m));
   }
   const table = h("table", { class: "rk" },
-    h("thead", {}, h("tr", {}, h("th", { title: "Drag a row by ⠿ onto a task in the plan" }, "⠿"), ...["Risk / mitigant", "Status", "Achieved", "Implemented by", "Accountable", "Responsible", "P · I / Control", ""].map(x => h("th", {}, x)))), tb);
+    h("thead", {}, h("tr", {}, h("th", { title: "Drag ⠿ onto a task in the plan to link it, or between tasks to create one there" }, "⠿"), ...["Risk / mitigant", "Status", "Achieved", "Implemented by", "Accountable", "Responsible", "P · I / Control", ""].map(x => h("th", {}, x)))), tb);
   body.innerHTML = "";
   if (!M.risks.length) body.append(h("div", { class: "empty" }, "No risks yet. Click ", h("b", {}, "＋ Risk"), ", or import a risk register from Excel."));
   else if (!risks.length) body.append(h("div", { class: "empty" }, UI.riskFilter === "gaps" ? "No gaps. Every risk is covered." : "No risks match the filter."));
@@ -98,9 +98,9 @@ function riskRowEl(r) {
   const sel = (field, title) => { const s = h("select", { class: "rk-lmh", title }, ...Object.entries(LMH).map(([k, v]) => h("option", { value: k, selected: r[field] === k }, k || "–"))); s.addEventListener("change", () => mutate(`Risk ${title} → ${LMH[s.value]}`, () => opUpdateRisk(r.id, { [field]: s.value }))); return s; };
   const tr = h("tr", { class: "rk-risk" + (isSel(r) ? " sel" : ""), "data-risk": r.id },
     h("td", { class: "rk-drag", title: "Drag onto a task in the plan" }, "⠿"),
-    h("td", { class: "rk-tc" }, h("div", { class: "rk-cell" }, h("span", { class: "rk-kind" }, "Risk"), name, gapIcon(r.gaps), openBtn("risk", r.id))),
+    h("td", { class: "rk-tc" }, h("div", { class: "rk-cell" }, name, gapIcon(r.gaps), openBtn("risk", r.id))),
     h("td", { html: riskBadge(r) }),
-    h("td", { class: "num" }, r.response === "accept" ? "—" : `${r.achievedCount} of ${r.mitigants.length}`),
+    h("td", { class: "num" }, r.response === "accept" && r.mitigants.length ? `${r.achievedCount} of ${r.mitigants.length}` : ""), // a Mitigate badge already counts them
     h("td", {}, r.response === "accept" ? h("span", { class: "hint", title: r.accept_reason }, "Accepted") : null),
     h("td", {}, partyCell(r, "A")), h("td", {}, partyCell(r, "R")),
     h("td", {}, h("span", { class: "hint" }, "P "), sel("probability", "probability"), h("span", { class: "hint" }, " I "), sel("impact", "impact")),
@@ -132,9 +132,9 @@ function mitRowEl(m) {
     h("button", { class: "rk-add", title: "Create a task that implements this mitigant", onclick: () => quickTask(m) }, "＋ Task"));
   return h("tr", { class: "rk-mit" + (isSel(m) ? " sel" : ""), "data-mit": m.id },
     h("td", { class: "rk-drag", title: "Drag onto a task to link it, or between tasks to create one there" }, "⠿"),
-    h("td", { class: "rk-tc" }, h("div", { class: "rk-cell rk-indent" }, h("span", { class: "rk-kind mit" }, "Mit."), ta, gapIcon(m.gaps), openBtn("mitigant", m.id))),
+    h("td", { class: "rk-tc" }, h("div", { class: "rk-cell rk-indent" }, ta, gapIcon(m.gaps), openBtn("mitigant", m.id))),
     h("td", {}, st),
-    h("td", { class: "num", title: m.is_control ? "Control: achieved when Tested" : "Achieved when Implemented" }, m.achieved ? "✓" : "✗"),
+    h("td", { class: "num", title: m.is_control ? "Control: achieved when Tested" : "Achieved when Implemented" }, m.achieved ? h("span", { class: "ach" }, "✓") : ""),
     h("td", {}, tasks),
     h("td", {}, partyCell(m, "A")), h("td", {}, partyCell(m, "R")),
     h("td", {}, h("label", { class: "hint rk-ctl" }, ctl, " Control")),

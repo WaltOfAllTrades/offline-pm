@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-opY8KKjSYw8amPTWlRPbeWzElf0Dj9SqasV0B1JCaaI='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-VYpyw6s0FdDm0kPP0j+dYVQ2ANWQVLS3uNo81l9rn9Q=' 'sha256-zAFRMKqFIefwiPiImOupSczcv7ON8L0Sm0S3Jzw6b0E=' 'sha256-78yMjaOF2HE8S/sKh6bohguJNBeGrwupAENECQAQ4Cc=' 'sha256-/KDOKODwOCHNkbggkGwGwHsek9JHHrTzVzy4GKmA24s='; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
 <title>Offline PM</title>
 <style>:root{
   --bg:#f5f6f8; --panel:#fff; --panel2:#fafbfc; --ink:#1b1f24; --muted:#667085; --line:#e4e7ec; --line2:#eef0f3;
@@ -112,9 +112,10 @@ hr{border:0;border-top:1px solid var(--line);margin:4px 0}
 .caret{width:16px;flex:none;text-align:center;color:var(--muted);cursor:pointer;user-select:none;font-size:10px}
 .ms-ico{color:var(--ms);font-size:11px}
 .warn-dot{color:var(--warn);font-size:11px;margin-left:auto;padding-left:4px}
-.st{font-size:12px;padding:1px 7px;border-radius:5px}
-.st-ns{background:var(--info-bg);color:var(--info)} .st-ip{background:var(--accent-soft);color:var(--accent)}
-.st-bl{background:var(--err-bg);color:var(--err)} .st-dn{background:var(--ok-bg);color:var(--ok)}
+/* Status: a coloured dot and plain text, not a filled pill (DECISIONS #95). Work under way reads in full ink; not started and done are muted. */
+.st{font-size:12px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;--dot:var(--bar-ns);color:var(--muted)}
+.st::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--dot);flex:none}
+.st-ip{--dot:var(--bar);color:var(--ink)} .st-bl{--dot:var(--bar-blocked);color:var(--err)} .st-dn{--dot:var(--bar-done)}
 .chips{display:flex;gap:3px;overflow:hidden}
 .chip{display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:5px;background:var(--info-bg);font-size:12px;white-space:nowrap}
 .chip.team{background:var(--accent-soft);color:var(--accent)}
@@ -376,11 +377,9 @@ table.rk{width:100%;border-collapse:collapse;font-size:12.5px}
 .rk .rk-tc{min-width:240px;width:34%}
 .rk-cell{display:flex;align-items:flex-start;gap:6px}
 .rk-indent{padding-left:30px}
-.rk-kind{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--accent);background:var(--accent-soft);border-radius:8px;padding:2px 6px;margin-top:4px;flex:none}
 .rk-name,.rk-text{flex:1;min-width:0;border:1px solid transparent;background:transparent;font:inherit;padding:3px 5px;border-radius:5px}
 .rk-name{font-weight:650}
 .rk-text{resize:none;overflow:hidden;line-height:1.35}
-.rk-kind.mit{color:var(--warn);background:var(--warn-bg)}
 .rk-open{border:0;background:none;padding:3px 4px;color:var(--accent);font-weight:700;opacity:0;flex:none}
 .rk tr:hover .rk-open,.rk tr.sel .rk-open,.rk-open:focus{opacity:1}
 .rk-name:hover,.rk-text:hover{border-color:var(--line)}
@@ -486,6 +485,15 @@ table.ptable{width:100%;border-collapse:collapse;font-size:13px}
 .ptable .pt-acts button{padding:3px 7px;font-size:12px}
 .ptable .pt-mem{color:var(--muted);font-size:12.5px}
 .ptable tr.inactive input[data-f=name]{text-decoration:line-through;color:var(--muted)}
+
+/* Monochrome indicators (DECISIONS #96): colour emoji drew the eye more than the data. Same glyphs, drawn grey. */
+.gc .nc,.rp-row .sh,.mg-l .nc{filter:grayscale(1);opacity:.7}
+.grow:hover .nc,.grow.sel .nc{opacity:1}
+.toolbar .ico{filter:grayscale(1)}
+.chip .ico{filter:grayscale(1)}
+/* File → Hide warning icons */
+body.no-warn .warn-dot,body.no-warn table.raci .flag{display:none}
+.rk td.num .ach{color:var(--ok);font-weight:700}
 </style>
 </head>
 <body>
@@ -521,6 +529,7 @@ table.ptable{width:100%;border-collapse:collapse;font-size:13px}
       <button data-act="csv">Export tasks (.csv)</button>
       <hr>
       <button data-act="print">Print / save as PDF…</button>
+      <button data-act="warnIcons" id="mWarnIcons">Hide warning icons</button>
       <button data-act="help">Help &amp; shortcuts</button>
     </div>
   </div>
@@ -534,14 +543,14 @@ table.ptable{width:100%;border-collapse:collapse;font-size:13px}
         <button id="addTaskBtn" class="primary" title="New task below (Insert). With the record open, the new record opens">＋ Task</button>
         <button id="addSubBtn" title="New subtask (Ctrl+Insert)">＋ Subtask</button>
         <button id="addMsBtn" title="New milestone">◆ Milestone</button>
-        <button id="pasteBtn" title="Paste a column copied from Excel into the selected cell (or click a cell and press Ctrl+V)">📋 Paste</button>
+        <button id="pasteBtn" title="Paste a column copied from Excel into the selected cell (or click a cell and press Ctrl+V)"><span class="ico">📋</span> Paste</button>
       </div>
       <div class="grp">
         <button id="outdentBtn" class="icon" title="Outdent the selected rows (Alt+Shift+←). Shift+click selects a block">⇤</button>
         <button id="indentBtn" class="icon" title="Indent the selected rows (Alt+Shift+→). Shift+click selects a block">⇥</button>
         <button id="upBtn" class="icon" title="Move up (Alt+Shift+↑)">↑</button>
         <button id="downBtn" class="icon" title="Move down (Alt+Shift+↓)">↓</button>
-        <button id="delBtn" class="icon" title="Delete the selected rows (Delete)">🗑</button>
+        <button id="delBtn" class="icon" title="Delete the selected rows (Delete)"><span class="ico">🗑</span></button>
         <span id="selCount" class="hint" hidden></span>
       </div>
       <div class="grp">
@@ -554,7 +563,7 @@ table.ptable{width:100%;border-collapse:collapse;font-size:13px}
       </div>
       <div class="spacer"></div>
       <div class="grp">
-        <button id="detailsBtn" title="Open the record form for the selected task (Ctrl+I)">📄 Record</button>
+        <button id="detailsBtn" title="Open the record form for the selected task (Ctrl+I)"><span class="ico">📄</span> Record</button>
       </div>
       <div class="grp seg" id="grainSeg">
         <button data-grain="day">Day</button><button data-grain="week" class="on">Week</button>
@@ -583,7 +592,6 @@ table.ptable{width:100%;border-collapse:collapse;font-size:13px}
       <div class="grp seg" id="riskSeg"><button data-f="all" class="on">All</button><button data-f="gaps" title="Risks with something not covered">Gaps</button></div>
       <div class="grp"><input id="riskSearch" type="search" placeholder="Filter risks…" size="16"></div>
       <div class="spacer"></div>
-      <span class="hint">Drag ⠿ onto a task to link it, or between tasks to create one</span>
       <div class="grp"><button id="riskImportBtn">Import risks…</button><button id="closeoutBtn">Closeout report</button></div>
     </div>
     <div class="split" id="riskSplit">
@@ -1002,7 +1010,13 @@ function finishFor(start, dur) { const s = wdIndex(start); return wdDay(s + Math
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function ymdParts(n) { const d = new Date(n * DAY); return { y: d.getUTCFullYear(), m: d.getUTCMonth(), d: d.getUTCDate() }; }
-function fmtShort(n) { if (n == null) return ""; const p = ymdParts(n); return `${MONTHS[p.m]} ${p.d}, ${String(p.y).slice(2)}`; }
+// "23 Oct", with the year only when it isn't this year: "23 Oct 27" (DECISIONS #94). year: always add it (print, which
+// outlives the year it was made in). Typed and stored dates stay YYYY-MM-DD.
+function fmtShort(n, year = false) {
+  if (n == null) return "";
+  const p = ymdParts(n);
+  return `${p.d} ${MONTHS[p.m]}${year || p.y !== new Date().getFullYear() ? " " + String(p.y).slice(2) : ""}`;
+}
 const dayOf = (y, m, d) => Math.round(Date.UTC(y, m, d) / DAY);
 
 // Duration text "5d", "2w", "3 days", "4" → working days (null if unparseable).
@@ -2491,8 +2505,8 @@ const UI = {
 const COLS = [
   { key: "wbs", label: "WBS", w: 64 },
   { key: "name", label: "Task name", w: 290, edit: "text" },
-  { key: "start", label: "Start", w: 92, edit: "date" },
-  { key: "finish", label: "Finish", w: 92, edit: "date" },
+  { key: "start", label: "Start", w: 80, edit: "date" },
+  { key: "finish", label: "Finish", w: 80, edit: "date" },
   { key: "duration", label: "Dur.", w: 54, edit: "text" },
   { key: "percent", label: "%", w: 50, edit: "text" },
   { key: "status", label: "Status", w: 104, edit: "select" },
@@ -2557,7 +2571,7 @@ let _warnSet = new Set();
 function chipFor(r, inherited, note = inherited ? " (inherited)" : "") {
   const p = M.parties.get(r.party_id); if (!p) return "";
   const team = p.kind === "team";
-  return html`<span class="chip ${team ? "team" : ""} ${inherited ? "inh" : ""} ${p.active ? "" : "inactive"}" title="${p.name}${team ? " (team)" : ""}${note}">${team ? "👥 " : ""}${p.name}</span>`;
+  return html`<span class="chip ${team ? "team" : ""} ${inherited ? "inh" : ""} ${p.active ? "" : "inactive"}" title="${p.name}${team ? " (team)" : ""}${note}">${team ? html`<span class="ico">👥</span> ` : ""}${p.name}</span>`;
 }
 const rChips = t => { const r = responsible(t); return r.list.map(x => chipFor(x, r.same, r.same ? " (same as Accountable)" : "")); };
 function cellHtml(t, c) {
@@ -2688,7 +2702,7 @@ function startEdit(colKey = UI.col, initial = null) {
     el.value = initial ?? v;
   }
   el.className = "cell-editor";
-  Object.assign(el.style, { left: left + "px", top: t.row * ROW + "px", width: c.w + (colKey === "name" ? 120 : c.edit === "date" ? 40 : 30) + "px" });
+  Object.assign(el.style, { left: left + "px", top: t.row * ROW + "px", width: c.w + (colKey === "name" ? 120 : c.edit === "date" ? 56 : 30) + "px" });
   UI.editing = { el, taskId: t.id, col: colKey, done: false };
   el.addEventListener("keydown", e => {
     if (e.key === "Enter") { e.preventDefault(); commitEdit(1, 0); }
@@ -3894,7 +3908,7 @@ function renderRiskGrid() {
     for (const m of r.mitigants) tb.append(mitRowEl(m));
   }
   const table = h("table", { class: "rk" },
-    h("thead", {}, h("tr", {}, h("th", { title: "Drag a row by ⠿ onto a task in the plan" }, "⠿"), ...["Risk / mitigant", "Status", "Achieved", "Implemented by", "Accountable", "Responsible", "P · I / Control", ""].map(x => h("th", {}, x)))), tb);
+    h("thead", {}, h("tr", {}, h("th", { title: "Drag ⠿ onto a task in the plan to link it, or between tasks to create one there" }, "⠿"), ...["Risk / mitigant", "Status", "Achieved", "Implemented by", "Accountable", "Responsible", "P · I / Control", ""].map(x => h("th", {}, x)))), tb);
   body.innerHTML = "";
   if (!M.risks.length) body.append(h("div", { class: "empty" }, "No risks yet. Click ", h("b", {}, "＋ Risk"), ", or import a risk register from Excel."));
   else if (!risks.length) body.append(h("div", { class: "empty" }, UI.riskFilter === "gaps" ? "No gaps. Every risk is covered." : "No risks match the filter."));
@@ -3913,9 +3927,9 @@ function riskRowEl(r) {
   const sel = (field, title) => { const s = h("select", { class: "rk-lmh", title }, ...Object.entries(LMH).map(([k, v]) => h("option", { value: k, selected: r[field] === k }, k || "–"))); s.addEventListener("change", () => mutate(`Risk ${title} → ${LMH[s.value]}`, () => opUpdateRisk(r.id, { [field]: s.value }))); return s; };
   const tr = h("tr", { class: "rk-risk" + (isSel(r) ? " sel" : ""), "data-risk": r.id },
     h("td", { class: "rk-drag", title: "Drag onto a task in the plan" }, "⠿"),
-    h("td", { class: "rk-tc" }, h("div", { class: "rk-cell" }, h("span", { class: "rk-kind" }, "Risk"), name, gapIcon(r.gaps), openBtn("risk", r.id))),
+    h("td", { class: "rk-tc" }, h("div", { class: "rk-cell" }, name, gapIcon(r.gaps), openBtn("risk", r.id))),
     h("td", { html: riskBadge(r) }),
-    h("td", { class: "num" }, r.response === "accept" ? "—" : `${r.achievedCount} of ${r.mitigants.length}`),
+    h("td", { class: "num" }, r.response === "accept" && r.mitigants.length ? `${r.achievedCount} of ${r.mitigants.length}` : ""), // a Mitigate badge already counts them
     h("td", {}, r.response === "accept" ? h("span", { class: "hint", title: r.accept_reason }, "Accepted") : null),
     h("td", {}, partyCell(r, "A")), h("td", {}, partyCell(r, "R")),
     h("td", {}, h("span", { class: "hint" }, "P "), sel("probability", "probability"), h("span", { class: "hint" }, " I "), sel("impact", "impact")),
@@ -3947,9 +3961,9 @@ function mitRowEl(m) {
     h("button", { class: "rk-add", title: "Create a task that implements this mitigant", onclick: () => quickTask(m) }, "＋ Task"));
   return h("tr", { class: "rk-mit" + (isSel(m) ? " sel" : ""), "data-mit": m.id },
     h("td", { class: "rk-drag", title: "Drag onto a task to link it, or between tasks to create one there" }, "⠿"),
-    h("td", { class: "rk-tc" }, h("div", { class: "rk-cell rk-indent" }, h("span", { class: "rk-kind mit" }, "Mit."), ta, gapIcon(m.gaps), openBtn("mitigant", m.id))),
+    h("td", { class: "rk-tc" }, h("div", { class: "rk-cell rk-indent" }, ta, gapIcon(m.gaps), openBtn("mitigant", m.id))),
     h("td", {}, st),
-    h("td", { class: "num", title: m.is_control ? "Control: achieved when Tested" : "Achieved when Implemented" }, m.achieved ? "✓" : "✗"),
+    h("td", { class: "num", title: m.is_control ? "Control: achieved when Tested" : "Achieved when Implemented" }, m.achieved ? h("span", { class: "ach" }, "✓") : ""),
     h("td", {}, tasks),
     h("td", {}, partyCell(m, "A")), h("td", {}, partyCell(m, "R")),
     h("td", {}, h("label", { class: "hint rk-ctl" }, ctl, " Control")),
@@ -4676,7 +4690,7 @@ function renderRaciRows(whole = false) {
   const wrap = $("raciWrap"), body = wrap.querySelector("tbody"); if (!RX?.rows || (!whole && !body)) return;
   const { scrollTop, scrollLeft } = wrap, rowH = RX.rowH, top = scrollTop - (wrap.querySelector("thead")?.offsetHeight ?? 60);
   const first = Math.max(0, Math.floor(top / rowH) - 10), last = Math.min(RX.rows.length, Math.ceil((top + wrap.clientHeight) / rowH) + 10);
-  const pad = n => n > 0 ? html`<tr class="pad" aria-hidden="true"><td colspan="${RX.cols + 2}" style="height:${n * rowH}px;padding:0;border:0"></td></tr>` : "";
+  const pad = n => n > 0 ? html`<tr class="pad" aria-hidden="true"><td colspan="${RX.cols + 1}" style="height:${n * rowH}px;padding:0;border:0"></td></tr>` : "";
   const rows = html`${pad(first)}${RX.rows.slice(first, last).map(RX.rowHtml)}${pad(RX.rows.length - last)}`;
   if (whole) setHtml(wrap, html`<table class="${RX.cls}" role="grid" aria-label="RACI matrix" aria-rowcount="${RX.rows.length + 1}"><thead>${RX.head}</thead><tbody>${rows}</tbody></table>`); else setHtml(body, rows);
   wrap.scrollTop = scrollTop; wrap.scrollLeft = scrollLeft;
@@ -4685,9 +4699,17 @@ function renderRaciRows(whole = false) {
   const real = wrap.querySelector("tbody tr:not(.pad)")?.offsetHeight; // measured once the first rows are on screen
   if (real && real !== rowH) { RX.rowH = real; renderRaciRows(); }
 }
+const memberCount = id => { const n = (M.members.get(id) || []).length; return `${n} ${n === 1 ? "person" : "people"}`; };
+// The Warnings column is drawn only when a row shown has a RACI warning; it's empty on most plans.
+function raciFlags(rows) {
+  const by = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!by.has(i.task.id)) by.set(i.task.id, []); by.get(i.task.id).push(i.text); }
+  const any = rows.some(t => by.has(t.id));
+  return { any, flagHead: any ? html`<th class="flag">Warnings</th>` : "", flagCell: t => any ? html`<td class="flag">${(by.get(t.id) || []).join("; ")}</td>` : "" };
+}
 function renderRaci() {
   $$("#raciBySeg button").forEach(b => b.classList.toggle("on", b.dataset.by === UI.raciBy));
-  $("raciHint").textContent = UI.raciBy === "team"
+  $("raciHint").textContent = "Click a cell for a role · keys R A C I, Del";
+  $("raciHint").title = UI.raciBy === "team"
     ? "Click a cell to pick the team's role; + hands it to a member. Keys: arrows, R A C I, Shift+A for A/R, Delete, +"
     : "Click a cell to pick a role. Keys: arrows, R A C I, Shift+A for A/R, Delete clears";
   $("raciOnlyUsed").parentElement.lastChild.textContent = UI.raciBy === "team" ? " Only teams with assignments" : " Only people/teams with assignments";
@@ -4700,7 +4722,7 @@ function renderRaci() {
   const rows = M.order.filter(t => !leaves || !t.isSummary);
   if (!M.order.length) { setHtml(wrap, html`<div class="empty">No tasks in this project yet.</div>`); return; }
   if (!cols.length) { setHtml(wrap, html`<div class="empty">No ${onlyUsed ? "assignments" : "people or teams"} yet. Untick “Only people/teams with assignments” or add people on the People &amp; teams tab.</div>`); return; }
-  const issuesBy = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!issuesBy.has(i.task.id)) issuesBy.set(i.task.id, []); issuesBy.get(i.task.id).push(i.text); }
+  const { any: anyFlag, flagHead, flagCell } = raciFlags(rows);
   const rowHtml = t => {
     const map = new Map(rolesOf(t.id).map(r => [r.party_id, r.role]));
     const inh = accountable(t);
@@ -4710,9 +4732,9 @@ function renderRaci() {
       const ar = t.r_is_a && (r === "A" || ghost); // Responsible = Accountable
       return html`<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" role="gridcell" tabindex="-1" title="${p.name}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? r + (ar ? "/R" : "") : ghost ? html`<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
     });
-    return html`<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
+    return html`<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}${flagCell(t)}</tr>`;
   };
-  showRaci("raci", html`<tr><th class="tn">Task</th>${cols.map(p => html`<th class="pc" title="${p.name}">${p.name}<span class="k">${p.kind === "team" ? "team" : p.title || ""}</span></th>`)}<th>Warnings</th></tr>`, rows, cols.length, rowHtml);
+  showRaci("raci", html`<tr><th class="tn">Task</th>${cols.map(p => html`<th class="pc" title="${p.name}">${p.name}<span class="k">${p.kind === "team" ? "team" : p.title || ""}</span></th>`)}${flagHead}</tr>`, rows, cols.length + anyFlag, rowHtml); // + the Warnings column, when drawn
 }
 function renderRaciTeams() {
   const wrap = $("raciWrap");
@@ -4724,7 +4746,7 @@ function renderRaciTeams() {
   const cols = M.teams.filter(tm => onlyUsed ? used.has(tm.id) : (tm.active || used.has(tm.id))).map(tm => ({ id: tm.id, name: tm.name, team: tm }));
   if (used.has(0)) cols.push({ id: 0, name: "No team", team: null });
   if (!cols.length) { setHtml(wrap, html`<div class="empty">${M.teams.length ? "No team has assignments yet. Untick “Only teams with assignments”." : "No teams yet. Add teams on the People & teams tab."}</div>`); return; }
-  const issuesBy = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!issuesBy.has(i.task.id)) issuesBy.set(i.task.id, []); issuesBy.get(i.task.id).push(i.text); }
+  const { any: anyFlag, flagHead, flagCell } = raciFlags(rows);
   const rowHtml = t => {
     const roles = rolesOf(t.id);
     const cells = cols.map(c => {
@@ -4737,9 +4759,9 @@ function renderRaciTeams() {
       const plus = c.team && (M.members.get(c.id) || []).length ? html`<button class="plus" data-plus="${c.id}" tabindex="-1" title="Give this to a member of ${c.name} (key: +)">+</button>` : "";
       return html`<td class="cell tcell ${top[0] || ""}" data-t="${t.id}" data-team="${c.id}" role="gridcell" tabindex="-1" title="${tip}">${ownL ? html`<b>${ownL}</b>` : ""}${chips}${plus}</td>`;
     });
-    return html`<tr class="${t.isSummary ? "summary" : ""}${t.id === UI.selId && UI.form ? " sel" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
+    return html`<tr class="${t.isSummary ? "summary" : ""}${t.id === UI.selId && UI.form ? " sel" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}${flagCell(t)}</tr>`;
   };
-  showRaci("raci team", html`<tr><th class="tn">Task</th>${cols.map(c => html`<th class="pc" title="${c.name}">${c.name}<span class="k">${c.team ? `${(M.members.get(c.id) || []).length} people` : "people without a team"}</span></th>`)}<th>Warnings</th></tr>`, rows, cols.length, rowHtml);
+  showRaci("raci team", html`<tr><th class="tn">Task</th>${cols.map(c => html`<th class="pc" title="${c.name}">${c.name}<span class="k">${c.team ? memberCount(c.id) : "people without a team"}</span></th>`)}${flagHead}</tr>`, rows, cols.length + anyFlag, rowHtml); // + the Warnings column, when drawn
 }
 // Hand the team's role on a task to one of its members (or set a member's role when the team has none).
 function teamMemberPicker(anchor, tid, teamId) {
@@ -5021,6 +5043,12 @@ function renderIssues() {
   for (const i of items) list.append(h("div", { class: "issue", onclick: () => { switchView("plan"); selectTask(i.task.id); } },
     h("span", { class: "lvl " + i.level }, i.level === "warn" ? "warning" : "info"), h("span", { class: "tk" }, `${i.task.wbs} ${i.task.name}`), h("span", {}, i.text)));
 }
+// File → Hide warning icons (DECISIONS #93): hides the ⚠ markers and the RACI Warnings column, remembered per browser.
+// The Issues tab and its count stay, so nothing is lost, only hidden.
+function setWarnIcons(hide) {
+  document.body.classList.toggle("no-warn", hide); lsSet("pm.hideWarn", hide);
+  $("mWarnIcons").textContent = hide ? "Show warning icons" : "Hide warning icons";
+}
 function updateIssueBadge() {
   const n = M.issues.filter(i => i.level === "warn").length, b = $("issueBadge");
   b.hidden = !n; b.textContent = n;
@@ -5110,7 +5138,8 @@ function showHelp() {
     h("ul", {}, h("li", {}, "Drag a bar to move it; drag its left or right edge to change dates. A new task has no dates: drag across its empty row to draw its bar."),
       h("li", {}, "Hover a bar to see link handles (○). Drag from a handle onto another bar: the end you start from and the half of the target you drop on decide the type (Finish→Start, Start→Start, …)."),
       h("li", {}, "Click an arrow to change its type and lag, or delete it. Red arrows mean the dates conflict with the link; dates are never moved automatically."),
-      h("li", {}, "Double-click a bar, or click ↗ next to a task name, to open its record form.")),
+      h("li", {}, "Double-click a bar, or click ↗ next to a task name, to open its record form."),
+      h("li", {}, "⚠ marks a task with warnings (see Issues). File → ", h("b", {}, "Hide warning icons"), " hides the marks; Issues keeps the list and its count.")),
     h("h3", {}, "Record form"),
     h("p", {}, "Shows every field of a task, a mini Gantt of a summary task's subtasks, its work notes (dated, editable) and related records in tabs. It slides in over the outline; the Gantt stays visible, and clicking a bar switches records. ", h("b", {}, "← Back"), " returns to the record you were on before, even across pages. Esc or ✕ closes it. ", h("kbd", {}, "Ctrl+Enter"), " posts a note."),
     h("h3", {}, "Predecessors cell"),
@@ -5929,7 +5958,7 @@ function printPlan() {
     const bars = chunk.map((t, i) => barSvg(sc, t, i * ROW, { print: true, noLabel: true }));
     const table = chunk.map((t, i) => {
       const y = i * ROW + 19, a = accountable(t);
-      const cells = [t.wbs, t.name, fmtShort(t.S), fmtShort(t.F), t.P + "%", rolesOf(t.id, "R").map(r => partyName(r.party_id)).join(", "), a.list.map(r => partyName(r.party_id)).join(", ")];
+      const cells = [t.wbs, t.name, fmtShort(t.S, true), fmtShort(t.F, true), t.P + "%", rolesOf(t.id, "R").map(r => partyName(r.party_id)).join(", "), a.list.map(r => partyName(r.party_id)).join(", ")];
       let cx = 0;
       const texts = cells.map((c, j) => {
         const max = Math.floor((COLW[j] - 8 - (j === 1 ? t.depth * 14 : 0)) / 6.4); const txt = String(c).length > max ? String(c).slice(0, max - 1) + "…" : c;
@@ -6050,6 +6079,7 @@ function initToolbar() {
   $$("#grainSeg button").forEach(b => b.addEventListener("click", () => setGrain(b.dataset.grain)));
   $("todayBtn").onclick = () => scrollGanttTo(todayNum(), 0.3);
   $("undoBtn").onclick = undo; $("redoBtn").onclick = redo;
+  setWarnIcons(lsGet("pm.hideWarn", false));
   $("savePill").onclick = () => { $("logPanel").hidden = !$("logPanel").hidden; redraw("save"); };
   $("logClose").onclick = () => $("logPanel").hidden = true;
   $("slowMo").onchange = e => slowSaves = e.target.checked;
@@ -6058,7 +6088,7 @@ function initToolbar() {
   $("fileMenu").addEventListener("click", e => {
     const act = e.target.closest("button")?.dataset.act; if (!act) return;
     $("fileMenu").hidden = true;
-    ({ new: newPlanFile, open: openPlanFile, copy: saveCopy, reconnect, import: startImport, riskImport: startRiskImport, xlsx: exportXlsx, csv: exportCsv, print: () => { if (UI.view !== "plan") switchView("plan"); printPlan(); }, help: showHelp, backups: showBackups })[act]?.();
+    ({ new: newPlanFile, open: openPlanFile, copy: saveCopy, reconnect, import: startImport, riskImport: startRiskImport, xlsx: exportXlsx, csv: exportCsv, print: () => { if (UI.view !== "plan") switchView("plan"); printPlan(); }, help: showHelp, backups: showBackups, warnIcons: () => setWarnIcons(!document.body.classList.contains("no-warn")) })[act]?.();
   });
   $("addPersonBtn").onclick = () => addPartyRow("person");
   $("addTeamBtn").onclick = () => addPartyRow("team");
@@ -6135,14 +6165,14 @@ setInterval(() => { if (fileHandle) redraw("save"); }, 15000); // "saved 2 min a
     op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote, opSetRIsA,
       opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote, opNestByWbs },
     risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport: drawn(loadRiskImport), riskImportItems, doRiskImport: drawn(doRiskImport), openRiskRecord: drawn(openRiskRecord), closeRiskForm: drawn(closeRiskForm), quickTask: drawn(quickTask), cmdRiskPaste: drawn(cmdRiskPaste), linkMit: drawn(linkMit), renderRisks: drawn(() => redraw("risks")), get RI() { return RI; }, recNotes, toLMH },
-    util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml, markFocus, refocus, parseClipColumn, wbsLevels },
+    util: { parseYMD, fmtYMD, fmtShort, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml, markFocus, refocus, parseClipColumn, wbsLevels },
     io: { loadImportFile, buildPlan, doImport: drawn(doImport), collectPeople, exportWorkbook, csvText, autoMap, riskPreviewText, get W() { return W; } },
     db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get historyBytes() { return historyBytes(); }, set undoBudget(n) { undoBudget = n; trimUndo(); }, get undoBudget() { return undoBudget; }, get mirrorRev() { return mirrorRev; },
       get diskRev() { return diskRev; }, get readOnly() { return readOnly; }, get fileId() { return readFileId(db); },
       // test aid: attach a stand-in file handle without a picker
       attach(h, base = null) { fileHandle = h; filePerm = !!h; diskRev = base; }, endReadOnly() { readOnly = false; readOnlyWhy = ""; $("roBanner").hidden = true; } },
     gantt: { buildScale, get SC() { return SC; }, setGrain },
-    ui: { openPasteChooser, openTaskPicker, openMitigantPicker, closePop: drawn(closePop) },
+    ui: { setWarnIcons, openPasteChooser, openTaskPicker, openMitigantPicker, closePop: drawn(closePop) },
     cmd: Object.fromEntries(Object.entries({ cmdAdd, cmdStructure, cmdDelete, startEdit, commitEdit, gridKey, toggleCollapse, showLevel, startImport, printPlan, cmdPaste, cmdPeoplePaste, addPartyRow, openGridPaste }).map(([k, f]) => [k, drawn(f)])),
     reset: drawn(() => { installDb(null); M.projectId = null; UI.selId = null; refresh(); loadCollapsed(); computeRows(); redraw("all"); }),
     get XLSX() { return XLSX; }, get SQL() { return SQL; },

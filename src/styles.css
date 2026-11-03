@@ -105,9 +105,10 @@ hr{border:0;border-top:1px solid var(--line);margin:4px 0}
 .caret{width:16px;flex:none;text-align:center;color:var(--muted);cursor:pointer;user-select:none;font-size:10px}
 .ms-ico{color:var(--ms);font-size:11px}
 .warn-dot{color:var(--warn);font-size:11px;margin-left:auto;padding-left:4px}
-.st{font-size:12px;padding:1px 7px;border-radius:5px}
-.st-ns{background:var(--info-bg);color:var(--info)} .st-ip{background:var(--accent-soft);color:var(--accent)}
-.st-bl{background:var(--err-bg);color:var(--err)} .st-dn{background:var(--ok-bg);color:var(--ok)}
+/* Status: a coloured dot and plain text, not a filled pill (DECISIONS #95). Work under way reads in full ink; not started and done are muted. */
+.st{font-size:12px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;--dot:var(--bar-ns);color:var(--muted)}
+.st::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--dot);flex:none}
+.st-ip{--dot:var(--bar);color:var(--ink)} .st-bl{--dot:var(--bar-blocked);color:var(--err)} .st-dn{--dot:var(--bar-done)}
 .chips{display:flex;gap:3px;overflow:hidden}
 .chip{display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:5px;background:var(--info-bg);font-size:12px;white-space:nowrap}
 .chip.team{background:var(--accent-soft);color:var(--accent)}
@@ -369,11 +370,9 @@ table.rk{width:100%;border-collapse:collapse;font-size:12.5px}
 .rk .rk-tc{min-width:240px;width:34%}
 .rk-cell{display:flex;align-items:flex-start;gap:6px}
 .rk-indent{padding-left:30px}
-.rk-kind{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--accent);background:var(--accent-soft);border-radius:8px;padding:2px 6px;margin-top:4px;flex:none}
 .rk-name,.rk-text{flex:1;min-width:0;border:1px solid transparent;background:transparent;font:inherit;padding:3px 5px;border-radius:5px}
 .rk-name{font-weight:650}
 .rk-text{resize:none;overflow:hidden;line-height:1.35}
-.rk-kind.mit{color:var(--warn);background:var(--warn-bg)}
 .rk-open{border:0;background:none;padding:3px 4px;color:var(--accent);font-weight:700;opacity:0;flex:none}
 .rk tr:hover .rk-open,.rk tr.sel .rk-open,.rk-open:focus{opacity:1}
 .rk-name:hover,.rk-text:hover{border-color:var(--line)}
@@ -479,3 +478,12 @@ table.ptable{width:100%;border-collapse:collapse;font-size:13px}
 .ptable .pt-acts button{padding:3px 7px;font-size:12px}
 .ptable .pt-mem{color:var(--muted);font-size:12.5px}
 .ptable tr.inactive input[data-f=name]{text-decoration:line-through;color:var(--muted)}
+
+/* Monochrome indicators (DECISIONS #96): colour emoji drew the eye more than the data. Same glyphs, drawn grey. */
+.gc .nc,.rp-row .sh,.mg-l .nc{filter:grayscale(1);opacity:.7}
+.grow:hover .nc,.grow.sel .nc{opacity:1}
+.toolbar .ico{filter:grayscale(1)}
+.chip .ico{filter:grayscale(1)}
+/* File → Hide warning icons */
+body.no-warn .warn-dot,body.no-warn table.raci .flag{display:none}
+.rk td.num .ach{color:var(--ok);font-weight:700}

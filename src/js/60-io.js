@@ -806,7 +806,7 @@ function printPlan() {
     const bars = chunk.map((t, i) => barSvg(sc, t, i * ROW, { print: true, noLabel: true }));
     const table = chunk.map((t, i) => {
       const y = i * ROW + 19, a = accountable(t);
-      const cells = [t.wbs, t.name, fmtShort(t.S), fmtShort(t.F), t.P + "%", rolesOf(t.id, "R").map(r => partyName(r.party_id)).join(", "), a.list.map(r => partyName(r.party_id)).join(", ")];
+      const cells = [t.wbs, t.name, fmtShort(t.S, true), fmtShort(t.F, true), t.P + "%", rolesOf(t.id, "R").map(r => partyName(r.party_id)).join(", "), a.list.map(r => partyName(r.party_id)).join(", ")];
       let cx = 0;
       const texts = cells.map((c, j) => {
         const max = Math.floor((COLW[j] - 8 - (j === 1 ? t.depth * 14 : 0)) / 6.4); const txt = String(c).length > max ? String(c).slice(0, max - 1) + "…" : c;

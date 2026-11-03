@@ -17,6 +17,7 @@ A project-planning tool that is **one HTML file** and needs no network. Open `of
 - **From Excel:** copy a column and paste it into the outline (Ctrl+V or **📋 Paste**). A chooser offers what fits the column: names fill down or become new tasks or subtasks, a WBS column on **#** nests the rows, other columns fill down. Multi-line descriptions go in the last column, **Description**. Paste a roster into the People tables, or risk and mitigant names on the Risks page.
 - **Rows and dates:** new tasks start with no dates; select one and drag across its empty Gantt row to set them. Shift+click or Shift+↑/↓ selects a block of rows to indent, outdent or delete together.
 - **Back:** **← name** at the top of a record panel (or Alt+←, or the mouse's Back button) returns to the record you came from, across the Plan and Risks pages.
+- **Warnings:** ⚠ marks a task with warnings, listed on the Issues tab. File → *Hide warning icons* hides the marks (per browser); Issues still lists them.
 - **Keyboard:** see File → *Help & shortcuts*. The main ones: Insert, Alt+Shift+→/← (indent/outdent), Enter, Delete, Ctrl+Z. Deleting doesn't ask first: the message that follows has an **Undo** button.
 
 ## Files

@@ -208,7 +208,7 @@ function renderRaciRows(whole = false) {
   const wrap = $("raciWrap"), body = wrap.querySelector("tbody"); if (!RX?.rows || (!whole && !body)) return;
   const { scrollTop, scrollLeft } = wrap, rowH = RX.rowH, top = scrollTop - (wrap.querySelector("thead")?.offsetHeight ?? 60);
   const first = Math.max(0, Math.floor(top / rowH) - 10), last = Math.min(RX.rows.length, Math.ceil((top + wrap.clientHeight) / rowH) + 10);
-  const pad = n => n > 0 ? html`<tr class="pad" aria-hidden="true"><td colspan="${RX.cols + 2}" style="height:${n * rowH}px;padding:0;border:0"></td></tr>` : "";
+  const pad = n => n > 0 ? html`<tr class="pad" aria-hidden="true"><td colspan="${RX.cols + 1}" style="height:${n * rowH}px;padding:0;border:0"></td></tr>` : "";
   const rows = html`${pad(first)}${RX.rows.slice(first, last).map(RX.rowHtml)}${pad(RX.rows.length - last)}`;
   if (whole) setHtml(wrap, html`<table class="${RX.cls}" role="grid" aria-label="RACI matrix" aria-rowcount="${RX.rows.length + 1}"><thead>${RX.head}</thead><tbody>${rows}</tbody></table>`); else setHtml(body, rows);
   wrap.scrollTop = scrollTop; wrap.scrollLeft = scrollLeft;
@@ -217,9 +217,17 @@ function renderRaciRows(whole = false) {
   const real = wrap.querySelector("tbody tr:not(.pad)")?.offsetHeight; // measured once the first rows are on screen
   if (real && real !== rowH) { RX.rowH = real; renderRaciRows(); }
 }
+const memberCount = id => { const n = (M.members.get(id) || []).length; return `${n} ${n === 1 ? "person" : "people"}`; };
+// The Warnings column is drawn only when a row shown has a RACI warning; it's empty on most plans.
+function raciFlags(rows) {
+  const by = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!by.has(i.task.id)) by.set(i.task.id, []); by.get(i.task.id).push(i.text); }
+  const any = rows.some(t => by.has(t.id));
+  return { any, flagHead: any ? html`<th class="flag">Warnings</th>` : "", flagCell: t => any ? html`<td class="flag">${(by.get(t.id) || []).join("; ")}</td>` : "" };
+}
 function renderRaci() {
   $$("#raciBySeg button").forEach(b => b.classList.toggle("on", b.dataset.by === UI.raciBy));
-  $("raciHint").textContent = UI.raciBy === "team"
+  $("raciHint").textContent = "Click a cell for a role · keys R A C I, Del";
+  $("raciHint").title = UI.raciBy === "team"
     ? "Click a cell to pick the team's role; + hands it to a member. Keys: arrows, R A C I, Shift+A for A/R, Delete, +"
     : "Click a cell to pick a role. Keys: arrows, R A C I, Shift+A for A/R, Delete clears";
   $("raciOnlyUsed").parentElement.lastChild.textContent = UI.raciBy === "team" ? " Only teams with assignments" : " Only people/teams with assignments";
@@ -232,7 +240,7 @@ function renderRaci() {
   const rows = M.order.filter(t => !leaves || !t.isSummary);
   if (!M.order.length) { setHtml(wrap, html`<div class="empty">No tasks in this project yet.</div>`); return; }
   if (!cols.length) { setHtml(wrap, html`<div class="empty">No ${onlyUsed ? "assignments" : "people or teams"} yet. Untick “Only people/teams with assignments” or add people on the People &amp; teams tab.</div>`); return; }
-  const issuesBy = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!issuesBy.has(i.task.id)) issuesBy.set(i.task.id, []); issuesBy.get(i.task.id).push(i.text); }
+  const { any: anyFlag, flagHead, flagCell } = raciFlags(rows);
   const rowHtml = t => {
     const map = new Map(rolesOf(t.id).map(r => [r.party_id, r.role]));
     const inh = accountable(t);
@@ -242,9 +250,9 @@ function renderRaci() {
       const ar = t.r_is_a && (r === "A" || ghost); // Responsible = Accountable
       return html`<td class="cell ${r}" data-t="${t.id}" data-p="${p.id}" role="gridcell" tabindex="-1" title="${p.name}: ${r ? ROLE_NAMES[r] : ghost ? "Accountable (inherited)" : "none"}${ar ? " and Responsible" : ""}">${r ? r + (ar ? "/R" : "") : ghost ? html`<span style="opacity:.35">a${ar ? "/r" : ""}</span>` : ""}</td>`;
     });
-    return html`<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
+    return html`<tr class="${t.isSummary ? "summary" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}${flagCell(t)}</tr>`;
   };
-  showRaci("raci", html`<tr><th class="tn">Task</th>${cols.map(p => html`<th class="pc" title="${p.name}">${p.name}<span class="k">${p.kind === "team" ? "team" : p.title || ""}</span></th>`)}<th>Warnings</th></tr>`, rows, cols.length, rowHtml);
+  showRaci("raci", html`<tr><th class="tn">Task</th>${cols.map(p => html`<th class="pc" title="${p.name}">${p.name}<span class="k">${p.kind === "team" ? "team" : p.title || ""}</span></th>`)}${flagHead}</tr>`, rows, cols.length + anyFlag, rowHtml); // + the Warnings column, when drawn
 }
 function renderRaciTeams() {
   const wrap = $("raciWrap");
@@ -256,7 +264,7 @@ function renderRaciTeams() {
   const cols = M.teams.filter(tm => onlyUsed ? used.has(tm.id) : (tm.active || used.has(tm.id))).map(tm => ({ id: tm.id, name: tm.name, team: tm }));
   if (used.has(0)) cols.push({ id: 0, name: "No team", team: null });
   if (!cols.length) { setHtml(wrap, html`<div class="empty">${M.teams.length ? "No team has assignments yet. Untick “Only teams with assignments”." : "No teams yet. Add teams on the People & teams tab."}</div>`); return; }
-  const issuesBy = new Map(); for (const i of M.issues) if (i.kind === "raci" && i.level === "warn") { if (!issuesBy.has(i.task.id)) issuesBy.set(i.task.id, []); issuesBy.get(i.task.id).push(i.text); }
+  const { any: anyFlag, flagHead, flagCell } = raciFlags(rows);
   const rowHtml = t => {
     const roles = rolesOf(t.id);
     const cells = cols.map(c => {
@@ -269,9 +277,9 @@ function renderRaciTeams() {
       const plus = c.team && (M.members.get(c.id) || []).length ? html`<button class="plus" data-plus="${c.id}" tabindex="-1" title="Give this to a member of ${c.name} (key: +)">+</button>` : "";
       return html`<td class="cell tcell ${top[0] || ""}" data-t="${t.id}" data-team="${c.id}" role="gridcell" tabindex="-1" title="${tip}">${ownL ? html`<b>${ownL}</b>` : ""}${chips}${plus}</td>`;
     });
-    return html`<tr class="${t.isSummary ? "summary" : ""}${t.id === UI.selId && UI.form ? " sel" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}<td class="flag">${(issuesBy.get(t.id) || []).join("; ")}</td></tr>`;
+    return html`<tr class="${t.isSummary ? "summary" : ""}${t.id === UI.selId && UI.form ? " sel" : ""}"><td class="tn" style="padding-left:${8 + t.depth * 16}px" title="${t.name}"><a href="#" class="tn-link" data-open="${t.id}" title="Open record">${t.wbs}&nbsp; ${t.name}</a></td>${cells}${flagCell(t)}</tr>`;
   };
-  showRaci("raci team", html`<tr><th class="tn">Task</th>${cols.map(c => html`<th class="pc" title="${c.name}">${c.name}<span class="k">${c.team ? `${(M.members.get(c.id) || []).length} people` : "people without a team"}</span></th>`)}<th>Warnings</th></tr>`, rows, cols.length, rowHtml);
+  showRaci("raci team", html`<tr><th class="tn">Task</th>${cols.map(c => html`<th class="pc" title="${c.name}">${c.name}<span class="k">${c.team ? memberCount(c.id) : "people without a team"}</span></th>`)}${flagHead}</tr>`, rows, cols.length + anyFlag, rowHtml); // + the Warnings column, when drawn
 }
 // Hand the team's role on a task to one of its members (or set a member's role when the team has none).
 function teamMemberPicker(anchor, tid, teamId) {
@@ -553,6 +561,12 @@ function renderIssues() {
   for (const i of items) list.append(h("div", { class: "issue", onclick: () => { switchView("plan"); selectTask(i.task.id); } },
     h("span", { class: "lvl " + i.level }, i.level === "warn" ? "warning" : "info"), h("span", { class: "tk" }, `${i.task.wbs} ${i.task.name}`), h("span", {}, i.text)));
 }
+// File → Hide warning icons (DECISIONS #93): hides the ⚠ markers and the RACI Warnings column, remembered per browser.
+// The Issues tab and its count stay, so nothing is lost, only hidden.
+function setWarnIcons(hide) {
+  document.body.classList.toggle("no-warn", hide); lsSet("pm.hideWarn", hide);
+  $("mWarnIcons").textContent = hide ? "Show warning icons" : "Hide warning icons";
+}
 function updateIssueBadge() {
   const n = M.issues.filter(i => i.level === "warn").length, b = $("issueBadge");
   b.hidden = !n; b.textContent = n;
@@ -642,7 +656,8 @@ function showHelp() {
     h("ul", {}, h("li", {}, "Drag a bar to move it; drag its left or right edge to change dates. A new task has no dates: drag across its empty row to draw its bar."),
       h("li", {}, "Hover a bar to see link handles (○). Drag from a handle onto another bar: the end you start from and the half of the target you drop on decide the type (Finish→Start, Start→Start, …)."),
       h("li", {}, "Click an arrow to change its type and lag, or delete it. Red arrows mean the dates conflict with the link; dates are never moved automatically."),
-      h("li", {}, "Double-click a bar, or click ↗ next to a task name, to open its record form.")),
+      h("li", {}, "Double-click a bar, or click ↗ next to a task name, to open its record form."),
+      h("li", {}, "⚠ marks a task with warnings (see Issues). File → ", h("b", {}, "Hide warning icons"), " hides the marks; Issues keeps the list and its count.")),
     h("h3", {}, "Record form"),
     h("p", {}, "Shows every field of a task, a mini Gantt of a summary task's subtasks, its work notes (dated, editable) and related records in tabs. It slides in over the outline; the Gantt stays visible, and clicking a bar switches records. ", h("b", {}, "← Back"), " returns to the record you were on before, even across pages. Esc or ✕ closes it. ", h("kbd", {}, "Ctrl+Enter"), " posts a note."),
     h("h3", {}, "Predecessors cell"),

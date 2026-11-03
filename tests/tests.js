@@ -1534,6 +1534,43 @@ await test("form-review", "Gantt lines up with the outline again after closing t
     eq(P.M.parties.get(ids[1]).title, "Lead", "R12.1 Enter saves"); eq(document.activeElement.closest("tr")?.dataset.party, String(ids[2]), "and moves down a row");
     P.switchView("plan");
   });
+
+  await test("declutter", "short dates: day and month, the year only when it isn't this year", () => {
+    const y = new Date().getFullYear();
+    eq(U.fmtShort(U.parseYMD(`${y}-10-23`)), "23 Oct"); eq(U.fmtShort(U.parseYMD(`${y + 1}-01-05`)), `5 Jan ${String(y + 1).slice(2)}`);
+    eq(U.fmtShort(null), ""); eq(U.fmtShort(U.parseYMD(`${y}-10-23`), true), `23 Oct ${String(y).slice(2)}`, "print always has the year");
+    fresh(); const a = T("A", null, `${y}-03-02`, `${y}-03-06`); P.switchView("plan");
+    eq(document.querySelector(`#gr-${a} .c-start`).textContent, "2 Mar", "the outline uses it");
+  });
+  await test("declutter", "Hide warning icons: hides ⚠ and the RACI Warnings column, remembered; Issues keeps its count", () => {
+    const was = localStorage.getItem("pm.hideWarn"); P.ui.setWarnIcons(false);
+    try {
+    fresh(); const a = T("A"); m(() => O.opSetRole(a, O.opAddParty("person", "Ana"), "R")); P.switchView("plan"); // no Accountable: a RACI warning
+    const dot = () => document.querySelector(`#gr-${a} .warn-dot`);
+    ok(dot() && getComputedStyle(dot()).display !== "none", "shown by default");
+    P.ui.setWarnIcons(true);
+    eq([getComputedStyle(dot()).display, localStorage.getItem("pm.hideWarn"), document.getElementById("mWarnIcons").textContent], ["none", "true", "Show warning icons"]);
+    ok(!document.getElementById("issueBadge").hidden, "the Issues count stays");
+    P.switchView("raci"); const flag = document.querySelector("#raciWrap th.flag"); ok(flag && getComputedStyle(flag).display === "none", "RACI Warnings column hidden");
+    document.getElementById("mWarnIcons").click(); // through the File menu
+    ok(!document.body.classList.contains("no-warn") && localStorage.getItem("pm.hideWarn") === "false", "shown again");
+    } finally { P.ui.setWarnIcons(was === "true"); if (was == null) localStorage.removeItem("pm.hideWarn"); } // the owner's own setting survives a failure
+    P.switchView("plan");
+  });
+  await test("declutter", "status is a dot and text; Risks drop the kind badges and show ✓ only when achieved; RACI Warnings only when needed", () => {
+    fresh(); const a = T("A"); let ana, eng, r, m1, m2;
+    m(() => { ana = O.opAddParty("person", "Ana"); eng = O.opAddParty("team", "Eng"); O.opSetMembers(eng, [ana]); O.opSetRole(a, ana, "A"); });
+    P.switchView("plan");
+    const st = document.querySelector(`#gr-${a} .st`); eq(getComputedStyle(st).backgroundColor, "rgba(0, 0, 0, 0)", "no pill"); eq(getComputedStyle(st, "::before").width, "7px", "a dot");
+    const by = P.UI.raciBy; P.UI.raciBy = "team"; P.switchView("raci");
+    ok(!document.querySelector("#raciWrap th.flag"), "no Warnings column without warnings"); ok(document.querySelector("#raciWrap th.pc").textContent.includes("1 person"), "1 person");
+    const b = T("B"); m(() => O.opSetRole(b, ana, "R")); ok(document.querySelector("#raciWrap th.flag"), "the column comes back with a warning (B has no Accountable)");
+    m(() => { r = O.opAddRisk({ name: "R" }); m1 = O.opAddMitigant(r, "One"); m2 = O.opAddMitigant(r, "Two", m1, { status: "Implemented" }); });
+    P.UI.raciBy = by; P.switchView("risks");
+    ok(!document.querySelector("#riskBody .rk-kind"), "no RISK / MIT. badges");
+    eq([`tr[data-risk="${r}"]`, `tr[data-mit="${m1}"]`, `tr[data-mit="${m2}"]`].map(s => document.querySelector(`#riskBody ${s} td.num`).textContent), ["", "", "✓"]);
+    P.switchView("plan");
+  });
   P.reset();
   } finally { shims.forEach(undo => undo()); }
   const failed = results.filter(r => !r.pass);

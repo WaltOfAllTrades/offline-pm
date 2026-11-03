@@ -7,8 +7,8 @@ const UI = {
 const COLS = [
   { key: "wbs", label: "WBS", w: 64 },
   { key: "name", label: "Task name", w: 290, edit: "text" },
-  { key: "start", label: "Start", w: 92, edit: "date" },
-  { key: "finish", label: "Finish", w: 92, edit: "date" },
+  { key: "start", label: "Start", w: 80, edit: "date" },
+  { key: "finish", label: "Finish", w: 80, edit: "date" },
   { key: "duration", label: "Dur.", w: 54, edit: "text" },
   { key: "percent", label: "%", w: 50, edit: "text" },
   { key: "status", label: "Status", w: 104, edit: "select" },
@@ -73,7 +73,7 @@ let _warnSet = new Set();
 function chipFor(r, inherited, note = inherited ? " (inherited)" : "") {
   const p = M.parties.get(r.party_id); if (!p) return "";
   const team = p.kind === "team";
-  return html`<span class="chip ${team ? "team" : ""} ${inherited ? "inh" : ""} ${p.active ? "" : "inactive"}" title="${p.name}${team ? " (team)" : ""}${note}">${team ? "👥 " : ""}${p.name}</span>`;
+  return html`<span class="chip ${team ? "team" : ""} ${inherited ? "inh" : ""} ${p.active ? "" : "inactive"}" title="${p.name}${team ? " (team)" : ""}${note}">${team ? html`<span class="ico">👥</span> ` : ""}${p.name}</span>`;
 }
 const rChips = t => { const r = responsible(t); return r.list.map(x => chipFor(x, r.same, r.same ? " (same as Accountable)" : "")); };
 function cellHtml(t, c) {
@@ -204,7 +204,7 @@ function startEdit(colKey = UI.col, initial = null) {
     el.value = initial ?? v;
   }
   el.className = "cell-editor";
-  Object.assign(el.style, { left: left + "px", top: t.row * ROW + "px", width: c.w + (colKey === "name" ? 120 : c.edit === "date" ? 40 : 30) + "px" });
+  Object.assign(el.style, { left: left + "px", top: t.row * ROW + "px", width: c.w + (colKey === "name" ? 120 : c.edit === "date" ? 56 : 30) + "px" });
   UI.editing = { el, taskId: t.id, col: colKey, done: false };
   el.addEventListener("keydown", e => {
     if (e.key === "Enter") { e.preventDefault(); commitEdit(1, 0); }

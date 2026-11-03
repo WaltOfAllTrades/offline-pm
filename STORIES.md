@@ -121,3 +121,8 @@ Each story lists its acceptance criteria. A tag in brackets after a criterion na
 - **K11 Task picker.** Predecessors, successors and a mitigant's tasks are linked through a searchable picker (type, ↑/↓, Enter) that leaves out tasks already linked; a task's Risks tab can link a mitigant the same way. [ui-plan]
 - **K12 Risks.** ＋ Task on a mitigant opens the new task's record with Back to the mitigant. Pasting lines into a risk name fills names or adds risks; into a mitigant, adds or fills mitigants. [ui-plan]
 - **K13 People tables.** People and teams are edited in tables (Enter / Shift+Enter move down / up; ＋ Person / ＋ Team focus the new name). Pasting names fills or adds rows, skipping duplicates; pasting team names creates missing teams and says so. [ui-plan]
+
+## L. Less clutter (branch `ui-declutter`)
+- **L1 Short dates.** Dates read "23 Oct", with the year only when it isn't this year. [declutter]
+- **L2 Hide warning icons.** File → Hide warning icons hides the ⚠ marks and the RACI Warnings column, remembered per browser; Issues keeps its count. [declutter]
+- **L3 Quieter indicators.** Status is a dot and text; indicator emoji are grey; the Risks table has no kind badges and shows ✓ only when achieved; the RACI Warnings column appears only when needed. [declutter]
