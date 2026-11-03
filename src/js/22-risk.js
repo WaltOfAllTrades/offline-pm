@@ -168,7 +168,7 @@ function mitigationParent() {
     if (saved.parent == null || one("SELECT 1 FROM task WHERE id=? AND project_id=?", [saved.parent, M.projectId])) return saved.parent;
   }
   const found = one("SELECT id FROM task WHERE project_id=? AND parent_id IS NULL AND name='Risk mitigation' ORDER BY position LIMIT 1", [M.projectId]);
-  return found ? found.id : opAddTask({ name: "Risk mitigation" });
+  return found ? found.id : opAddTask({ name: "Risk mitigation", start: null });
 }
 // Create a task that implements the mitigant, linked, carrying its Responsible / Accountable (DECISIONS #57).
 // place = { targetId, where: "before" | "after" } puts it at that spot in the WBS.
@@ -178,10 +178,10 @@ function opTaskFromMitigant(mitId, place = null) {
   let id;
   if (place) {
     const tgt = taskRow(place.targetId);
-    id = opAddTask({ name, parentId: tgt.parent_id, start: parseYMD(tgt.start) ?? undefined, finish: parseYMD(tgt.start) ?? undefined });
+    id = opAddTask({ name, parentId: tgt.parent_id, start: null, finish: null });
     opMoveTo(id, place.targetId, place.where);
     lsSet(mitParentKey(), { parent: tgt.parent_id });
-  } else id = opAddTask({ name, parentId: mitigationParent() });
+  } else id = opAddTask({ name, parentId: mitigationParent(), start: null, finish: null });
   opLinkTask(mitId, id);
   const rec = M.mitById.get(mitId);
   if (rec) {

@@ -153,6 +153,25 @@ function splitNames(v, semicolonOnly) {
   const s = String(v ?? "");
   return s.split(semicolonOnly || /[;\n]/.test(s) ? /[;\n]+/ : /,+/).map(x => x.trim()).filter(Boolean);
 }
+// What Excel puts on the clipboard → { lines, cols }: one line per row, from the first column only (cols says how many
+// there were, so a paste can warn). Cells holding a newline, tab or quote arrive quoted, with "" for a quote. Excel ends
+// with one newline, which is dropped; blank lines stay, as "", so pasted rows stay lined up with the sheet.
+function parseClipColumn(text) {
+  const s = String(text ?? "").replace(/\r\n?/g, "\n"), rows = [[]];
+  let cell = "", quoted = false, start = true;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quoted) { if (c !== '"') cell += c; else if (s[i + 1] === '"') { cell += '"'; i++; } else quoted = false; continue; }
+    if (c === '"' && start) { quoted = true; start = false; continue; }
+    start = false;
+    if (c === "\t") { rows.at(-1).push(cell); cell = ""; start = true; }
+    else if (c === "\n") { rows.at(-1).push(cell); rows.push([]); cell = ""; start = true; }
+    else cell += c;
+  }
+  rows.at(-1).push(cell);
+  if (rows.length > 1 && rows.at(-1).length === 1 && rows.at(-1)[0] === "") rows.pop();
+  return { lines: rows.map(r => r[0].trim()), cols: Math.max(...rows.map(r => r.length)) };
+}
 // Percent "50%", 0.5, "50" → 0..100
 function parsePercent(v) {
   if (v == null || v === "") return null;

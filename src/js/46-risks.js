@@ -94,6 +94,7 @@ function riskRowEl(r) {
     else if (e.key === "Escape") { name.value = r.name; name.blur(); }
     e.stopPropagation();
   });
+  name.addEventListener("paste", e => riskPaste(e, r, null));
   const sel = (field, title) => { const s = h("select", { class: "rk-lmh", title }, ...Object.entries(LMH).map(([k, v]) => h("option", { value: k, selected: r[field] === k }, k || "–"))); s.addEventListener("change", () => mutate(`Risk ${title} → ${LMH[s.value]}`, () => opUpdateRisk(r.id, { [field]: s.value }))); return s; };
   const tr = h("tr", { class: "rk-risk" + (isSel(r) ? " sel" : ""), "data-risk": r.id },
     h("td", { class: "rk-drag", title: "Drag onto a task in the plan" }, "⠿"),
@@ -120,6 +121,7 @@ function mitRowEl(m) {
     } else if (e.key === "Escape") { ta.value = m.text; ta.blur(); }
     e.stopPropagation();
   });
+  ta.addEventListener("paste", e => riskPaste(e, m.risk, m));
   const st = statusSelect(m, "rk-st");
   const ctl = h("input", { type: "checkbox", checked: !!m.is_control, title: "Control: achieved only when Tested" });
   ctl.addEventListener("change", () => mutate(`Mitigant ${ctl.checked ? "is" : "is not"} a control`, () => opUpdateMitigant(m.id, { is_control: ctl.checked })));
@@ -165,9 +167,16 @@ function deleteMitRec(m) {
   const n = m.tasks.length;
   if (mutate("Deleted mitigant", () => opDeleteMitigant(m.id))) toast(`Deleted mitigant${n ? `; its ${n} linked task${n > 1 ? "s stay" : " stays"} in the plan` : ""}`, "", { undo: true });
 }
-function quickTask(m, place) {
+// ＋ Task opens the new task's record on the Plan page, and Back comes home to the mitigant (DECISIONS #89). Dragging a
+// mitigant between tasks (place) keeps the small naming pop-up, so several can be linked in a row without leaving the page.
+function quickTask(m, place, { open = !place } = {}) {
   let id;
   if (mutate(`Created a task for a mitigant`, () => { id = opTaskFromMitigant(m.id, place); })) {
+    if (open) {
+      if (UI.view === "risks") noteVisit({ kind: "mitigant", id: m.id, tab: null }); // from the grid with no record open: Back still has somewhere to go
+      UI.formFocus = "name"; openRecord(id);
+      return;
+    }
     // After the (possibly deferred) re-render: flash it in the plan and offer an inline rename.
     setTimeout(() => {
       flashPlanRow(id);
@@ -278,11 +287,70 @@ function chooseMitigant(ev, r, suggested, then) {
   openPop(ev.clientX, ev.clientY, box);
 }
 
+// From a task's record: link one of the project's mitigants without the drag (mitigants and tasks are many-to-many).
+function openMitigantPicker(rect, t) {
+  const items = M.risks.flatMap(r => r.mitigants.filter(m => !m.tasks.includes(t)).map(m => ({ id: m.id, label: `${shortText(r.name, 40)} › ${shortText(m.text, 70)}`, text: (r.name + " " + m.text).toLowerCase() })));
+  openSearchPicker(rect, { title: `Mitigant that ${t.wbs} implements`, placeholder: "Search risks and mitigants…", items, match: (x, s) => x.text.includes(s), empty: M.risks.length ? "Every mitigant is already linked." : "No risks yet. Add them on the Risks page.", onPick: mid => linkMit(mid, t.id) });
+}
+
+// ---------- Column paste in the grid (DECISIONS #84) ----------
+// More than one line pasted into a risk name or a mitigant asks what to do; one line pastes as usual.
+function riskPaste(e, r, m) {
+  const text = e.clipboardData?.getData("text/plain") ?? "", { lines, cols } = parseClipColumn(text);
+  if (lines.length < 2) return;
+  e.preventDefault();
+  const el = e.target, rect = el.getBoundingClientRect(), caret = [el.selectionStart, el.selectionEnd];
+  const n = lines.filter(Boolean).length;
+  if (!m) {
+    const shown = M.risks.filter(riskMatches), from = shown.findIndex(x => x.id === r.id), room = shown.length - from;
+    openPasteChooser(rect, { title: `Paste ${lines.length} lines into Risk name`, lines, cols, key: "paste.risk", options: [
+      { id: "fill", label: "Fill down risk names", sub: `Overwrite names from this risk down${lines.length > room ? `; adds ${lines.slice(room).filter(Boolean).length} new risks past the end` : ""}`, run: () => cmdRiskPaste("fill", r.id, null, lines) },
+      { id: "add", label: "Add as new risks below this one", sub: `${n} new risk${n === 1 ? "" : "s"}`, run: () => cmdRiskPaste("add", r.id, null, lines) },
+    ] });
+    return;
+  }
+  openPasteChooser(rect, { title: `Paste ${lines.length} lines into a mitigant`, lines, cols, key: "paste.mit", options: [
+    { id: "add", label: "Add as mitigants of this risk", sub: `${n} new mitigant${n === 1 ? "" : "s"} after this one`, run: () => cmdRiskPaste("add", r.id, m.id, lines) },
+    { id: "fill", label: "Fill down this risk's mitigants", sub: "Overwrite this and the following mitigants; adds new ones past the end", run: () => cmdRiskPaste("fill", r.id, m.id, lines) },
+    { id: "text", label: "Keep it as text in this mitigant", sub: "Paste the lines into this one cell", run: () => {
+      const ta = $("view-risks").querySelector(`[data-keep="m${m.id}:text"]`); if (!ta) return;
+      ta.focus(); try { ta.setSelectionRange(...caret); } catch { }
+      ta.setRangeText(text.replace(/\r\n?/g, "\n").replace(/\n$/, ""), ta.selectionStart, ta.selectionEnd, "end"); autoGrow(ta);
+    } },
+  ] });
+}
+// mode "fill" | "add"; mitId null means risk names. One change, one undo step, a message with Undo.
+function cmdRiskPaste(mode, riskId, mitId, lines) {
+  let last = null;
+  const ok = mutate(`Pasted ${lines.length} ${mitId ? "mitigants" : "risk names"}`, () => {
+    if (!mitId) {
+      const shown = M.risks.filter(riskMatches), rows = mode === "fill" ? shown.slice(shown.findIndex(x => x.id === riskId)) : [];
+      let after = mode === "fill" ? (shown.at(-1)?.id ?? riskId) : riskId, renamed = 0, added = 0;
+      lines.forEach((l, i) => {
+        const r = rows[i];
+        if (r) { last = r.id; if (l && l !== r.name) { opUpdateRisk(r.id, { name: l }); renamed++; } }
+        else if (l) { after = last = opAddRisk({ name: l, afterId: after }); added++; }
+      });
+      opNotes.push(mode === "fill" ? `Pasted ${lines.length} risk names: ${renamed} renamed, ${added} new risk${added === 1 ? "" : "s"}.` : `Added ${added} risk${added === 1 ? "" : "s"}.`);
+      return;
+    }
+    const r = M.riskById.get(riskId), mits = r.mitigants, rows = mode === "fill" ? mits.slice(mits.findIndex(x => x.id === mitId)) : [];
+    let after = mode === "fill" ? mits.at(-1).id : mitId, changed = 0, added = 0;
+    lines.forEach((l, i) => {
+      const m = rows[i];
+      if (m) { last = m.id; if (l && l !== m.text) { opUpdateMitigant(m.id, { text: l }); changed++; } }
+      else if (l) { after = last = opAddMitigant(riskId, l, after); added++; }
+    });
+    opNotes.push(mode === "fill" ? `Pasted ${lines.length} mitigants: ${changed} changed, ${added} new.` : `Added ${added} mitigant${added === 1 ? "" : "s"} to “${shortText(r.name, 40)}”.`);
+  });
+  if (ok && last != null) focusRisk(mitId ? `m${last}:text` : `r${last}:name`);
+  return ok;
+}
+
 // ---------- Record panel (same slide-out pattern as tasks) ----------
 function openRiskRecord(kind, id) {
-  if (UI.view !== "risks") switchView("risks");
-  UI.riskSel = { kind, id }; UI.riskForm = true; UI.editNote = null;
-  redraw("risks");
+  UI.riskSel = { kind, id }; UI.riskForm = true; UI.editNote = null; // before switching, so the page draws this record and no other
+  if (UI.view !== "risks") switchView("risks"); else redraw("risks");
 }
 function sizeRiskForm() {
   const split = $("riskSplit").clientWidth || innerWidth;
@@ -301,7 +369,8 @@ function renderRiskForm() {
   const proj = M.projects.find(p => p.id === M.projectId);
   const crumbs = [h("span", {}, proj?.name || ""), h("span", { class: "sep" }, "›"), h("span", {}, "Risks")];
   if (rec.kind === "mitigant") crumbs.push(h("span", { class: "sep" }, "›"), h("a", { href: "#", onclick: e => { e.preventDefault(); openRiskRecord("risk", rec.risk_id); } }, shortText(rec.risk.name, 40)));
-  pane.append(h("div", { class: "f-head" },
+  noteVisit({ kind: rec.kind, id: rec.id, tab: null }); // first, so the Back button below already leaves this record out
+  pane.append(h("div", { class: "f-head" }, backButton(),
     h("div", { class: "f-title" }, h("div", { class: "f-crumbs" }, ...crumbs),
       h("h2", {}, h("span", { class: "f-kind" }, rec.kind === "risk" ? "Risk" : rec.is_control ? "Control" : "Mitigant"), shortText(recLabel(rec), 90))),
     h("div", { class: "f-acts" }, h("button", { class: "icon", title: "Close (Esc)", onclick: closeRiskForm }, "✕"))));
@@ -312,6 +381,7 @@ function renderRiskForm() {
     empty: "No work notes yet.", post: body => mutate(`${rec.kind === "risk" ? "Risk" : "Mitigant"}: added a work note`, () => opAddRecNote(rec.kind, rec.id, body)),
   }));
   pane.scrollTop = scroll;
+  flashRelRow(pane);
 }
 function recField(label, el, cls = "") { return h("div", { class: "f-field " + cls }, h("label", {}, label), el); }
 function recText(rec, field, multi, attrs = {}) {
@@ -365,7 +435,7 @@ function mitFields(m) {
 }
 function riskMitList(r) {
   const add = h("button", { onclick: () => { let id; if (mutate("Added mitigant", () => { id = opAddMitigant(r.id); })) openRiskRecord("mitigant", id); } }, "＋ Mitigant");
-  const rows = r.mitigants.map(m => h("tr", { class: "click", onclick: () => openRiskRecord("mitigant", m.id) },
+  const rows = r.mitigants.map(m => h("tr", { class: "click", "data-mit": m.id, onclick: () => openRiskRecord("mitigant", m.id) },
     h("td", {}, m.text), h("td", {}, m.eff), h("td", {}, m.is_control ? "Control" : ""), h("td", {}, m.achieved ? "✓" : "✗"),
     h("td", {}, m.tasks.map(t => t.wbs).join(", "))));
   return h("section", { class: "f-sec" }, h("div", { class: "f-sec-h" }, h("h3", {}, "Mitigants"), h("span", { class: "hint" }, r.response === "accept" ? "Accepted risk" : `${r.achievedCount} of ${r.mitigants.length} achieved`), h("span", { class: "spacer" }), add),
@@ -373,13 +443,12 @@ function riskMitList(r) {
 }
 function mitTaskList(m) {
   const linked = new Set(m.tasks.map(t => t.id));
-  const addSel = h("select", {}, h("option", { value: "" }, "＋ Link a task…"), ...M.order.filter(t => !linked.has(t.id)).map(t => h("option", { value: t.id }, `${t.wbs} ${t.name}`)));
-  addSel.addEventListener("change", () => { const id = +addSel.value; if (id) linkMit(m.id, id); });
-  const rows = m.tasks.map(t => h("tr", {},
+  const addBtn = h("button", { onclick: () => openTaskPicker(addBtn.getBoundingClientRect(), { title: `Task that implements “${shortText(m.text, 40)}”`, exclude: linked, onPick: id => linkMit(m.id, id) }) }, "＋ Link a task…");
+  const rows = m.tasks.map(t => h("tr", { "data-id": t.id },
     h("td", {}, h("a", { href: "#", onclick: e => { e.preventDefault(); openRecord(t.id); } }, t.wbs)), h("td", {}, t.name),
     h("td", {}, fmtShort(t.S)), h("td", {}, fmtShort(t.F)), h("td", { html: html`<span class="st ${stClass(t.ST)}">${t.ST}</span>` }),
     h("td", {}, h("button", { class: "x", title: "Unlink", onclick: () => mutate(`Unlinked ${t.wbs}`, () => opUnlinkTask(m.id, t.id)) }, "✕"))));
-  return h("section", { class: "f-sec" }, h("div", { class: "f-sec-h" }, h("h3", {}, "Implemented by"), h("span", { class: "spacer" }), addSel, h("button", { onclick: () => quickTask(m) }, "＋ Task")),
+  return h("section", { class: "f-sec" }, h("div", { class: "f-sec-h" }, h("h3", {}, "Implemented by"), h("span", { class: "spacer" }), addBtn, h("button", { onclick: () => quickTask(m) }, "＋ Task")),
     relTable(["WBS", "Task", "Start", "Finish", "Status", ""], rows, "No tasks yet. Drag this mitigant onto a task, or click ＋ Task."));
 }
 

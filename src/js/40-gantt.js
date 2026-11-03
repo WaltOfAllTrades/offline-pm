@@ -61,6 +61,7 @@ function buildScale(grain, width, tasks) {
   return { origin: a, end: b, px, hg, width: (b - a) * px };
 }
 const xOf = (sc, day) => (day - sc.origin) * sc.px;
+const dayAt = (sc, x) => Math.floor(x / sc.px) + sc.origin; // the day under an x position
 
 function headerSvg(sc) {
   const [[topU, topF], [botU, botF]] = TIERS[sc.hg];
@@ -103,7 +104,7 @@ function anchor(sc, t, side, y) {
   return { x: xOf(sc, side === "S" ? t.S : t.F + 1), y };
 }
 function barSvg(sc, t, y, opts = {}) {
-  if (t.S == null) return "";
+  if ((opts.S ?? t.S) == null) return ""; // opts.S: a preview of a task that has no dates yet
   const S = opts.S ?? t.S, F = opts.F ?? t.F;
   const sel = t.id === UI.selId ? " sel" : "";
   const cy = y + ROW / 2;
@@ -168,8 +169,11 @@ function renderGanttRows() {
   const first = Math.max(0, Math.floor(body.scrollTop / ROW) - 6);
   const last = Math.min(UI.rows.length, Math.ceil((body.scrollTop + body.clientHeight) / ROW) + 6);
   setHtml($("gBg"), backgroundSvg(SC, H, body.scrollLeft, body.scrollLeft + body.clientWidth));
-  const sel = selTask();
-  setHtml($("gSel"), sel && UI.rows[sel.row] === sel ? html`<rect class="g-rowsel" x="0" y="${sel.row * ROW}" width="${SC.width}" height="${ROW}"/>` : html``);
+  const sel = selTask(), block = selBlock().filter(t => UI.rows[t.row] === t && t.row >= first && t.row < last);
+  // An undated task has no bar to drag, so its selected row says how to draw one (DECISIONS #87).
+  const draw = sel && UI.rows[sel.row] === sel && sel.S == null && !sel.isSummary
+    ? html`<rect class="g-draw" x="0" y="${sel.row * ROW}" width="${SC.width}" height="${ROW}"/><text class="g-hint" x="${body.scrollLeft + 8}" y="${sel.row * ROW + ROW / 2 + 4}">Drag across this row to set dates</text>` : "";
+  setHtml($("gSel"), html`${block.map(t => html`<rect class="g-rowsel" x="0" y="${t.row * ROW}" width="${SC.width}" height="${ROW}"/>`)}${draw}`);
   const bars = [];
   for (let i = first; i < last; i++) bars.push(barSvg(SC, UI.rows[i], i * ROW));
   setHtml($("gBars"), html`${bars}`);
@@ -208,8 +212,9 @@ function initGantt() {
     UI.selDep = null;
     const barEl = e.target.closest(".bar");
     if (!barEl) {
-      const row = Math.floor(svgPoint(e).y / ROW);
-      if (UI.rows[row]) selectTask(UI.rows[row].id, { scroll: false });
+      const t = UI.rows[Math.floor(svgPoint(e).y / ROW)];
+      if (t && !e.shiftKey && !t.isSummary && t.S == null) { selectTask(t.id, { scroll: false }); return beginBarDraw(e, t); }
+      if (t) selectTask(t.id, { scroll: false, extend: e.shiftKey });
       else redraw("ganttRows");
       return;
     }
@@ -262,6 +267,34 @@ function beginBarDrag(e, t, mode, barEl) {
       else { selectTask(t.id, { scroll: false }); barClicked(t); }
     },
     cancel: () => { hideTip(); redraw("ganttRows"); }, // Escape puts the bar back
+  });
+}
+// Drag across an undated task's empty row to draw its first bar. Days snap like resizing (calendar days); a milestone
+// lands where the pointer is let go. A click without a drag only selects the row.
+function beginBarDraw(e, t) {
+  const svg = $("ganttSvg"), start = svgPoint(e), a = dayAt(SC, start.x), y = t.row * ROW;
+  if (UI.editing) commitEdit(0, 0, true);
+  try { svg.setPointerCapture(e.pointerId); } catch { } // a synthetic pointer (tests) can't be captured
+  let moved = false, S = a, F = a;
+  const move = ev => {
+    const p = svgPoint(ev);
+    if (!moved && Math.abs(p.x - start.x) < 3) return;
+    moved = true;
+    const b = dayAt(SC, p.x);
+    if (t.isMilestone) S = F = b; else [S, F] = a <= b ? [a, b] : [b, a];
+    $("gBars").querySelector(".bar.drawing")?.remove();
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g"); setHtml(g, html`${barSvg(SC, t, y, { S, F, noLabel: true })}`);
+    g.firstElementChild?.classList.add("drawing"); $("gBars").append(...g.childNodes);
+    showTip(ev, t.isMilestone ? fmtShort(S) : `${fmtShort(S)} → ${fmtShort(F)}  ·  ${workdays(S, F)}d`);
+  };
+  trackDrag(svg, {
+    move,
+    drop: () => {
+      hideTip();
+      if (moved) mutate(`Scheduled “${t.name}” ${fmtYMD(S)}${t.isMilestone ? "" : " → " + fmtYMD(F)}`, () => opSetField(t.id, "dates", { start: S, finish: F }));
+      else redraw("ganttRows");
+    },
+    cancel: () => { hideTip(); redraw("ganttRows"); }, // Escape draws nothing
   });
 }
 // Our own double-click detection: bars are re-rendered between clicks, so native dblclick can't find them.

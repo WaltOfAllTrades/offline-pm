@@ -450,3 +450,32 @@ table.raci tr.sel td{outline:1px solid var(--accent);outline-offset:-1px}
   .gantt-pane,.splitter{display:none}
   .tabs{order:10;width:100%;margin-left:0}
 }
+
+/* Interaction plan (DECISIONS #80–#92) */
+.f-back{flex:none;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:5px 9px;align-self:center}
+.rel-list tr.flash td,.rk tr.flash td{animation:flash 1.4s ease}
+.gc.c-notes{overflow:hidden;white-space:nowrap}
+.gc.c-notes .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+#selCount{align-self:center;margin-left:4px}
+.g-draw{fill:transparent;cursor:crosshair}
+.g-hint{fill:var(--muted);font-size:11.5px;font-style:italic;pointer-events:none}
+.bar.drawing{opacity:.75}
+.pick-btn.on{background:var(--sel);box-shadow:inset 2px 0 0 var(--accent)}
+.pick-btn kbd{margin-right:4px}
+.pick-btn .sub{display:block;color:var(--muted);font-size:11.5px;margin:2px 0 0 26px}
+.paste-pick,.search-pick{width:420px;max-width:calc(100vw - 32px);outline:none}
+.paste-prev{margin:4px 0 6px;padding-left:22px;font-size:12.5px;color:var(--muted);max-height:120px;overflow:hidden}
+.paste-prev li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search-pick .pick{max-height:340px}
+.people-cols{grid-template-columns:minmax(560px,2fr) minmax(380px,1fr)}
+table.ptable{width:100%;border-collapse:collapse;font-size:13px}
+.ptable th{text-align:left;font-weight:600;color:var(--muted);padding:4px 6px;border-bottom:1px solid var(--line)}
+.ptable td{padding:3px 6px;border-bottom:1px solid var(--line2);vertical-align:middle}
+.ptable td.c{text-align:center}
+.ptable td.num{text-align:right;color:var(--muted)}
+.ptable input:not([type=checkbox]),.ptable select{width:100%;min-width:0;border-color:transparent;background:transparent;padding:3px 5px}
+.ptable input:not([type=checkbox]):hover,.ptable select:hover,.ptable input:focus,.ptable select:focus{border-color:var(--line);background:var(--panel)}
+.ptable .pt-acts{white-space:nowrap;text-align:right}
+.ptable .pt-acts button{padding:3px 7px;font-size:12px}
+.ptable .pt-mem{color:var(--muted);font-size:12.5px}
+.ptable tr.inactive input[data-f=name]{text-decoration:line-through;color:var(--muted)}

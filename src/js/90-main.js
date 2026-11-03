@@ -73,6 +73,7 @@ function initToolbar() {
   $("addTaskBtn").onclick = () => cmdAdd("task");
   $("addSubBtn").onclick = () => { if (!selTask()) return toast("Select the task that should get a subtask"); cmdAdd("task", true); };
   $("addMsBtn").onclick = () => cmdAdd("milestone");
+  $("pasteBtn").onclick = pasteFromClipboard;
   $("indentBtn").onclick = () => cmdStructure("indent");
   $("outdentBtn").onclick = () => cmdStructure("outdent");
   $("upBtn").onclick = () => cmdStructure("up");
@@ -96,8 +97,9 @@ function initToolbar() {
     $("fileMenu").hidden = true;
     ({ new: newPlanFile, open: openPlanFile, copy: saveCopy, reconnect, import: startImport, riskImport: startRiskImport, xlsx: exportXlsx, csv: exportCsv, print: () => { if (UI.view !== "plan") switchView("plan"); printPlan(); }, help: showHelp, backups: showBackups })[act]?.();
   });
-  $("addPersonBtn").onclick = () => editParty(null, "person");
-  $("addTeamBtn").onclick = () => editParty(null, "team");
+  $("addPersonBtn").onclick = () => addPartyRow("person");
+  $("addTeamBtn").onclick = () => addPartyRow("team");
+  $("peopleList").addEventListener("paste", peoplePaste); $("teamList").addEventListener("paste", peoplePaste);
   $$("#issueSeg button").forEach(b => b.addEventListener("click", () => { issueFilter = b.dataset.f; $$("#issueSeg button").forEach(x => x.classList.toggle("on", x === b)); redraw("issues"); }));
   $("modalBack").addEventListener("pointerdown", e => { if (e.target === $("modalBack")) closeModal(); });
   // Committing a form field blurs it first, so the re-render after the change isn't skipped.
@@ -118,9 +120,14 @@ function initToolbar() {
   });
   let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (UI.view === "risks") { if (UI.riskForm) sizeRiskForm(); $$("#riskBody textarea").forEach(autoGrow); } if (UI.view === "plan") { if (UI.form) relayoutForm(); else if (lsGet("pm.split", null) == null) pane.style.width = gridFullWidth() + "px"; redraw("gridRows", "gantt"); } }, 120); });
 
+  // The mouse's Back button goes Back in the record panel, and never takes the browser away from the app (DECISIONS #81).
+  for (const type of ["pointerup", "mouseup"]) addEventListener(type, e => { if (e.button === 3 && recordPanelOpen()) { e.preventDefault(); if (type === "pointerup") goBack(); } }, true);
+  addEventListener("auxclick", e => { if (e.button === 3) e.preventDefault(); }, true);
+
   document.addEventListener("keydown", e => {
     const ctrl = e.ctrlKey || e.metaKey;
     const typing = e.target.matches("input,textarea,select") && !e.target.matches("[type=checkbox]");
+    if (e.altKey && !e.shiftKey && !ctrl && e.key === "ArrowLeft" && ($("formPane").contains(e.target) || $("riskFormPane").contains(e.target))) { e.preventDefault(); goBack(); return; }
     if (e.key === "Escape") { if (!$("pop").hidden) { closePop(); return; } if (modalOpen()) { closeModal(); return; } $("logPanel").hidden = true; if (!typing && !modalOpen()) { if (UI.view === "risks" && UI.riskForm) { closeRiskForm(); return; } if (UI.form && (UI.view === "plan" || UI.view === "raci")) { toggleForm(false); return; } } }
     if (modalOpen() || typing) return;
     if (ctrl && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
@@ -132,7 +139,7 @@ function initToolbar() {
 hooks.onChange = onDataChanged;
 hooks.onSaveState = () => redraw("save");
 hooks.onReadOnly = () => { $("roText").textContent = readOnlyWhy; $("roBanner").hidden = false; };
-hooks.onReplace = () => { UI.selId = null; UI.noteDrafts.clear(); UI.editNote = null; UI.riskSel = null; UI.riskForm = false; UI.riskFocus = null; }; // ids from another file mean nothing here
+hooks.onReplace = () => { UI.selId = null; UI.anchorId = null; clearHistory(); UI.noteDrafts.clear(); UI.editNote = null; UI.riskSel = null; UI.riskForm = false; UI.riskFocus = null; }; // ids from another file mean nothing here
 setInterval(() => { if (fileHandle) redraw("save"); }, 15000); // "saved 2 min ago" ages
 
 (async () => {
@@ -160,19 +167,20 @@ setInterval(() => { if (fileHandle) redraw("save"); }, 15000); // "saved 2 min a
   const drawn = fn => (...a) => { try { return fn(...a); } finally { drawNow(); } }; // console/test calls see the result drawn
   window.PM = {
     M, UI, q, run, one, scalar, undo: drawn(undo), redo: drawn(redo), flushSaves, refresh, redraw, drawNow, notesFor,
-    mutate: drawn(mutate), selectTask: drawn(selectTask), switchView: drawn(switchView), switchProject: drawn(switchProject), openRecord: drawn(openRecord), toggleForm: drawn(toggleForm),
+    mutate: drawn(mutate), selectTask: drawn(selectTask), goBack: drawn(goBack), selBlock, blockTops, switchView: drawn(switchView), switchProject: drawn(switchProject), openRecord: drawn(openRecord), toggleForm: drawn(toggleForm),
     renderAll: drawn(() => redraw("all")), renderForm: drawn(force => redraw(force ? "formForce" : "form")),
     op: { opAddTask, opIndent, opOutdent, opMove, opMoveTo, opDelete, opSetField, opAddDep, opUpdateDep, opRemoveDep, opSetPredText, opSetRole, opSetRoleParties, opAddParty, opUpdateParty, opDeleteParty, opSetMembers, opAddProject, opRenameProject, opDeleteProject, opAddNote, opEditNote, opDeleteNote, opSetRIsA,
-      opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote },
-    risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport: drawn(loadRiskImport), riskImportItems, doRiskImport: drawn(doRiskImport), openRiskRecord: drawn(openRiskRecord), closeRiskForm: drawn(closeRiskForm), renderRisks: drawn(() => redraw("risks")), get RI() { return RI; }, recNotes, toLMH },
-    util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml, markFocus, refocus },
+      opSetPersonTeam, opAddRisk, opUpdateRisk, opDeleteRisk, opAddMitigant, opUpdateMitigant, opDeleteMitigant, opLinkTask, opUnlinkTask, opSetRecParties, opSetRecRIsA, opTaskFromMitigant, opAddRecNote, opNestByWbs },
+    risk: { splitMitigationPlan, closeoutRows, closeoutSummary, loadRiskImport: drawn(loadRiskImport), riskImportItems, doRiskImport: drawn(doRiskImport), openRiskRecord: drawn(openRiskRecord), closeRiskForm: drawn(closeRiskForm), quickTask: drawn(quickTask), cmdRiskPaste: drawn(cmdRiskPaste), linkMit: drawn(linkMit), renderRisks: drawn(() => redraw("risks")), get RI() { return RI; }, recNotes, toLMH },
+    util: { parseYMD, fmtYMD, wdIndex, wdDay, workdays, finishFor, span, parseDuration, parsePercent, parseDateText, excelSerialToDay, parsePredText, nextWorkday, todayNum, html, setHtml, markFocus, refocus, parseClipColumn, wbsLevels },
     io: { loadImportFile, buildPlan, doImport: drawn(doImport), collectPeople, exportWorkbook, csvText, autoMap, riskPreviewText, get W() { return W; } },
     db: { installDb, exportBytes, migrate, sanitizePlan, syncWithFile, keepBackup, idb, setReadOnly, get rev() { return rev; }, get undoDepth() { return undoStack.length; }, get historyBytes() { return historyBytes(); }, set undoBudget(n) { undoBudget = n; trimUndo(); }, get undoBudget() { return undoBudget; }, get mirrorRev() { return mirrorRev; },
       get diskRev() { return diskRev; }, get readOnly() { return readOnly; }, get fileId() { return readFileId(db); },
       // test aid: attach a stand-in file handle without a picker
       attach(h, base = null) { fileHandle = h; filePerm = !!h; diskRev = base; }, endReadOnly() { readOnly = false; readOnlyWhy = ""; $("roBanner").hidden = true; } },
     gantt: { buildScale, get SC() { return SC; }, setGrain },
-    cmd: Object.fromEntries(Object.entries({ cmdAdd, cmdStructure, cmdDelete, startEdit, commitEdit, gridKey, toggleCollapse, showLevel, startImport, printPlan }).map(([k, f]) => [k, drawn(f)])),
+    ui: { openPasteChooser, openTaskPicker, openMitigantPicker, closePop: drawn(closePop) },
+    cmd: Object.fromEntries(Object.entries({ cmdAdd, cmdStructure, cmdDelete, startEdit, commitEdit, gridKey, toggleCollapse, showLevel, startImport, printPlan, cmdPaste, cmdPeoplePaste, addPartyRow, openGridPaste }).map(([k, f]) => [k, drawn(f)])),
     reset: drawn(() => { installDb(null); M.projectId = null; UI.selId = null; refresh(); loadCollapsed(); computeRows(); redraw("all"); }),
     get XLSX() { return XLSX; }, get SQL() { return SQL; },
   };

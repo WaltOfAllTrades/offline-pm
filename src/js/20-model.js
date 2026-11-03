@@ -178,10 +178,12 @@ function insertAt(parentId, index, id) {
 }
 
 function opAddTask({ parentId = null, afterId = null, name = "New task", start, finish, kind = "task", projectId = M.projectId } = {}) {
-  let s = start ?? nextWorkday(todayNum());
-  let f = kind === "milestone" ? s : (finish ?? s);
+  // start: null makes an undated task (what the app's own add buttons do, DECISIONS #80); leaving it out keeps the
+  // old default of the next workday, which import and the tests rely on.
+  const s = start === undefined ? nextWorkday(todayNum()) : start;
+  const f = s == null ? null : kind === "milestone" ? s : (finish ?? s);
   run("INSERT INTO task(project_id, parent_id, position, name, kind, start, finish, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-    [projectId, parentId, 1e9, name, kind, fmtYMD(s), fmtYMD(f), nowIso(), nowIso()]);
+    [projectId, parentId, 1e9, name, kind, s == null ? null : fmtYMD(s), f == null ? null : fmtYMD(f), nowIso(), nowIso()]);
   const id = lastId();
   if (projectId === M.projectId) {
     const sib = siblingsOf(parentId).filter(x => x !== id);
@@ -251,6 +253,34 @@ function opMoveTo(id, targetId, where) {
     insertAt(target.parent_id, sib.indexOf(targetId) + (where === "after" ? 1 : 0), id);
   }
   if (t.parent_id !== (where === "child" ? targetId : target.parent_id)) { renumber(siblingsOf(t.parent_id)); keepRollupIfChildless(t.parent_id); }
+  dropHierarchyLinks(); checkDateCycles();
+}
+
+// A pasted WBS column → levels, relative to the first line, numbers thrown away (DECISIONS #85). A skipped level drops
+// to the lowest open one ("1" then "1.1.1" is "1.1"); a line that isn't a WBS number keeps the level above it.
+function wbsLevels(lines) {
+  const segs = lines.map(l => /^\d+(\.\d+)*\.?$/.test(l.trim()) ? l.trim().replace(/\.$/, "").split(".").length : null);
+  const base = segs.find(n => n != null) ?? 1, levels = []; let bad = 0;
+  segs.forEach((n, i) => {
+    if (n == null) { bad++; levels.push(i ? levels[i - 1] : 0); return; }
+    levels.push(clamp(n - base, 0, i ? levels[i - 1] + 1 : 0));
+  });
+  return { levels, bad };
+}
+// Re-nest a run of rows (ids in visual order) to the given levels. The first row keeps its place and parent P; a row at
+// level 0 goes under P straight after the last level-0 row, any other under the nearest earlier row one level up.
+// Rows keep their order, and each takes its existing subtree along.
+function opNestByWbs(ids, levels) {
+  if (!ids.length) return;
+  const P = taskRow(ids[0]).parent_id, oldParents = new Set(), lastAt = [ids[0]];
+  ids.forEach((id, i) => {
+    if (!i) return;
+    const L = levels[i]; oldParents.add(taskRow(id).parent_id);
+    if (L === 0) insertAt(P, siblingsOf(P).filter(x => x !== id).indexOf(lastAt[0]) + 1, id);
+    else insertAt(lastAt[L - 1], null, id);
+    lastAt[L] = id; lastAt.length = L + 1;
+  });
+  for (const p of oldParents) { renumber(siblingsOf(p)); keepRollupIfChildless(p); }
   dropHierarchyLinks(); checkDateCycles();
 }
 

@@ -102,6 +102,73 @@ function openPartyPickerFor(rect, o) {
   openPop(rect.left, rect.bottom + 4, box, save);
 }
 
+// ---------- Paste chooser (DECISIONS #84) ----------
+// Asks what a multi-line paste should do. The preview shows what was copied, so it opens even with one option.
+// options: [{ id, label, sub, run() }]; key remembers the last choice per column ("paste.name"), highlighted next time.
+function openPasteChooser(rect, { title, lines, cols = 1, options, key }) {
+  const saved = lsGet("pm.pasteChoice", {});
+  let cur = Math.max(0, options.findIndex(o => o.id === saved[key]));
+  const pick = i => {
+    const o = options[i]; if (!o) return;
+    closePop(); lsSet("pm.pasteChoice", { ...lsGet("pm.pasteChoice", {}), [key]: o.id });
+    o.run();
+  };
+  const btns = options.map((o, i) => h("button", { class: "pick-btn", "data-opt": o.id, onclick: () => pick(i), onfocus: () => { cur = i; mark(); } },
+    h("kbd", {}, String(i + 1)), " ", o.label, o.sub ? h("span", { class: "sub" }, o.sub) : null));
+  const mark = () => btns.forEach((b, i) => { b.classList.toggle("on", i === cur); b.setAttribute("aria-selected", String(i === cur)); });
+  const box = h("div", { class: "paste-pick", tabindex: "-1", role: "dialog", "aria-label": title },
+    h("h4", {}, title),
+    h("ol", { class: "paste-prev" }, ...lines.slice(0, 5).map(l => h("li", {}, l ? shortText(l, 80) : h("i", { class: "hint" }, "(blank)")))),
+    lines.length > 5 ? h("div", { class: "hint" }, `…and ${lines.length - 5} more`) : null,
+    cols > 1 ? h("div", { class: "msg warn" }, `You copied ${cols} columns. Only the first is used. Copy one column at a time.`) : null,
+    h("div", { class: "pick" }, ...btns));
+  box.addEventListener("keydown", e => {
+    if (e.key === "Escape") return; // the global handler closes the popover
+    const n = /^[1-9]$/.test(e.key) ? +e.key : 0;
+    if (n && n <= options.length) pick(n - 1);
+    else if (e.key === "ArrowDown" || e.key === "ArrowUp") { cur = (cur + (e.key === "ArrowDown" ? 1 : options.length - 1)) % options.length; mark(); }
+    else if (e.key === "Enter") pick(cur);
+    else return;
+    e.preventDefault(); e.stopPropagation();
+  });
+  mark();
+  openPop(rect.left, rect.bottom + 4, box);
+  box.focus();
+  return box;
+}
+
+// ---------- Searchable pickers (DECISIONS #88) ----------
+// items: [{ id, label, depth? }], match(item, lowercased search). Type to filter, ↑/↓ and Enter or a click to pick.
+function openSearchPicker(rect, { title, placeholder, items, match, onPick, empty = "Nothing to pick." }) {
+  const search = h("input", { type: "search", placeholder, style: { width: "100%" } });
+  const list = h("div", { class: "pick" });
+  let shown = [], cur = 0;
+  const mark = () => list.querySelectorAll(".pick-btn").forEach((b, i) => { b.classList.toggle("on", i === cur); b.setAttribute("aria-selected", String(i === cur)); });
+  const pick = i => { const x = shown[i]; if (!x) return; closePop(); onPick(x.id); };
+  const draw = () => {
+    const s = search.value.trim().toLowerCase(), all = s ? items.filter(x => match(x, s)) : items;
+    shown = all.slice(0, 300); cur = 0;
+    list.replaceChildren(...shown.map((x, i) => h("button", { class: "pick-btn", "data-id": x.id, style: x.depth ? { paddingLeft: 8 + x.depth * 14 + "px" } : null, onclick: () => pick(i) }, x.label)));
+    if (!shown.length) list.append(h("div", { class: "hint", style: { padding: "6px" } }, items.length ? "No match." : empty));
+    if (all.length > shown.length) list.append(h("div", { class: "hint", style: { padding: "6px" } }, `${all.length - shown.length} more. Type to narrow down`));
+    mark();
+  };
+  search.addEventListener("input", draw);
+  search.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); cur = clamp(cur + (e.key === "ArrowDown" ? 1 : -1), 0, Math.max(0, shown.length - 1)); mark(); list.querySelectorAll(".pick-btn")[cur]?.scrollIntoView({ block: "nearest" }); }
+    else if (e.key === "Enter") { e.preventDefault(); pick(cur); }
+  });
+  draw();
+  openPop(rect.left, rect.bottom + 4, h("div", { class: "search-pick" }, h("h4", {}, title), search, list));
+  search.focus();
+}
+// The project's tasks in outline order; search by name or WBS (equal or a prefix, as the outline filter does).
+function openTaskPicker(rect, { title, exclude = new Set(), onPick }) {
+  const items = M.order.filter(t => !exclude.has(t.id)).map(t => ({ id: t.id, label: `${t.wbs} ${t.name}`, depth: t.depth, t }));
+  openSearchPicker(rect, { title, placeholder: "Search by name or WBS…", items, onPick, empty: "No other tasks to pick.",
+    match: (x, s) => x.t.name.toLowerCase().includes(s) || x.t.wbs === s || x.t.wbs.startsWith(s + ".") });
+}
+
 // ---------- Dependency editor popover ----------
 function openDepEditor(depId, x, y) {
   const d = M.deps.find(z => z.id === depId); if (!d) return;
@@ -312,30 +379,103 @@ function initRaci() {
 
 // ---------- People & teams ----------
 function assignmentCounts() { const c = new Map(); for (const r of q("SELECT party_id, COUNT(*) n FROM (SELECT party_id FROM raci UNION ALL SELECT party_id FROM risk_party UNION ALL SELECT party_id FROM mitigant_party) GROUP BY party_id")) c.set(r.party_id, r.n); return c; }
+// Two tables edited in place, like the Risks grid (DECISIONS #92). Rows carry data-party and inputs data-f, so focus
+// survives the redraw after every change; UI.peopleFocus ("id:field") puts the cursor in a new row once.
+UI.peopleFocus = null;
 function renderPeople() {
-  const counts = assignmentCounts();
-  const pl = $("peopleList"), tl = $("teamList"); pl.innerHTML = ""; tl.innerHTML = "";
-  if (!M.people.length) pl.append(h("div", { class: "hint", style: { padding: "8px" } }, "No people yet."));
-  for (const p of M.people) {
-    const teams = (M.teamsOf.get(p.id) || []).map(partyName);
-    pl.append(h("div", { class: "prow" + (p.active ? "" : " inactive") },
-      h("div", { class: "avatar", style: { background: avatarColor(p) } }, initials(p.name)),
-      h("div", { class: "info" }, h("div", { class: "nm" }, p.name + (p.active ? "" : " (inactive)")),
-        h("div", { class: "meta" }, [p.title, p.email, teams.length ? "Teams: " + teams.join(", ") : ""].filter(Boolean).join(" · ") || "—")),
-      h("span", { class: "hint", title: "Assignments across all projects" }, `${counts.get(p.id) || 0} tasks`),
-      h("button", { onclick: () => showInvolvement(p.id) }, "Involvement"),
-      h("button", { onclick: () => editParty(p.id) }, "Edit")));
+  const counts = assignmentCounts(), focus = UI.peopleFocus; UI.peopleFocus = null;
+  const txt = (p, f, ph) => {
+    const el = bindText(h("input", { value: p[f] || "", "data-f": f, placeholder: ph }), p[f] || "",
+      v => { if (!mutate(`${p.kind === "team" ? "Team" : "Person"} ${p.name}: ${f} → “${v.trim()}”`, () => opUpdateParty(p.id, { [f]: v }))) el.value = p[f] || ""; });
+    el.addEventListener("keydown", e => {
+      if (e.key === "Enter") { // like a spreadsheet: save and go to the same column in the next row (Shift: the row above)
+        e.preventDefault(); el._commit();
+        const tr = el.closest("tr"), next = (e.shiftKey ? tr.previousElementSibling : tr.nextElementSibling)?.querySelector(`[data-f="${f}"]`);
+        if (next) { next.focus(); next.select(); }
+      } else if (e.key === "Escape") { el.value = p[f] || ""; el._cancel(); el.blur(); }
+    });
+    return el;
+  };
+  const active = p => { const cb = h("input", { type: "checkbox", checked: !!p.active, "data-f": "active", title: "Can be assigned to tasks" }); cb.addEventListener("change", () => mutate(`${p.name} ${cb.checked ? "active" : "inactive"}`, () => opUpdateParty(p.id, { active: cb.checked }))); return cb; };
+  const acts = p => h("td", { class: "pt-acts" }, h("button", { onclick: () => showInvolvement(p.id) }, "Involvement"), h("button", { onclick: () => editParty(p.id) }, "Edit…"));
+  const tasks = p => h("td", { class: "num", title: "Assignments across all projects" }, String(counts.get(p.id) || 0));
+  const people = M.people.map(p => {
+    const team = h("select", { "data-f": "team" }, h("option", { value: "" }, "— no team —"), ...M.teams.map(tm => h("option", { value: tm.id, selected: homeTeam(p.id) === tm.id }, tm.name)));
+    team.addEventListener("change", () => mutate(`${p.name}: team → ${team.value ? partyName(+team.value) : "none"}`, () => opSetPersonTeam(p.id, +team.value || null)));
+    return h("tr", { "data-party": p.id, class: p.active ? "" : "inactive" },
+      h("td", {}, txt(p, "name", "Name")), h("td", {}, txt(p, "email", "name@company.com")), h("td", {}, txt(p, "title", "Role or job title")),
+      h("td", {}, team), h("td", { class: "c" }, active(p)), tasks(p), acts(p));
+  });
+  const teams = M.teams.map(p => h("tr", { "data-party": p.id, class: p.active ? "" : "inactive" },
+    h("td", {}, txt(p, "name", "Name")), h("td", { class: "pt-mem" }, (M.members.get(p.id) || []).map(partyName).join(", ") || h("span", { class: "hint" }, "No members")),
+    h("td", { class: "c" }, active(p)), tasks(p), acts(p)));
+  const table = (kind, heads, rows, empty) => rows.length
+    ? h("table", { class: "ptable", "data-kind": kind }, h("thead", {}, h("tr", {}, ...heads.map(x => h("th", {}, x)))), h("tbody", {}, ...rows))
+    : h("div", { class: "hint", style: { padding: "8px" } }, empty);
+  $("peopleList").replaceChildren(table("person", ["Name", "Email", "Title", "Team", "Active", "Tasks", ""], people, "No people yet. Click ＋ Person, or add one and paste a column of names into it."));
+  $("teamList").replaceChildren(table("team", ["Name", "Members", "Active", "Tasks", ""], teams, "No teams yet."));
+  if (focus) {
+    const [id, f] = focus.split(":"), el = $("view-people").querySelector(`tr[data-party="${id}"] [data-f="${f}"]`);
+    if (el) { el.focus(); el.select?.(); }
   }
-  if (!M.teams.length) tl.append(h("div", { class: "hint", style: { padding: "8px" } }, "No teams yet."));
-  for (const p of M.teams) {
-    const mem = (M.members.get(p.id) || []).map(partyName);
-    tl.append(h("div", { class: "prow" + (p.active ? "" : " inactive") },
-      h("div", { class: "avatar team", style: { background: avatarColor(p) } }, initials(p.name)),
-      h("div", { class: "info" }, h("div", { class: "nm" }, p.name + (p.active ? "" : " (inactive)")), h("div", { class: "meta" }, mem.length ? mem.join(", ") : "No members")),
-      h("span", { class: "hint" }, `${counts.get(p.id) || 0} tasks`),
-      h("button", { onclick: () => showInvolvement(p.id) }, "Involvement"),
-      h("button", { onclick: () => editParty(p.id) }, "Edit")));
-  }
+}
+// Multi-line paste into a People or Teams column: the same chooser as the outline. Fill down follows the rows as shown
+// when the paste started.
+function peoplePaste(e) {
+  const el = e.target.closest?.("[data-f]"), tr = e.target.closest?.("tr[data-party]"); if (!el || !tr) return;
+  const f = el.dataset.f; if (!["name", "email", "title", "team"].includes(f)) return;
+  const { lines, cols } = parseClipColumn(e.clipboardData?.getData("text/plain") ?? "");
+  if (lines.length < 2) return;
+  e.preventDefault();
+  if (el._cancel) { el._cancel(); el.value = el._orig; } // the paste replaces whatever was half-typed
+  const table = tr.closest("table"), kind = table.dataset.kind, rows = [...table.querySelectorAll("tr[data-party]")].map(x => +x.dataset.party);
+  const from = rows.indexOf(+tr.dataset.party), order = rows.slice(from), nouns = kind === "team" ? "teams" : "people";
+  const label = { name: "Name", email: "Email", title: "Title", team: "Team" }[f];
+  const run = mode => () => cmdPeoplePaste(kind, f, mode, order, lines);
+  const past = lines.slice(order.length).filter(Boolean).length;
+  const options = [{ id: "fill", label: f === "name" ? "Fill down names" : "Fill down", sub: f === "name" ? `Overwrite names from this row down${past ? `; adds ${past} new ${past === 1 ? (kind === "team" ? "team" : "person") : nouns} past the end` : ""}` : f === "team" ? "Match team names; a team that doesn't exist yet is created" : `Overwrite ${label.toLowerCase()} from this row down`, run: run("fill") }];
+  if (f === "name") options.push({ id: "add", label: `Add as new ${nouns}`, sub: "Names already on the roster are skipped", run: run("add") });
+  openPasteChooser(el.getBoundingClientRect(), { title: `Paste ${lines.length} lines into ${kind === "team" ? "Teams" : "People"} › ${label}`, lines, cols, key: `paste.${kind}.${f}`, options });
+}
+// rows: party ids in the order shown, from the row pasted into. One change, one undo step, a message with Undo.
+function cmdPeoplePaste(kind, f, mode, rows, lines) {
+  let last = null;
+  const noun = kind === "team" ? "team" : "person", nouns = kind === "team" ? "teams" : "people", many = (n, a, b) => `${n} ${n === 1 ? a : b}`;
+  const ok = mutate(`Pasted ${lines.length} lines into ${nouns}: ${f}`, () => {
+    const byName = new Map([...M.parties.values()].filter(p => p.kind === kind).map(p => [p.name.trim().toLowerCase(), p.id]));
+    if (mode === "add") {
+      const dup = []; let added = 0;
+      for (const l of lines) {
+        if (!l) continue;
+        if (byName.has(l.toLowerCase())) { dup.push(l); continue; }
+        last = opAddParty(kind, l); byName.set(l.toLowerCase(), last); added++;
+      }
+      opNotes.push(`Added ${many(added, noun, nouns)}.`);
+      if (dup.length) opNotes.push(`Already on the roster: ${dup.join(", ")}.`);
+      return;
+    }
+    const teams = new Map(M.teams.map(t => [t.name.trim().toLowerCase(), t.id])), created = [];
+    let changed = 0, added = 0, over = 0;
+    lines.forEach((l, i) => {
+      const id = rows[i];
+      if (id == null) { if (f === "name" && l) { last = opAddParty(kind, l); added++; } else if (l) over++; return; }
+      last = id;
+      if (f === "name") { if (l) { opUpdateParty(id, { name: l }); changed++; } }
+      else if (f === "team") { // one team per person still holds (DECISIONS #60)
+        let tid = null;
+        if (l) { tid = teams.get(l.toLowerCase()); if (tid == null) { tid = opAddParty("team", l); teams.set(l.toLowerCase(), tid); created.push(l); } }
+        opSetPersonTeam(id, tid); changed++;
+      } else { opUpdateParty(id, { [f]: l }); changed++; }
+    });
+    opNotes.push(f === "name" ? `Pasted ${lines.length} names: ${changed} renamed, ${many(added, "new " + noun, "new " + nouns)}.` : `Pasted ${f} into ${many(changed, "row", "rows")}.`);
+    if (created.length) opNotes.push(`Created teams: ${created.join(", ")}.`);
+    if (over) opNotes.push(`${many(over, "line", "lines")} didn't fit below the last row.`);
+  });
+  if (ok && last != null) UI.peopleFocus = `${last}:${f}`;
+  return ok;
+}
+function addPartyRow(kind) {
+  let id; if (mutate(kind === "team" ? "Added team" : "Added person", () => { id = opAddParty(kind, kind === "team" ? "New team" : "New person"); })) UI.peopleFocus = `${id}:name`;
 }
 function editParty(id, kind) {
   const p = id ? M.parties.get(id) : { kind, name: "", email: "", title: "", active: 1 };
@@ -431,7 +571,7 @@ function renderProjectMenu() {
 }
 function switchProject(id) {
   M.projectId = id; lsSet("pm.project", id);
-  UI.selId = null; UI.selDep = null;
+  UI.selId = null; UI.anchorId = null; UI.selDep = null; clearHistory();
   refresh(); loadCollapsed(); computeRows(); redraw("all");
   const b = $("ganttBody"); const r = projectRange(); if (SC) scrollGanttTo(r.lo, 0.05); b.scrollTop = 0;
 }
@@ -490,20 +630,21 @@ async function showBackups() {
 // ---------- Help ----------
 function showHelp() {
   const rows = [
-    ["Insert", "New task below"], ["Ctrl+Insert", "New subtask"], ["Tab / Shift+Tab", "Next / previous cell (past the row's end, out of the outline)"], ["Alt+Shift+→ / Alt+Shift+←", "Indent / outdent"], ["Alt+Shift+↑/↓", "Move task up / down"],
+    ["Insert", "New task below (with the record open, it opens the new record)"], ["Ctrl+Insert", "New subtask"], ["Shift+click / Shift+↑↓", "Select a block of rows; ⇤ ⇥ and Delete then work on the whole block"],
+    ["Ctrl+V", "Paste a column copied from Excel: choose fill down, add as subtasks or add below. # (WBS) nests rows by the pasted numbers"], ["Tab / Shift+Tab", "Next / previous cell (past the row's end, out of the outline)"], ["Alt+Shift+→ / Alt+Shift+←", "Indent / outdent"], ["Alt+Shift+↑/↓", "Move task up / down"],
     ["Alt+← / Alt+→", "Collapse / expand"], ["Enter or F2", "Edit cell (Enter again to save)"], ["Type", "Start editing the cell"], ["Esc", "Cancel edit, or clear the selection"],
-    ["Delete", "Delete task and subtasks (Undo appears in the message)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+I", "Open / close the record form"], ["Arrows, PgUp/PgDn", "Move around"],
+    ["Delete", "Delete task and subtasks (Undo appears in the message)"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["Ctrl+I", "Open / close the record form"], ["Alt+← (in the record)", "Back to the record you came from (or the mouse's Back button)"], ["Arrows, PgUp/PgDn", "Move around"],
   ];
   const body = h("div", { class: "modal-b" },
     h("h3", { style: { marginTop: 0 } }, "Keyboard (outline grid)"),
     h("div", { class: "help-grid" }, ...rows.flatMap(([k, v]) => [h("div", {}, ...k.split(" / ").flatMap((x, i) => i ? [" / ", h("kbd", {}, x)] : [h("kbd", {}, x)])), h("div", {}, v)])),
     h("h3", {}, "Gantt"),
-    h("ul", {}, h("li", {}, "Drag a bar to move it; drag its left or right edge to change dates."),
+    h("ul", {}, h("li", {}, "Drag a bar to move it; drag its left or right edge to change dates. A new task has no dates: drag across its empty row to draw its bar."),
       h("li", {}, "Hover a bar to see link handles (○). Drag from a handle onto another bar: the end you start from and the half of the target you drop on decide the type (Finish→Start, Start→Start, …)."),
       h("li", {}, "Click an arrow to change its type and lag, or delete it. Red arrows mean the dates conflict with the link; dates are never moved automatically."),
       h("li", {}, "Double-click a bar, or click ↗ next to a task name, to open its record form.")),
     h("h3", {}, "Record form"),
-    h("p", {}, "Shows every field of a task, a mini Gantt of a summary task's subtasks, its work notes (dated, editable) and related records in tabs. It slides in over the outline; the Gantt stays visible, and clicking a bar switches records. Esc or ✕ closes it. ", h("kbd", {}, "Ctrl+Enter"), " posts a note."),
+    h("p", {}, "Shows every field of a task, a mini Gantt of a summary task's subtasks, its work notes (dated, editable) and related records in tabs. It slides in over the outline; the Gantt stays visible, and clicking a bar switches records. ", h("b", {}, "← Back"), " returns to the record you were on before, even across pages. Esc or ✕ closes it. ", h("kbd", {}, "Ctrl+Enter"), " posts a note."),
     h("h3", {}, "Predecessors cell"),
     h("p", {}, "Type WBS numbers separated by commas, with an optional type and lag: ", h("kbd", {}, "1.2"), " ", h("kbd", {}, "3FS+2d"), " ", h("kbd", {}, "2.1SS-1d"), " ", h("kbd", {}, "4FF+1w")),
     h("h3", {}, "Saving"),
